@@ -174,6 +174,19 @@
 
 ---
 
+## Phase 13：GUI Settings画面・未設定時自動プロンプト・設定初期化機能
+
+対応する仕様書セクション：3.5.2節（GUI UI仕様）
+
+- [x] 未設定時（`config.json`未存在・`VaultPath`未指定）の起動時自動 Settings プロンプト表示ロジック
+- [x] 設定済みの場合のサイレント常駐・バックグラウンド同期開始ロジック
+- [x] メニューバーからの `Settings...` 画面表示（Vaultパス選択ダイアログ、rclone設定、同期間隔入力）
+- [x] `Save & Start Sync` ボタンによる設定保存および自動 `init` 実行
+- [x] `Reset Configuration` ボタンによる設定クリア・初期化機能（確認ダイアログ付き）
+- [x] **コンパイル確認**：`go build ./...` → `go test ./...` を実行し、全パッケージでエラー・テスト失敗を解消する
+
+---
+
 ## 進め方の補足
 
 - 各PhaseはPhase番号の順に進めることを推奨する（Phase 4〈drive〉→Phase 5〈bootstrap〉→Phase 6〈merge〉の順は依存関係上この並びが自然）。

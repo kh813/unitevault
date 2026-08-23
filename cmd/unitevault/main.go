@@ -6,7 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -78,6 +81,8 @@ func onTrayReady() {
 
 	systray.AddSeparator()
 	mSyncNow := systray.AddMenuItem("Sync Now", "Trigger manual sync cycle")
+	mSettings := systray.AddMenuItem("Settings...", "Open configuration settings")
+	mResetConfig := systray.AddMenuItem("Reset Configuration", "Reset settings to uninitialized state")
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit UniteVault", "Quit application")
 
@@ -87,9 +92,13 @@ func onTrayReady() {
 		return
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	cfg, err := cfgMgr.LoadConfig()
 	if err != nil || cfg.VaultPath == "" {
-		mStatus.SetTitle("Status: Not Initialized (Run 'unitevault init')")
+		mStatus.SetTitle("Status: Not Initialized")
+		// Prompt user for settings automatically on startup if uninitialized
+		go openSettingsGUI(cfgMgr)
 	} else {
 		role, _ := cfgMgr.LoadRole()
 		if role != "" {
@@ -97,44 +106,18 @@ func onTrayReady() {
 		} else {
 			mStatus.SetTitle("Status: Active")
 		}
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Start daemon loop in goroutine if configured
-	if cfg != nil && cfg.VaultPath != "" {
-		hostname, _ := os.Hostname()
-		eng := engine.NewSyncEngine(cfgMgr, cfg.VaultPath, hostname, nil)
-		go func() {
-			interval := cfg.IntervalSeconds
-			if interval <= 0 {
-				interval = 120
-			}
-			ticker := time.NewTicker(time.Duration(interval) * time.Second)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					mStatus.SetTitle("Status: Syncing...")
-					_ = eng.RunCycle(ctx)
-					role, _ := cfgMgr.LoadRole()
-					mStatus.SetTitle(fmt.Sprintf("Status: Active (%s) - %s", role, time.Now().Format("15:04")))
-				}
-			}
-		}()
+		startDaemonLoop(ctx, cfgMgr, cfg, mStatus)
 	}
 
 	go func() {
 		for {
 			select {
 			case <-mSyncNow.ClickedCh:
-				if cfg != nil && cfg.VaultPath != "" {
+				c, err := cfgMgr.LoadConfig()
+				if err == nil && c.VaultPath != "" {
 					mStatus.SetTitle("Status: Syncing...")
 					hostname, _ := os.Hostname()
-					eng := engine.NewSyncEngine(cfgMgr, cfg.VaultPath, hostname, nil)
+					eng := engine.NewSyncEngine(cfgMgr, c.VaultPath, hostname, nil)
 					err := eng.RunCycle(ctx)
 					role, _ := cfgMgr.LoadRole()
 					if err != nil {
@@ -144,6 +127,15 @@ func onTrayReady() {
 					}
 				} else {
 					mStatus.SetTitle("Status: Not Initialized")
+					openSettingsGUI(cfgMgr)
+				}
+			case <-mSettings.ClickedCh:
+				openSettingsGUI(cfgMgr)
+			case <-mResetConfig.ClickedCh:
+				if confirmDialog("Reset Configuration", "Are you sure you want to reset UniteVault configuration? This will uninitialize this device.") {
+					_ = cfgMgr.ResetConfig()
+					mStatus.SetTitle("Status: Not Initialized")
+					openSettingsGUI(cfgMgr)
 				}
 			case <-mQuit.ClickedCh:
 				cancel()
@@ -152,6 +144,114 @@ func onTrayReady() {
 			}
 		}
 	}()
+}
+
+func startDaemonLoop(ctx context.Context, cfgMgr *config.ConfigManager, cfg *config.Config, mStatus *systray.MenuItem) {
+	hostname, _ := os.Hostname()
+	eng := engine.NewSyncEngine(cfgMgr, cfg.VaultPath, hostname, nil)
+	go func() {
+		interval := cfg.IntervalSeconds
+		if interval <= 0 {
+			interval = 120
+		}
+		ticker := time.NewTicker(time.Duration(interval) * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				mStatus.SetTitle("Status: Syncing...")
+				_ = eng.RunCycle(ctx)
+				role, _ := cfgMgr.LoadRole()
+				mStatus.SetTitle(fmt.Sprintf("Status: Active (%s) - %s", role, time.Now().Format("15:04")))
+			}
+		}
+	}()
+}
+
+func openSettingsGUI(cfgMgr *config.ConfigManager) {
+	cfg, _ := cfgMgr.LoadConfig()
+	currentVault := ""
+	currentRemote := "gdrive"
+	currentPath := "VaultBackup"
+	currentInterval := "120"
+
+	if cfg != nil {
+		currentVault = cfg.VaultPath
+		if cfg.RcloneRemote != "" {
+			currentRemote = cfg.RcloneRemote
+		}
+		if cfg.RclonePath != "" {
+			currentPath = cfg.RclonePath
+		}
+		if cfg.IntervalSeconds > 0 {
+			currentInterval = strconv.Itoa(cfg.IntervalSeconds)
+		}
+	}
+
+	if runtime.GOOS == "darwin" {
+		script := fmt.Sprintf(`
+		set vaultPath to text returned of (display dialog "Enter Obsidian Vault Directory Path:" default answer "%s" buttons {"Cancel", "Browse...", "Save"} default button "Save")
+		`, currentVault)
+
+		// Simple AppleScript GUI prompt for macOS
+		out, err := exec.Command("osascript", "-e", fmt.Sprintf(`
+		set chosenFolder to ""
+		try
+			set folderChoice to choose folder with prompt "Select Obsidian Vault Directory:"
+			set chosenFolder to POSIX path of folderChoice
+		end try
+		if chosenFolder is not "" then
+			set remoteName to text returned of (display dialog "rclone Remote Name:" default answer "%s" buttons {"Cancel", "OK"} default button "OK")
+			set remotePath to text returned of (display dialog "Remote Backup Folder:" default answer "%s" buttons {"Cancel", "OK"} default button "OK")
+			return chosenFolder & "::" & remoteName & "::" & remotePath
+		end if
+		`, currentRemote, currentPath)).Output()
+
+		if err == nil {
+			result := string(out)
+			var vPath, rRemote, rPath string
+			fmt.Sscanf(result, "%s::%s::%s", &vPath, &rRemote, &rPath)
+			if vPath != "" {
+				if rRemote == "" {
+					rRemote = "gdrive"
+				}
+				if rPath == "" {
+					rPath = "VaultBackup"
+				}
+				intervalInt, _ := strconv.Atoi(currentInterval)
+				if intervalInt <= 0 {
+					intervalInt = 120
+				}
+				newCfg := &config.Config{
+					VaultPath:       vPath,
+					RcloneRemote:    rRemote,
+					RclonePath:      rPath,
+					IntervalSeconds: intervalInt,
+				}
+				_ = cfgMgr.SaveConfig(newCfg)
+
+				// Initialize node
+				hostname, _ := os.Hostname()
+				client := drive.NewClient("")
+				bootstrapper := bootstrap.NewBootstrapper(cfgMgr, client)
+				remoteTarget := fmt.Sprintf("%s:%s", rRemote, rPath)
+				_, _ = bootstrapper.InitializeNode(context.Background(), vPath, remoteTarget, hostname)
+			}
+		}
+		_ = script
+	}
+}
+
+func confirmDialog(title, message string) bool {
+	if runtime.GOOS == "darwin" {
+		cmd := fmt.Sprintf(`display dialog "%s" with title "%s" buttons {"Cancel", "OK"} default button "OK"`, message, title)
+		err := exec.Command("osascript", "-e", cmd).Run()
+		return err == nil
+	}
+	return true
 }
 
 func onTrayExit() {

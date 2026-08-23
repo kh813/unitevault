@@ -160,3 +160,10 @@ func (cm *ConfigManager) SaveRole(role string) error {
 	}
 	return os.WriteFile(cm.RolePath(), []byte(role), 0644)
 }
+
+// ResetConfig removes config.json and role files to restore initial state
+func (cm *ConfigManager) ResetConfig() error {
+	_ = os.Remove(cm.ConfigPath())
+	_ = os.Remove(cm.RolePath())
+	return nil
+}
