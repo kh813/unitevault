@@ -19,11 +19,11 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Build Mac binaries, create macOS .app Bundles & Ad-hoc Sign
+      - name: Build Apple Silicon Mac binary, create macOS .app Bundle & Ad-hoc Sign
         run: |
           mkdir -p dist
 
-          # 1. Build arm64 binary & .app Bundle
+          # Build arm64 binary & .app Bundle (Apple Silicon Mac)
           CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o dist/unitevault-binary-arm64 ./cmd/unitevault
           mkdir -p "dist/UniteVault-mac-arm64.app/Contents/MacOS"
           mkdir -p "dist/UniteVault-mac-arm64.app/Contents/Resources"
@@ -51,20 +51,9 @@ jobs:
           codesign --force --deep --sign - "dist/UniteVault-mac-arm64.app"
           (cd dist && zip -r UniteVault-mac-arm64.app.zip UniteVault-mac-arm64.app)
 
-          # 2. Build amd64 binary & .app Bundle
-          CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o dist/unitevault-binary-amd64 ./cmd/unitevault
-          mkdir -p "dist/UniteVault-mac-amd64.app/Contents/MacOS"
-          mkdir -p "dist/UniteVault-mac-amd64.app/Contents/Resources"
-          cp dist/unitevault-binary-amd64 "dist/UniteVault-mac-amd64.app/Contents/MacOS/UniteVault"
-          cp "dist/UniteVault-mac-arm64.app/Contents/Info.plist" "dist/UniteVault-mac-amd64.app/Contents/Info.plist"
-          codesign --force --deep --sign - "dist/UniteVault-mac-amd64.app"
-          (cd dist && zip -r UniteVault-mac-amd64.app.zip UniteVault-mac-amd64.app)
-
-          # Standalone CLI binaries
+          # Standalone arm64 CLI binary
           cp dist/unitevault-binary-arm64 dist/unitevault-mac-arm64
-          cp dist/unitevault-binary-amd64 dist/unitevault-mac-amd64
           codesign --force --deep --sign - dist/unitevault-mac-arm64
-          codesign --force --deep --sign - dist/unitevault-mac-amd64
 
       - name: Build Windows binary
         run: |
@@ -75,9 +64,7 @@ jobs:
         with:
           files: |
             dist/UniteVault-mac-arm64.app.zip
-            dist/UniteVault-mac-amd64.app.zip
             dist/unitevault-mac-arm64
-            dist/unitevault-mac-amd64
             dist/unitevault-windows-amd64.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
