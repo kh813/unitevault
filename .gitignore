@@ -1,0 +1,12 @@
+# Build artifacts
+unitevault
+unitevault.exe
+bin/
+dist/
+
+# Logs & temporary files
+*.log
+scratch/
+
+# Local settings
+.unitevault/

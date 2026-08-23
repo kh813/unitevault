@@ -1,0 +1,170 @@
+package engine
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/kh813/unitevault/internal/bootstrap"
+	"github.com/kh813/unitevault/internal/config"
+	"github.com/kh813/unitevault/internal/drive"
+	"github.com/kh813/unitevault/internal/merge"
+	"github.com/kh813/unitevault/internal/scan"
+	"github.com/kh813/unitevault/internal/syncedlog"
+)
+
+type SyncEngine struct {
+	cfgMgr   *config.ConfigManager
+	scanner  *scan.Scanner
+	logMgr   *syncedlog.LogManager
+	drive    drive.RcloneRunner
+	vaultPath string
+	label    string
+}
+
+func NewSyncEngine(cfgMgr *config.ConfigManager, vaultPath string, label string, driveRunner drive.RcloneRunner) *SyncEngine {
+	if driveRunner == nil {
+		driveRunner = drive.NewClient(filepath.Join(vaultPath, "_sync", "engine.log"))
+	}
+	return &SyncEngine{
+		cfgMgr:   cfgMgr,
+		scanner:  scan.NewScanner(vaultPath),
+		logMgr:   syncedlog.NewLogManager(vaultPath),
+		drive:    driveRunner,
+		vaultPath: vaultPath,
+		label:    label,
+	}
+}
+
+// RunCycle executes a single sync iteration (scan -> log -> merge -> sync drive)
+func (e *SyncEngine) RunCycle(ctx context.Context) error {
+	deviceID, err := e.cfgMgr.GetDeviceID()
+	if err != nil {
+		return fmt.Errorf("failed to get device ID: %w", err)
+	}
+
+	role, err := e.cfgMgr.LoadRole()
+	if err != nil || role == "" {
+		cfg, err := e.cfgMgr.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		remoteTarget := fmt.Sprintf("%s:%s", cfg.RcloneRemote, cfg.RclonePath)
+		bootstrapper := bootstrap.NewBootstrapper(e.cfgMgr, e.drive)
+		role, err = bootstrapper.InitializeNode(ctx, e.vaultPath, remoteTarget, e.label)
+		if err != nil {
+			return fmt.Errorf("initialization failed: %w", err)
+		}
+	}
+
+	if err := os.MkdirAll(e.vaultPath, 0755); err != nil {
+		return fmt.Errorf("failed to create vault dir: %w", err)
+	}
+
+	// 1. Scan Vault
+	currState, err := e.scanner.ScanVault()
+	if err != nil {
+		return fmt.Errorf("vault scan failed: %w", err)
+	}
+
+	lastState, err := e.scanner.LoadLastScan()
+	if err != nil {
+		return fmt.Errorf("failed to load last scan: %w", err)
+	}
+
+	// Debounce check
+	stableState := scan.DebounceFilter(lastState, currState)
+	changes := scan.DetectChanges(lastState, stableState)
+
+	// Save scan state
+	if err := e.scanner.SaveScanState(currState); err != nil {
+		return fmt.Errorf("failed to save scan state: %w", err)
+	}
+
+	// 2. Log changes for this device
+	for _, ch := range changes {
+		seq, err := e.logMgr.GetNextSeq(deviceID)
+		if err != nil {
+			return fmt.Errorf("failed to get next seq: %w", err)
+		}
+		entry := syncedlog.CreateLogEntryFromChange(deviceID, e.label, seq, ch, "")
+		if err := e.logMgr.AppendLogEntry(entry); err != nil {
+			return fmt.Errorf("failed to append log entry: %w", err)
+		}
+	}
+
+	// Secondary node stops here (only records local log)
+	if role == "secondary" {
+		return nil
+	}
+
+	// Primary node: Perform 3-way/N-way merges across device logs
+	latestByPath, err := e.logMgr.LatestEntryByPath()
+	if err != nil {
+		return fmt.Errorf("failed to get latest log entries: %w", err)
+	}
+
+	for relPath, devEntries := range latestByPath {
+		if len(devEntries) <= 1 {
+			continue // No concurrent changes across multiple devices
+		}
+
+		// Perform N-way merge if multiple devices have modified relPath
+		var versions []merge.DeviceVersion
+		for devID, entry := range devEntries {
+			// Read content from Vault or file
+			fullPath := filepath.Join(e.vaultPath, relPath)
+			content, err := os.ReadFile(fullPath)
+			if err != nil {
+				continue
+			}
+			versions = append(versions, merge.DeviceVersion{
+				DeviceID: devID,
+				Content:  string(scan.NormalizeLF(content)),
+				BaseHash: entry.BaseHash,
+			})
+		}
+
+		if len(versions) > 1 {
+			// Assume common base or empty for initial
+			res, err := merge.NWayMerge("", versions)
+			if err != nil {
+				return fmt.Errorf("merge error for %s: %w", relPath, err)
+			}
+
+			fullPath := filepath.Join(e.vaultPath, relPath)
+			if err := os.WriteFile(fullPath, []byte(res.MergedContent), 0644); err != nil {
+				return fmt.Errorf("failed to write merged file: %w", err)
+			}
+
+			if res.HasConflict {
+				resolver := merge.NewConflictResolver(os.Stdin, os.Stdout)
+				labels := make(map[string]string)
+				for dID, entry := range devEntries {
+					labels[dID] = entry.Label
+				}
+				resolved, err := resolver.ResolveInteractive(relPath, res.MergedContent, labels)
+				if err == nil && resolved != "" {
+					_ = merge.ResolveAndRecord(e.logMgr, e.vaultPath, relPath, resolved, deviceID, e.label)
+				}
+			}
+		}
+	}
+
+	// 3. Mirror to Google Drive via rclone sync
+	cfg, err := e.cfgMgr.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config for drive sync: %w", err)
+	}
+
+	if cfg.RcloneRemote != "" && cfg.RclonePath != "" {
+		remoteTarget := fmt.Sprintf("%s:%s", cfg.RcloneRemote, cfg.RclonePath)
+		if err := e.drive.Sync(ctx, e.vaultPath, remoteTarget); err != nil {
+			// Log error and carry over
+			return fmt.Errorf("rclone sync failed: %w", err)
+		}
+	}
+
+	return nil
+}

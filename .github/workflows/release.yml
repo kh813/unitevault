@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build Mac binaries & Ad-hoc Sign
+        run: |
+          mkdir -p dist
+          GOOS=darwin GOARCH=arm64 go build -o dist/unitevault-mac-arm64 ./cmd/unitevault
+          GOOS=darwin GOARCH=amd64 go build -o dist/unitevault-mac-amd64 ./cmd/unitevault
+          codesign --force --deep --sign - dist/unitevault-mac-arm64
+          codesign --force --deep --sign - dist/unitevault-mac-amd64
+          codesign --verify --verbose dist/unitevault-mac-arm64
+          codesign --verify --verbose dist/unitevault-mac-amd64
+
+      - name: Build Windows binary
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o dist/unitevault-windows-amd64.exe ./cmd/unitevault
+
+      - name: Release artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/unitevault-mac-arm64
+            dist/unitevault-mac-amd64
+            dist/unitevault-windows-amd64.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
