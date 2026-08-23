@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"flag"
 	"fmt"
 	"os"
@@ -61,8 +62,15 @@ func runTrayMode() {
 	systray.Run(onTrayReady, onTrayExit)
 }
 
+//go:embed assets/tray/icon.png
+var trayIcon []byte
+
 func onTrayReady() {
-	systray.SetTitle("UniteVault")
+	if len(trayIcon) > 0 {
+		systray.SetIcon(trayIcon)
+	} else {
+		systray.SetTitle("UniteVault")
+	}
 	systray.SetTooltip("UniteVault - Obsidian Sync & Backup")
 
 	mStatus := systray.AddMenuItem("Status: Idle", "Current status")
