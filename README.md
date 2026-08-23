@@ -6,16 +6,16 @@ Obsidian Vault（Markdownファイル群）を Mac / iPhone 間で安全に利�
 - **iCloud同期との協調**: ファイル実体のマルチデバイス同期は既存のiCloud Driveを利用
 - **独自ログと3-way merge**: `git merge-file`を活用した競合自動検出・マージ
 - **Google Driveへ一方向ミラー**: `rclone sync` による一方向バックアップ
+- **rclone自動ダウンロード機能**: 未インストールの場合は最適な`rclone`バイナリを自動取得
 - **単一バイナリ動作**: Go言語で実装されており追加ランタイム不要
 
 ## クイックスタート
 
-### 1. 前提条件のインストール
-- **rclone**: Google Driveミラーリングに使用
-  - Mac: `brew install rclone`
-  - Windows: [rclone.org](https://rclone.org/downloads/) からダウンロード
-  - `rclone config` を実行し、Google Drive のリモート名（例: `gdrive`）を設定してください。
+### 1. 前提条件
 - **Git**: 3-way merge（`git merge-file`）に使用
+- **rclone 設定**:
+  - `rclone` バイナリが未インストールの場合は `unitevault` が実行時に最適な `rclone` を自動ダウンロードします。
+  - 事前に `rclone config` （または手動DLしたrclone）で Google Drive のリモート名（例: `gdrive`）を設定・認証してください。
 
 ### 2. インストール・セットアップ
 
