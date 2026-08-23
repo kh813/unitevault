@@ -1,13 +1,17 @@
 package drive
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -26,16 +30,120 @@ type Client struct {
 	logFile      string
 }
 
-// NewClient creates a new Client instance.
+// NewClient creates a new Client instance, auto-downloading rclone if not found in PATH or app directory.
 func NewClient(logFile string) *Client {
-	rcloneBin, err := exec.LookPath("rclone")
-	if err != nil {
-		rcloneBin = "rclone"
+	binName := "rclone"
+	if runtime.GOOS == "windows" {
+		binName = "rclone.exe"
 	}
+
+	// 1. Check system PATH
+	rcloneBin, err := exec.LookPath(binName)
+	if err == nil {
+		return &Client{rcloneBinary: rcloneBin, logFile: logFile}
+	}
+
+	// 2. Check next to executable
+	execPath, err := os.Executable()
+	if err == nil {
+		appDir := filepath.Dir(execPath)
+		localBin := filepath.Join(appDir, binName)
+		if _, err := os.Stat(localBin); err == nil {
+			return &Client{rcloneBinary: localBin, logFile: logFile}
+		}
+
+		// 3. Auto-download if missing
+		fmt.Printf("rclone binary not found. Downloading rclone for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
+		if err := EnsureRcloneBinary(localBin); err == nil {
+			fmt.Printf("rclone successfully downloaded to: %s\n", localBin)
+			return &Client{rcloneBinary: localBin, logFile: logFile}
+		} else {
+			log.Printf("Failed to auto-download rclone: %v\n", err)
+		}
+	}
+
 	return &Client{
-		rcloneBinary: rcloneBin,
+		rcloneBinary: binName,
 		logFile:      logFile,
 	}
+}
+
+// EnsureRcloneBinary downloads the appropriate rclone zip archive from official downloads, extracts rclone executable to targetPath.
+func EnsureRcloneBinary(targetPath string) error {
+	var archiveOS, archiveArch string
+	switch runtime.GOOS {
+	case "darwin":
+		archiveOS = "osx"
+	case "windows":
+		archiveOS = "windows"
+	case "linux":
+		archiveOS = "linux"
+	default:
+		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+
+	switch runtime.GOARCH {
+	case "amd64":
+		archiveArch = "amd64"
+	case "arm64":
+		archiveArch = "arm64"
+	default:
+		return fmt.Errorf("unsupported Architecture: %s", runtime.GOARCH)
+	}
+
+	zipURL := fmt.Sprintf("https://downloads.rclone.org/rclone-current-%s-%s.zip", archiveOS, archiveArch)
+	resp, err := http.Get(zipURL)
+	if err != nil {
+		return fmt.Errorf("http get failed for %s: %w", zipURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to download rclone: status %s", resp.Status)
+	}
+
+	zipBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read zip body: %w", err)
+	}
+
+	zipReader, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
+	if err != nil {
+		return fmt.Errorf("failed to parse zip archive: %w", err)
+	}
+
+	execName := "rclone"
+	if runtime.GOOS == "windows" {
+		execName = "rclone.exe"
+	}
+
+	for _, file := range zipReader.File {
+		if filepath.Base(file.Name) == execName && !file.FileInfo().IsDir() {
+			rc, err := file.Open()
+			if err != nil {
+				return fmt.Errorf("failed to open file inside zip: %w", err)
+			}
+			defer rc.Close()
+
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+				return fmt.Errorf("failed to create directory for binary: %w", err)
+			}
+
+			out, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+			if err != nil {
+				return fmt.Errorf("failed to create binary file: %w", err)
+			}
+			defer out.Close()
+
+			if _, err := io.Copy(out, rc); err != nil {
+				return fmt.Errorf("failed to write binary content: %w", err)
+			}
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("rclone executable not found inside zip archive")
 }
 
 func (c *Client) logError(format string, v ...interface{}) {
