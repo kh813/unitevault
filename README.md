@@ -20,7 +20,7 @@ Obsidian Vault（Markdownファイル群）を Mac / iPhone 間で安全に利�
 
 ### 2. インストール・セットアップ
 
-[Releases](https://github.com/kh813/unitevault/releases) ページから `UniteVault-mac-arm64.app.zip` (または CLI単体用 `unitevault-mac-arm64`) をダウンロードし、解凍して `Applications` フォルダへ配置します。
+[Releases](https://github.com/kh813/unitevault/releases) ページから `UniteVault-mac-arm64.app.zip` をダウンロードし、解凍して `Applications` フォルダへ配置します。
 
 #### macOSでの初回起動時の注意点
 Apple Silicon Mac等で Gatekeeper 警告が出た場合は、初回のみ以下のように属性を除去して起動してください：

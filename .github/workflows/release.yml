@@ -45,7 +45,7 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>0.0.2</string>
+              <string>0.0.3</string>
               <key>LSUIElement</key>
               <true/>
           </dict>
@@ -53,10 +53,6 @@ jobs:
           EOF
           codesign --force --deep --sign - "dist/UniteVault-mac-arm64.app"
           (cd dist && zip -r UniteVault-mac-arm64.app.zip UniteVault-mac-arm64.app)
-
-          # Standalone arm64 CLI binary
-          cp dist/unitevault-binary-arm64 dist/unitevault-mac-arm64
-          codesign --force --deep --sign - dist/unitevault-mac-arm64
 
       - name: Build Windows binary
         run: |
@@ -67,7 +63,6 @@ jobs:
         with:
           files: |
             dist/UniteVault-mac-arm64.app.zip
-            dist/unitevault-mac-arm64
             dist/unitevault-windows-amd64.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
