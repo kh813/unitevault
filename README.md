@@ -6,8 +6,9 @@ Obsidian Vault（Markdownファイル群）を Mac / iPhone 間で安全に利�
 - **iCloud同期との協調**: ファイル実体のマルチデバイス同期は既存のiCloud Driveを利用
 - **独自ログと3-way merge**: `git merge-file`を活用した競合自動検出・マージ
 - **Google Driveへ一方向ミラー**: `rclone sync` による一方向バックアップ
+- **メニューバー / トレイ常駐GUI**: Macメニューバーに常駐し、同期ステータスの表示や「Sync Now」による手動同期が可能
 - **rclone自動ダウンロード機能**: 未インストールの場合は最適な`rclone`バイナリを自動取得
-- **単一バイナリ動作**: Go言語で実装されており追加ランタイム不要
+- **単一バイナリ / .app バンドル動作**: Go言語で実装されており追加ランタイム不要
 
 ## クイックスタート
 
@@ -19,14 +20,14 @@ Obsidian Vault（Markdownファイル群）を Mac / iPhone 間で安全に利�
 
 ### 2. インストール・セットアップ
 
-[Releases](https://github.com/kh813/unitevault/releases) ページからお使いのOS向けバイナリをダウンロードします。
+[Releases](https://github.com/kh813/unitevault/releases) ページから `UniteVault-mac-arm64.app.zip` (またはIntel用 / CLI単体用) をダウンロードし、解凍して `Applications` フォルダへ配置します。
 
 #### macOSでの初回起動時の注意点
-Apple Silicon Mac等で Gatekeeper 警告や属性除去を行うには、初回のみ以下のコマンドを実行してください：
+Apple Silicon Mac等で Gatekeeper 警告が出た場合は、初回のみ以下のように属性を除去して起動してください：
 ```bash
-xattr -d com.apple.quarantine unitevault-mac-arm64
-chmod +x unitevault-mac-arm64
+xattr -d com.apple.quarantine UniteVault-mac-arm64.app
 ```
+または、アプリを右クリック（Control+クリック）して「開く」を選択してください。
 
 #### 初期化（`init`）
 ```bash

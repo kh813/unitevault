@@ -19,15 +19,52 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Build Mac binaries & Ad-hoc Sign
+      - name: Build Mac binaries, create macOS .app Bundles & Ad-hoc Sign
         run: |
           mkdir -p dist
-          GOOS=darwin GOARCH=arm64 go build -o dist/unitevault-mac-arm64 ./cmd/unitevault
-          GOOS=darwin GOARCH=amd64 go build -o dist/unitevault-mac-amd64 ./cmd/unitevault
+
+          # 1. Build arm64 binary & .app Bundle
+          GOOS=darwin GOARCH=arm64 go build -o dist/unitevault-binary-arm64 ./cmd/unitevault
+          mkdir -p "dist/UniteVault-mac-arm64.app/Contents/MacOS"
+          mkdir -p "dist/UniteVault-mac-arm64.app/Contents/Resources"
+          cp dist/unitevault-binary-arm64 "dist/UniteVault-mac-arm64.app/Contents/MacOS/UniteVault"
+          cat <<EOF > "dist/UniteVault-mac-arm64.app/Contents/Info.plist"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>UniteVault</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.unitevault.app</string>
+              <key>CFBundleName</key>
+              <string>UniteVault</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>0.0.1</string>
+              <key>LSUIElement</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+          codesign --force --deep --sign - "dist/UniteVault-mac-arm64.app"
+          (cd dist && zip -r UniteVault-mac-arm64.app.zip UniteVault-mac-arm64.app)
+
+          # 2. Build amd64 binary & .app Bundle
+          GOOS=darwin GOARCH=amd64 go build -o dist/unitevault-binary-amd64 ./cmd/unitevault
+          mkdir -p "dist/UniteVault-mac-amd64.app/Contents/MacOS"
+          mkdir -p "dist/UniteVault-mac-amd64.app/Contents/Resources"
+          cp dist/unitevault-binary-amd64 "dist/UniteVault-mac-amd64.app/Contents/MacOS/UniteVault"
+          cp "dist/UniteVault-mac-arm64.app/Contents/Info.plist" "dist/UniteVault-mac-amd64.app/Contents/Info.plist"
+          codesign --force --deep --sign - "dist/UniteVault-mac-amd64.app"
+          (cd dist && zip -r UniteVault-mac-amd64.app.zip UniteVault-mac-amd64.app)
+
+          # Standalone CLI binaries
+          cp dist/unitevault-binary-arm64 dist/unitevault-mac-arm64
+          cp dist/unitevault-binary-amd64 dist/unitevault-mac-amd64
           codesign --force --deep --sign - dist/unitevault-mac-arm64
           codesign --force --deep --sign - dist/unitevault-mac-amd64
-          codesign --verify --verbose dist/unitevault-mac-arm64
-          codesign --verify --verbose dist/unitevault-mac-amd64
 
       - name: Build Windows binary
         run: |
@@ -37,6 +74,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            dist/UniteVault-mac-arm64.app.zip
+            dist/UniteVault-mac-amd64.app.zip
             dist/unitevault-mac-arm64
             dist/unitevault-mac-amd64
             dist/unitevault-windows-amd64.exe

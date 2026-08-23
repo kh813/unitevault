@@ -21,9 +21,10 @@ Obsidian Vault（Markdownファイル群）を Mac / iPhone 間で安全に利�
 | 競合検出・履歴管理 | 独自の「デバイス別diffログ」＋ 3-way merge（`git merge-file`を部品として利用） |
 | Google Drive への転送 | rclone による一方向ミラー（`rclone sync`） |
 | Google Drive 認証 | rclone の OAuth ブラウザ連携（APIキー手動発行不要） |
-| 処理実装言語 | Go（単一の静的バイナリにクロスコンパイルし、Mac/Windowsにランタイム不要で配布するため） |
+| 処理実装言語 | Go（単一の静的バイナリ / macOS `.app` バンドルにクロスコンパイルし、Mac/Windowsにランタイム不要で配布するため） |
 | マージ処理・Drive転送の実行主体 | 「プライマリノード」役を1台に固定する方式を基本とする（1.4節参照） |
-| 動作形態 | **常駐型バックグラウンドプロセス（デーモン）**。`config.json`の指定間隔（デフォルト120秒）で自動ループ実行。ワンショット実行（`unitevault run --once`）もサポート |
+| 動作形態 | **メニューバー（システムトレイ）常駐GUIアプリ** または CLIバッチ。`config.json`の指定間隔（デフォルト120秒）で自動ループ実行。「Sync Now」ボタンでの手動同期も可能 |
+| macOS配布形式 | **`UniteVault.app` バンドル**（.app.zip）および CLI単一バイナリ。アドホック署名付き |
 | iPhone側の追加インストール | なし（iCloud同期のみで完結） |
 
 ### 1.4 対応デバイスとエンジン方式

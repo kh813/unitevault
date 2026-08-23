@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/getlantern/systray"
 	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/drive"
@@ -16,8 +18,9 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		printUsage()
-		os.Exit(1)
+		// If launched without args (e.g. clicking macOS .app bundle), run in tray/GUI mode
+		runTrayMode()
+		return
 	}
 
 	subcommand := os.Args[1]
@@ -30,6 +33,8 @@ func main() {
 		handleStatus(os.Args[2:])
 	case "promote":
 		handlePromote(os.Args[2:])
+	case "gui", "tray":
+		runTrayMode()
 	case "-h", "--help", "help":
 		printUsage()
 	default:
@@ -40,15 +45,109 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("UniteVault CLI - Personal Obsidian Vault Sync & Mirroring System")
+	fmt.Println("UniteVault - Personal Obsidian Vault Sync & Mirroring System")
 	fmt.Println("\nUsage:")
 	fmt.Println("  unitevault <command> [options]")
 	fmt.Println("\nCommands:")
+	fmt.Println("  gui      Run in Menu Bar / System Tray GUI mode")
 	fmt.Println("  init     Initialize local configuration and node role")
 	fmt.Println("  run      Run background sync process (defaults to resident daemon mode)")
 	fmt.Println("             Options: --once (run single cycle and exit)")
 	fmt.Println("  status   Display current node ID, role, and configuration")
 	fmt.Println("  promote  Promote current node to Primary node manually")
+}
+
+func runTrayMode() {
+	systray.Run(onTrayReady, onTrayExit)
+}
+
+func onTrayReady() {
+	systray.SetTitle("UniteVault")
+	systray.SetTooltip("UniteVault - Obsidian Sync & Backup")
+
+	mStatus := systray.AddMenuItem("Status: Idle", "Current status")
+	mStatus.Disable()
+
+	systray.AddSeparator()
+	mSyncNow := systray.AddMenuItem("Sync Now", "Trigger manual sync cycle")
+	systray.AddSeparator()
+	mQuit := systray.AddMenuItem("Quit UniteVault", "Quit application")
+
+	cfgMgr, err := config.NewConfigManager()
+	if err != nil {
+		mStatus.SetTitle("Status: Config Error")
+		return
+	}
+
+	cfg, err := cfgMgr.LoadConfig()
+	if err != nil || cfg.VaultPath == "" {
+		mStatus.SetTitle("Status: Not Initialized (Run 'unitevault init')")
+	} else {
+		role, _ := cfgMgr.LoadRole()
+		if role != "" {
+			mStatus.SetTitle(fmt.Sprintf("Status: Active (%s)", role))
+		} else {
+			mStatus.SetTitle("Status: Active")
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start daemon loop in goroutine if configured
+	if cfg != nil && cfg.VaultPath != "" {
+		hostname, _ := os.Hostname()
+		eng := engine.NewSyncEngine(cfgMgr, cfg.VaultPath, hostname, nil)
+		go func() {
+			interval := cfg.IntervalSeconds
+			if interval <= 0 {
+				interval = 120
+			}
+			ticker := time.NewTicker(time.Duration(interval) * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					mStatus.SetTitle("Status: Syncing...")
+					_ = eng.RunCycle(ctx)
+					role, _ := cfgMgr.LoadRole()
+					mStatus.SetTitle(fmt.Sprintf("Status: Active (%s) - %s", role, time.Now().Format("15:04")))
+				}
+			}
+		}()
+	}
+
+	go func() {
+		for {
+			select {
+			case <-mSyncNow.ClickedCh:
+				if cfg != nil && cfg.VaultPath != "" {
+					mStatus.SetTitle("Status: Syncing...")
+					hostname, _ := os.Hostname()
+					eng := engine.NewSyncEngine(cfgMgr, cfg.VaultPath, hostname, nil)
+					err := eng.RunCycle(ctx)
+					role, _ := cfgMgr.LoadRole()
+					if err != nil {
+						mStatus.SetTitle(fmt.Sprintf("Status: Error (%v)", err))
+					} else {
+						mStatus.SetTitle(fmt.Sprintf("Status: Active (%s) - %s", role, time.Now().Format("15:04")))
+					}
+				} else {
+					mStatus.SetTitle("Status: Not Initialized")
+				}
+			case <-mQuit.ClickedCh:
+				cancel()
+				systray.Quit()
+				return
+			}
+		}
+	}()
+}
+
+func onTrayExit() {
+	// Cleanup on exit
 }
 
 func handleInit(args []string) {
@@ -136,7 +235,6 @@ func handleRun(args []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Handle SIGINT and SIGTERM gracefully
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
