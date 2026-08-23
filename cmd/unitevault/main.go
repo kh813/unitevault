@@ -66,11 +66,16 @@ func runTrayMode() {
 }
 
 //go:embed assets/tray/icon.png
-var trayIcon []byte
+var trayIconPNG []byte
+
+//go:embed assets/tray/icon.ico
+var trayIconICO []byte
 
 func onTrayReady() {
-	if len(trayIcon) > 0 {
-		systray.SetIcon(trayIcon)
+	if runtime.GOOS == "windows" && len(trayIconICO) > 0 {
+		systray.SetIcon(trayIconICO)
+	} else if len(trayIconPNG) > 0 {
+		systray.SetIcon(trayIconPNG)
 	} else {
 		systray.SetTitle("UniteVault")
 	}
