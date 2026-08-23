@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
@@ -167,4 +168,32 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// RunDaemon runs RunCycle in a continuous loop with the specified interval until ctx is canceled.
+func (e *SyncEngine) RunDaemon(ctx context.Context, interval int) error {
+	if interval <= 0 {
+		interval = 120
+	}
+	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	defer ticker.Stop()
+
+	fmt.Printf("[%s] Starting UniteVault daemon (interval: %ds)...\n", time.Now().Format("15:04:05"), interval)
+
+	// Run first cycle immediately
+	if err := e.RunCycle(ctx); err != nil {
+		fmt.Printf("[%s] Cycle error: %v\n", time.Now().Format("15:04:05"), err)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Printf("[%s] Stopping UniteVault daemon...\n", time.Now().Format("15:04:05"))
+			return ctx.Err()
+		case <-ticker.C:
+			if err := e.RunCycle(ctx); err != nil {
+				fmt.Printf("[%s] Cycle error: %v\n", time.Now().Format("15:04:05"), err)
+			}
+		}
+	}
 }

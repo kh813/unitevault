@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
@@ -43,7 +45,8 @@ func printUsage() {
 	fmt.Println("  unitevault <command> [options]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  init     Initialize local configuration and node role")
-	fmt.Println("  run      Execute one iteration of sync/mirroring cycle")
+	fmt.Println("  run      Run background sync process (defaults to resident daemon mode)")
+	fmt.Println("             Options: --once (run single cycle and exit)")
 	fmt.Println("  status   Display current node ID, role, and configuration")
 	fmt.Println("  promote  Promote current node to Primary node manually")
 }
@@ -111,6 +114,10 @@ func handleInit(args []string) {
 }
 
 func handleRun(args []string) {
+	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	once := fs.Bool("once", false, "Run a single sync cycle and exit")
+	_ = fs.Parse(args)
+
 	cfgMgr, err := config.NewConfigManager()
 	if err != nil {
 		fmt.Printf("Config error: %v\n", err)
@@ -126,13 +133,30 @@ func handleRun(args []string) {
 	hostname, _ := os.Hostname()
 	eng := engine.NewSyncEngine(cfgMgr, cfg.VaultPath, hostname, nil)
 
-	ctx := context.Background()
-	if err := eng.RunCycle(ctx); err != nil {
-		fmt.Printf("Sync error: %v\n", err)
-		os.Exit(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle SIGINT and SIGTERM gracefully
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		cancel()
+	}()
+
+	if *once {
+		if err := eng.RunCycle(ctx); err != nil {
+			fmt.Printf("Sync error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Single sync cycle completed successfully.")
+		return
 	}
 
-	fmt.Println("Sync cycle completed successfully.")
+	if err := eng.RunDaemon(ctx, cfg.IntervalSeconds); err != nil && err != context.Canceled {
+		fmt.Printf("Daemon error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func handleStatus(args []string) {
