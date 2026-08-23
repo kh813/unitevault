@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/getlantern/systray"
+	"fyne.io/systray"
 	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/drive"

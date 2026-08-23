@@ -24,7 +24,7 @@ jobs:
           mkdir -p dist
 
           # 1. Build arm64 binary & .app Bundle
-          GOOS=darwin GOARCH=arm64 go build -o dist/unitevault-binary-arm64 ./cmd/unitevault
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o dist/unitevault-binary-arm64 ./cmd/unitevault
           mkdir -p "dist/UniteVault-mac-arm64.app/Contents/MacOS"
           mkdir -p "dist/UniteVault-mac-arm64.app/Contents/Resources"
           cp dist/unitevault-binary-arm64 "dist/UniteVault-mac-arm64.app/Contents/MacOS/UniteVault"
@@ -52,7 +52,7 @@ jobs:
           (cd dist && zip -r UniteVault-mac-arm64.app.zip UniteVault-mac-arm64.app)
 
           # 2. Build amd64 binary & .app Bundle
-          GOOS=darwin GOARCH=amd64 go build -o dist/unitevault-binary-amd64 ./cmd/unitevault
+          CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o dist/unitevault-binary-amd64 ./cmd/unitevault
           mkdir -p "dist/UniteVault-mac-amd64.app/Contents/MacOS"
           mkdir -p "dist/UniteVault-mac-amd64.app/Contents/Resources"
           cp dist/unitevault-binary-amd64 "dist/UniteVault-mac-amd64.app/Contents/MacOS/UniteVault"
@@ -68,7 +68,7 @@ jobs:
 
       - name: Build Windows binary
         run: |
-          GOOS=windows GOARCH=amd64 go build -o dist/unitevault-windows-amd64.exe ./cmd/unitevault
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o dist/unitevault-windows-amd64.exe ./cmd/unitevault
 
       - name: Release artifacts
         uses: softprops/action-gh-release@v2
