@@ -8,6 +8,8 @@ on:
 jobs:
   release:
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -20,8 +22,8 @@ jobs:
       - name: Build Mac binaries & Ad-hoc Sign
         run: |
           mkdir -p dist
-          GOOS=darwin GOARCH=arm64 go build -o dist/unitevault-mac-arm64 ./cmd/unitevault/main.go
-          GOOS=darwin GOARCH=amd64 go build -o dist/unitevault-mac-amd64 ./cmd/unitevault/main.go
+          GOOS=darwin GOARCH=arm64 go build -o dist/unitevault-mac-arm64 ./cmd/unitevault
+          GOOS=darwin GOARCH=amd64 go build -o dist/unitevault-mac-amd64 ./cmd/unitevault
           codesign --force --deep --sign - dist/unitevault-mac-arm64
           codesign --force --deep --sign - dist/unitevault-mac-amd64
           codesign --verify --verbose dist/unitevault-mac-arm64
@@ -29,7 +31,7 @@ jobs:
 
       - name: Build Windows binary
         run: |
-          GOOS=windows GOARCH=amd64 go build -o dist/unitevault-windows-amd64.exe ./cmd/unitevault/main.go
+          GOOS=windows GOARCH=amd64 go build -o dist/unitevault-windows-amd64.exe ./cmd/unitevault
 
       - name: Release artifacts
         uses: softprops/action-gh-release@v2
