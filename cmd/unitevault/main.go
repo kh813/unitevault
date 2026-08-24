@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
@@ -233,86 +232,65 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 		return
 	}
 
-	client := drive.NewClient("")
 	cfg, _ := cfgMgr.LoadConfig()
-	currentVaultPath := ""
-	currentRemote := "gdrive"
-	currentPath := "VaultBackup"
+	currentData := gui.SettingsFormData{
+		VaultPath:       "",
+		RcloneRemote:    "gdrive",
+		RclonePath:      "VaultBackup",
+		IntervalSeconds: 120,
+	}
 
-	if cfg != nil && cfg.VaultPath != "" {
-		currentVaultPath = cfg.VaultPath
+	if cfg != nil {
+		currentData.VaultPath = cfg.VaultPath
 		if cfg.RcloneRemote != "" {
-			currentRemote = cfg.RcloneRemote
+			currentData.RcloneRemote = cfg.RcloneRemote
 		}
 		if cfg.RclonePath != "" {
-			currentPath = cfg.RclonePath
+			currentData.RclonePath = cfg.RclonePath
 		}
-
-		role, _ := cfgMgr.LoadRole()
-		remoteStatus := "OK (Configured in rclone)"
-		if !client.IsRemoteConfigured(context.Background(), currentRemote) {
-			remoteStatus = fmt.Sprintf("⚠️ WARNING: Remote '%s' is NOT configured in rclone yet", currentRemote)
-		}
-
-		msg := fmt.Sprintf("Current Configuration:\n\n- Vault Directory: %s\n- rclone Executable: %s\n- rclone Remote: %s\n- Remote Status: %s\n- Remote Backup Path: %s\n- Sync Interval: %d seconds\n- Node Role: %s\n\nWould you like to edit these settings?",
-			currentVaultPath, client.GetBinaryPath(), currentRemote, remoteStatus, currentPath, cfg.IntervalSeconds, role)
-
-		if !confirmDialog("UniteVault Settings", msg) {
-			return
+		if cfg.IntervalSeconds > 0 {
+			currentData.IntervalSeconds = cfg.IntervalSeconds
 		}
 	}
 
-	// Windows iCloud Drive Notice
-	if runtime.GOOS == "windows" {
+	// Windows iCloud Drive Notice for new setups
+	if runtime.GOOS == "windows" && (cfg == nil || cfg.VaultPath == "") {
 		icloudMsg := "Notice for Windows Users:\n\nIf you plan to sync this Vault with an iPhone (iOS), 'iCloud for Windows' must be installed and your Vault folder should be stored inside your iCloud Drive folder.\n\nWould you like to open the 'iCloud for Windows' download page?"
 		if confirmDialog("iPhone / iCloud Drive Setup Notice", icloudMsg) {
 			_ = bootstrap.OpenURL(bootstrap.GetICloudDownloadURL())
 		}
 	}
 
-	// 1. Vault Directory Picker
-	vPath, ok := gui.PromptFolder("Select Obsidian Vault Directory")
-	if !ok || vPath == "" {
+	updated, ok := gui.PromptSettingsWindow("UniteVault Settings", currentData)
+	if !ok || updated.VaultPath == "" {
 		return
-	}
-
-	// 2. Remote Name Input
-	rRemote, ok := gui.PromptTextInput("rclone Remote Name", "Enter rclone remote name (default: gdrive):", currentRemote)
-	if !ok || strings.TrimSpace(rRemote) == "" {
-		rRemote = "gdrive"
 	}
 
 	driveClient := drive.NewClient("")
 
-	// Check if rRemote is configured in rclone
-	if !driveClient.IsRemoteConfigured(context.Background(), rRemote) {
-		warnMsg := fmt.Sprintf("Notice: rclone remote '%s' is not configured on this computer yet.\n\nTo backup to Google Drive, please run 'rclone config' in your terminal or set up OAuth.\n\nWould you like to open the rclone Google Drive setup guide in your browser?", rRemote)
+	// Check if rclone remote is configured
+	if !driveClient.IsRemoteConfigured(context.Background(), updated.RcloneRemote) {
+		warnMsg := fmt.Sprintf("Notice: rclone remote '%s' is not configured on this computer yet.\n\nTo backup to Google Drive, please run 'rclone config' in your terminal or set up OAuth.\n\nWould you like to open the rclone Google Drive setup guide in your browser?", updated.RcloneRemote)
 		if confirmDialog("rclone Remote Setup Notice", warnMsg) {
 			_ = bootstrap.OpenURL(bootstrap.GetRcloneDriveGuideURL())
 		}
 	}
 
-	// 3. Remote Path Input
-	rPath, ok := gui.PromptTextInput("Google Drive Target Folder", "Enter target folder path on Google Drive:", currentPath)
-	if !ok || strings.TrimSpace(rPath) == "" {
-		rPath = "VaultBackup"
-	}
-
 	newCfg := &config.Config{
-		VaultPath:       vPath,
-		RcloneRemote:    rRemote,
-		RclonePath:      rPath,
-		IntervalSeconds: 120,
+		VaultPath:       updated.VaultPath,
+		RcloneRemote:    updated.RcloneRemote,
+		RclonePath:      updated.RclonePath,
+		IntervalSeconds: updated.IntervalSeconds,
 	}
 	_ = cfgMgr.SaveConfig(newCfg)
 
 	// Initialize node
 	hostname, _ := os.Hostname()
 	bootstrapper := bootstrap.NewBootstrapper(cfgMgr, driveClient)
-	remoteTarget := fmt.Sprintf("%s:%s", rRemote, rPath)
-	role, _ := bootstrapper.InitializeNode(context.Background(), vPath, remoteTarget, hostname)
+	remoteTarget := fmt.Sprintf("%s:%s", updated.RcloneRemote, updated.RclonePath)
+	role, _ := bootstrapper.InitializeNode(context.Background(), updated.VaultPath, remoteTarget, hostname)
 
-	gui.PromptMessage("UniteVault Initialized", fmt.Sprintf("UniteVault has been successfully configured and initialized!\n\nVault: %s\nRemote Target: %s\nRole: %s", vPath, remoteTarget, role))
+	gui.PromptMessage("UniteVault Configured", fmt.Sprintf("UniteVault settings saved successfully!\n\nVault: %s\nRemote Target: %s\nSync Interval: %d seconds\nRole: %s", updated.VaultPath, remoteTarget, updated.IntervalSeconds, role))
 }
 
 func confirmDialog(title, message string) bool {
