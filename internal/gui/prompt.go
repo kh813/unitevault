@@ -50,7 +50,8 @@ func PromptTextInput(title, message, defaultValue string) (string, bool) {
 func PromptFolder(title string) (string, bool) {
 	switch runtime.GOOS {
 	case "darwin":
-		script := fmt.Sprintf(`POSIX path of (choose folder with prompt %q)`, title)
+		script := fmt.Sprintf(`tell application (path to frontmost application as text) to set f to (choose folder with prompt %q)
+return POSIX path of f`, title)
 		cmd := exec.Command("osascript", "-e", script)
 		var out bytes.Buffer
 		cmd.Stdout = &out
@@ -92,7 +93,8 @@ func PromptFolder(title string) (string, bool) {
 func PromptConfirm(title, message string) bool {
 	switch runtime.GOOS {
 	case "darwin":
-		script := fmt.Sprintf(`button returned of (display dialog %q with title %q buttons {"Cancel", "OK"} default button "OK")`, message, title)
+		script := fmt.Sprintf(`tell application (path to frontmost application as text) to set res to button returned of (display dialog %q with title %q buttons {"Cancel", "OK"} default button "OK")
+return res`, message, title)
 		cmd := exec.Command("osascript", "-e", script)
 		var out bytes.Buffer
 		cmd.Stdout = &out
@@ -117,6 +119,89 @@ func PromptConfirm(title, message string) bool {
 	}
 }
 
+// PromptChoice displays a dialog with two custom choice buttons (btn1 returns 1, btn2 returns 2, cancel/close returns 0).
+func PromptChoice(title, message, btn1Text, btn2Text string) int {
+	switch runtime.GOOS {
+	case "darwin":
+		script := fmt.Sprintf(`tell application (path to frontmost application as text) to set res to button returned of (display dialog %q with title %q buttons {"Cancel", %q, %q} default button %q)
+return res`, message, title, btn2Text, btn1Text, btn1Text)
+		cmd := exec.Command("osascript", "-e", script)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		if err := cmd.Run(); err != nil {
+			return 0
+		}
+		res := strings.TrimSpace(out.String())
+		if res == btn1Text {
+			return 1
+		} else if res == btn2Text {
+			return 2
+		}
+		return 0
+
+	case "windows":
+		psCmd := fmt.Sprintf(`
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$form = New-Object System.Windows.Forms.Form
+$form.Text = %q
+$form.Size = New-Object System.Drawing.Size(420, 200)
+$form.StartPosition = 'CenterScreen'
+$form.FormBorderStyle = 'FixedDialog'
+$form.MaximizeBox = $false
+$form.TopMost = $true
+$form.Add_Shown({ $form.Activate() })
+$lbl = New-Object System.Windows.Forms.Label
+$lbl.Text = %q
+$lbl.Location = New-Object System.Drawing.Point(20, 20)
+$lbl.Size = New-Object System.Drawing.Size(360, 60)
+$form.Controls.Add($lbl)
+
+$btn1 = New-Object System.Windows.Forms.Button
+$btn1.Text = %q
+$btn1.Location = New-Object System.Drawing.Point(20, 95)
+$btn1.Size = New-Object System.Drawing.Size(170, 35)
+$btn1.DialogResult = [System.Windows.Forms.DialogResult]::OK
+$form.Controls.Add($btn1)
+
+$btn2 = New-Object System.Windows.Forms.Button
+$btn2.Text = %q
+$btn2.Location = New-Object System.Drawing.Point(210, 95)
+$btn2.Size = New-Object System.Drawing.Size(170, 35)
+$btn2.DialogResult = [System.Windows.Forms.DialogResult]::Yes
+$form.Controls.Add($btn2)
+
+$res = $form.ShowDialog()
+if ($res -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output "1" }
+elseif ($res -eq [System.Windows.Forms.DialogResult]::Yes) { Write-Output "2" }
+else { Write-Output "0" }
+`, title, message, btn1Text, btn2Text)
+
+		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		if err := cmd.Run(); err != nil {
+			return 0
+		}
+		switch strings.TrimSpace(out.String()) {
+		case "1":
+			return 1
+		case "2":
+			return 2
+		default:
+			return 0
+		}
+
+	default:
+		cmd := exec.Command("zenity", "--question", "--title="+title, "--text="+message, "--ok-label="+btn1Text, "--cancel-label="+btn2Text)
+		if cmd.Run() == nil {
+			return 1
+		}
+		return 2
+	}
+}
+
+
 // SettingsFormData represents the status and configurable parameters in the Settings Window
 type SettingsFormData struct {
 	// Status Info
@@ -139,10 +224,7 @@ type SettingsFormData struct {
 func PromptMessage(title, message string) {
 	switch runtime.GOOS {
 	case "darwin":
-		script := fmt.Sprintf(`tell application "System Events"
-	activate
-	display dialog %q with title %q buttons {"OK"} default button "OK"
-end tell`, message, title)
+		script := fmt.Sprintf(`tell application (path to frontmost application as text) to display dialog %q with title %q buttons {"OK"} default button "OK"`, message, title)
 		cmd := exec.Command("osascript", "-e", script)
 		_ = cmd.Run()
 
@@ -174,10 +256,7 @@ func ShowLoadingDialog(title, message string) *LoadingDialog {
 	switch runtime.GOOS {
 	case "darwin":
 		// AppleScript window with progress indicator that closes when process is killed
-		script := fmt.Sprintf(`tell application "System Events"
-	activate
-	display dialog %q with title %q buttons {} giving up after 300
-end tell`, message, title)
+		script := fmt.Sprintf(`tell application (path to frontmost application as text) to display dialog %q with title %q buttons {} giving up after 300`, message, title)
 		cmd := exec.Command("osascript", "-e", script)
 		if err := cmd.Start(); err != nil {
 			return nil
@@ -187,8 +266,6 @@ end tell`, message, title)
 				if cmd.Process != nil {
 					_ = cmd.Process.Kill()
 				}
-				// Force close AppleScript dialog window
-				_ = exec.Command("osascript", "-e", `tell application "System Events" to kill (processes whose name is "osascript")`).Run()
 			},
 		}
 

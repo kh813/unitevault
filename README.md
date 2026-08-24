@@ -16,7 +16,7 @@ Obsidian Vault（Markdownファイル群）を Mac / iPhone 間で安全に利�
 - **Git**: 3-way merge（`git merge-file`）に使用
 - **rclone 設定**:
   - `rclone` バイナリが未インストールの場合は `unitevault` が実行時に最適な `rclone` を自動ダウンロードします。
-  - 事前に `rclone config` （または手動DLしたrclone）で Google Drive のリモート名（例: `gdrive`）を設定・認証してください。
+  - Google Drive リモートが未設定の場合、GUIダイアログで「新規Rclone設定（デフォルト）」または「既存のRclone設定（CLI）」を選択できます。「新規Rclone設定」を選ぶと、コマンドライン操作をすることなく `rclone config create` 経由でブラウザ認証が開かれ、GUIのみでセットアップを完了できます。「既存のRclone設定」を選ぶと Terminal (macOS) や PowerShell (Windows) での対話設定が起動します。
 
 ### 2. インストール・セットアップ
 

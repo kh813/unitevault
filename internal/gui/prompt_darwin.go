@@ -2,151 +2,91 @@ package gui
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
-
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/layout"
-	"fyne.io/fyne/v2/widget"
 )
 
-// PromptSettingsWindow displays a structured native Fyne GUI window on macOS with Status, Config form, and rclone details.
+// PromptSettingsWindow displays an interactive settings wizard on macOS allowing modification of all parameters.
 func PromptSettingsWindow(title string, current SettingsFormData) (SettingsFormData, bool) {
 	if current.IntervalSeconds <= 0 {
 		current.IntervalSeconds = 120
 	}
+	if current.RcloneRemote == "" {
+		current.RcloneRemote = "gdrive"
+	}
+	if current.RclonePath == "" {
+		current.RclonePath = "VaultBackup"
+	}
 
-	appInst := app.NewWithID("com.unitevault.settings")
-	win := appInst.NewWindow(title)
-	win.Resize(fyne.NewSize(580, 480))
-	win.CenterOnScreen()
+	updated := current
 
-	// --- 1. Status Section ---
-	statusTitle := widget.NewLabelWithStyle("[ Status ]", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	gitLabel := widget.NewLabel(fmt.Sprintf("  - Git Status: %s", current.GitStatus))
-	rcloneStatusLabel := widget.NewLabel(fmt.Sprintf("  - rclone Status: %s", current.RcloneStatus))
-	roleLabel := widget.NewLabel(fmt.Sprintf("  - Device Role: %s", current.DeviceRole))
+	for {
+		msg := fmt.Sprintf(`[ UniteVault Settings ]
 
-	statusGroup := container.NewVBox(
-		statusTitle,
-		gitLabel,
-		rcloneStatusLabel,
-		roleLabel,
-	)
+• Status Info:
+  - Git Status: %s
+  - rclone Status: %s
+  - Device Role: %s
 
-	// --- 2. Settings Config Section ---
-	configTitle := widget.NewLabelWithStyle("[ Config Settings ]", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+• Current Configuration:
+  1. Vault Path: %s
+  2. Google Drive Target Path: %s
+  3. Sync Interval: %d seconds
+  4. rclone Remote: %s (%s)
 
-	vaultEntry := widget.NewEntry()
-	vaultEntry.SetText(current.VaultPath)
-	vaultEntry.SetPlaceHolder("/path/to/Obsidian/Vault")
+Select an action below to change settings or save:`,
+			updated.GitStatus, updated.RcloneStatus, updated.DeviceRole,
+			updated.VaultPath, updated.RclonePath, updated.IntervalSeconds,
+			updated.RcloneRemote, updated.RcloneRemoteInfo)
 
-	selectBtn := widget.NewButton("Select Folder", func() {
-		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
-			if err == nil && uri != nil {
-				vaultEntry.SetText(uri.Path())
+		// 1. Choice menu: Select Vault / Edit Config / Save & Apply / Cancel
+		choice := PromptChoice(title, msg, "Save & Apply", "Change Settings...")
+		if choice == 0 {
+			// User canceled
+			return current, false
+		}
+
+		if choice == 1 {
+			// Save & Apply
+			if updated.VaultPath == "" {
+				// Must select Vault first
+				PromptMessage("Vault Required", "Please select your Obsidian Vault directory before saving.")
+				newFolder, ok := PromptFolder("Select Obsidian Vault Directory")
+				if ok && newFolder != "" {
+					updated.VaultPath = newFolder
+				} else {
+					continue
+				}
 			}
-		}, win)
-	})
+			return updated, true
+		}
 
-	vaultContainer := container.NewBorder(nil, nil, nil, selectBtn, vaultEntry)
-
-	pathEntry := widget.NewEntry()
-	pathEntry.SetText(current.RclonePath)
-	pathEntry.SetPlaceHolder("VaultBackup")
-
-	intervalEntry := widget.NewEntry()
-	intervalEntry.SetText(fmt.Sprintf("%d", current.IntervalSeconds))
-	intervalEntry.SetPlaceHolder("120")
-
-	remoteEntry := widget.NewEntry()
-	remoteEntry.SetText(current.RcloneRemote)
-	remoteEntry.SetPlaceHolder("gdrive")
-
-	configForm := &widget.Form{
-		Items: []*widget.FormItem{
-			{Text: "Vault Directory", Widget: vaultContainer},
-			{Text: "Google Drive Target Path", Widget: pathEntry},
-			{Text: "Sync Interval (seconds)", Widget: intervalEntry},
-		},
+		// choice == 2: Change Settings menu
+		settingMenuMsg := "Which setting would you like to change?"
+		itemChoice := PromptChoice("Edit Configuration", settingMenuMsg, "Select Vault Folder", "Edit Target Path / Interval")
+		if itemChoice == 1 {
+			// Select Vault Directory using OS native Finder
+			newFolder, ok := PromptFolder("Select Obsidian Vault Directory")
+			if ok && newFolder != "" {
+				updated.VaultPath = newFolder
+			}
+		} else if itemChoice == 2 {
+			// Edit Google Drive Target Path or Interval
+			subChoice := PromptChoice("Edit Target Path or Interval", "Select field to edit:", "Edit Target Folder", "Edit Interval (Sec)")
+			if subChoice == 1 {
+				newPath, ok := PromptTextInput("Google Drive Target Path", "Enter Google Drive Target Folder Path:", updated.RclonePath)
+				if ok && newPath != "" {
+					updated.RclonePath = newPath
+				}
+			} else if subChoice == 2 {
+				newIntervalStr, ok := PromptTextInput("Sync Interval", "Enter Sync Interval in seconds (e.g. 120):", fmt.Sprintf("%d", updated.IntervalSeconds))
+				if ok && newIntervalStr != "" {
+					var sec int
+					_, err := fmt.Sscanf(newIntervalStr, "%d", &sec)
+					if err == nil && sec > 0 {
+						updated.IntervalSeconds = sec
+					}
+				}
+			}
+		}
 	}
-
-	configGroup := container.NewVBox(
-		configTitle,
-		configForm,
-	)
-
-	// --- 3. rclone Status Section ---
-	rcloneTitle := widget.NewLabelWithStyle("[ rclone Configuration ]", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-
-	rcloneForm := &widget.Form{
-		Items: []*widget.FormItem{
-			{Text: "rclone Remote Name", Widget: remoteEntry},
-		},
-	}
-
-	execPathLabel := widget.NewLabel(fmt.Sprintf("  - Executable Path: %s", current.RcloneExecPath))
-	remoteStatusLabel := widget.NewLabel(fmt.Sprintf("  - Remote Status: %s", current.RcloneRemoteInfo))
-
-	rcloneGroup := container.NewVBox(
-		rcloneTitle,
-		rcloneForm,
-		execPathLabel,
-		remoteStatusLabel,
-	)
-
-	// --- 4. Action Buttons ---
-	resultData := current
-	saved := false
-
-	saveBtn := widget.NewButtonWithIcon("Save Settings", nil, func() {
-		sec, _ := strconv.Atoi(strings.TrimSpace(intervalEntry.Text))
-		if sec <= 0 {
-			sec = 120
-		}
-		resultData.VaultPath = strings.TrimSpace(vaultEntry.Text)
-		resultData.RcloneRemote = strings.TrimSpace(remoteEntry.Text)
-		resultData.RclonePath = strings.TrimSpace(pathEntry.Text)
-		resultData.IntervalSeconds = sec
-
-		if resultData.RcloneRemote == "" {
-			resultData.RcloneRemote = "gdrive"
-		}
-		if resultData.RclonePath == "" {
-			resultData.RclonePath = "VaultBackup"
-		}
-		saved = true
-		win.Close()
-	})
-	saveBtn.Importance = widget.HighImportance
-
-	cancelBtn := widget.NewButton("Cancel", func() {
-		saved = false
-		win.Close()
-	})
-
-	buttonContainer := container.NewHBox(
-		layout.NewSpacer(),
-		cancelBtn,
-		saveBtn,
-	)
-
-	// Main Layout
-	mainContent := container.NewVBox(
-		statusGroup,
-		widget.NewSeparator(),
-		configGroup,
-		widget.NewSeparator(),
-		rcloneGroup,
-		widget.NewSeparator(),
-		buttonContainer,
-	)
-
-	win.SetContent(container.NewPadded(mainContent))
-	win.ShowAndRun()
-
-	return resultData, saved
 }
+

@@ -492,8 +492,6 @@ unitevault/                         ← ソースコードリポジトリ（GitH
     5. Google Drive バックアップ先パス (`rclone_path`)
     6. 同期インターバル秒数 (`interval_seconds`)
     7. ノード役割 (Primary / Secondary)
-- **インタラクティブ設定ウィザードとリモート検証**:
-  1. **Vault フォルダ選択**: OS標準のフォルダ選択ダイアログで指定。
-  2. **rclone リモート名設定と検証**: テキスト入力ダイアログ（デフォルト: `gdrive`）。入力されたリモート名が `rclone listremotes` に存在しない場合、「リモートが未設定です。端末で `rclone config` を実行するかガイドを参照してください」との注意ダイアログを表示し、Google Drive セットアップガイド（`https://rclone.org/drive/`）を開く案内を提供する。
+  2. **rclone リモート名設定と検証**: テキスト入力ダイアログ（デフォルト: `gdrive`）。入力されたリモート名が `rclone listremotes` に存在しない場合、ダイアログで「新規Rclone設定（デフォルト、GUIのみで完結）」と「既存/カスタムRclone設定（Terminal/PowerShell）」をユーザーに選択させる。「新規Rclone設定」選択時は `rclone config create <remote> drive` を非対話実行して自動的にブラウザでのGoogle認証ページを開き、コマンド操作不要で設定を完了する。「既存/カスタムRclone設定」選択時は Terminal (macOS) や PowerShell (Windows) で `rclone config` を対話起動する。
   3. **Google Drive バックアップ先パス設定**: テキスト入力ダイアログ（デフォルト: `VaultBackup`）。
   4. **設定保存とノード初期化**: `config.json` への保存およびノード役割判定（`PRIMARY_MARKER.json`の検証）を自動実行し、完了ダイアログを表示する。

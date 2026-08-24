@@ -163,6 +163,36 @@ func CheckRcloneInstalled() bool {
 	return false
 }
 
+// LaunchTerminalRcloneConfig launches interactive `rclone config` inside a new Terminal window (Terminal.app on macOS, PowerShell/cmd on Windows).
+func LaunchTerminalRcloneConfig(rcloneBin string) error {
+	if rcloneBin == "" {
+		rcloneBin = "rclone"
+	}
+
+	switch runtime.GOOS {
+	case "darwin":
+		script := fmt.Sprintf(`tell application "Terminal"
+	do script %q
+	activate
+end tell`, fmt.Sprintf("%s config", rcloneBin))
+		return exec.Command("osascript", "-e", script).Start()
+
+	case "windows":
+		cmdStr := fmt.Sprintf("Start-Process powershell -ArgumentList '-NoExit', '-Command', '& {%s config}'", rcloneBin)
+		return exec.Command("powershell", "-NoProfile", "-Command", cmdStr).Start()
+
+	default:
+		// Linux: try x-terminal-emulator or gnome-terminal
+		if term, err := exec.LookPath("x-terminal-emulator"); err == nil {
+			return exec.Command(term, "-e", rcloneBin+" config").Start()
+		}
+		if term, err := exec.LookPath("gnome-terminal"); err == nil {
+			return exec.Command(term, "--", rcloneBin, "config").Start()
+		}
+		return exec.Command("xterm", "-e", rcloneBin+" config").Start()
+	}
+}
+
 // OpenURL opens a URL in the default web browser.
 func OpenURL(urlStr string) error {
 	var cmd *exec.Cmd

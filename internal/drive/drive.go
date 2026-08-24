@@ -319,6 +319,14 @@ func (c *Client) IsRemoteConfigured(ctx context.Context, remoteName string) bool
 	return false
 }
 
+// CreateGoogleDriveRemote non-interactively creates a Google Drive remote using `rclone config create <remoteName> drive`.
+// This triggers the browser OAuth flow automatically without terminal interaction.
+func (c *Client) CreateGoogleDriveRemote(ctx context.Context, remoteName string) error {
+	target := strings.TrimSuffix(remoteName, ":")
+	cmd := exec.CommandContext(ctx, c.rcloneBinary, "config", "create", target, "drive")
+	return cmd.Run()
+}
+
 // GetBinaryPath returns the resolved rclone executable path
 func (c *Client) GetBinaryPath() string {
 	return c.rcloneBinary

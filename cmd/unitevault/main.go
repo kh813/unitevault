@@ -293,9 +293,27 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 
 	// Check if rclone remote is configured
 	if !driveClient.IsRemoteConfigured(context.Background(), updated.RcloneRemote) {
-		warnMsg := fmt.Sprintf("Notice: rclone remote '%s' is not configured on this computer yet.\n\nTo backup to Google Drive, please run 'rclone config' in your terminal or set up OAuth.\n\nWould you like to open the rclone Google Drive setup guide in your browser?", updated.RcloneRemote)
-		if confirmDialog("rclone Remote Setup Notice", warnMsg) {
-			_ = bootstrap.OpenURL(bootstrap.GetRcloneDriveGuideURL())
+		msg := fmt.Sprintf("Google Drive Remote '%s' is not configured yet.\n\nPlease select how you want to set up Google Drive:", updated.RcloneRemote)
+		btn1 := "New Setup (Recommended)"
+		btn2 := "Existing/CLI Config"
+		
+		choice := gui.PromptChoice("rclone Setup Mode", msg, btn1, btn2)
+		if choice == 1 {
+			// Auto GUI OAuth setup via rclone config create <remote> drive
+			loadingDlg := gui.ShowLoadingDialog("Google Drive Setup", "Opening browser for Google Drive authentication...\nPlease grant permissions in your browser.")
+			err := driveClient.CreateGoogleDriveRemote(context.Background(), updated.RcloneRemote)
+			if loadingDlg != nil {
+				loadingDlg.Close()
+			}
+			if err == nil && driveClient.IsRemoteConfigured(context.Background(), updated.RcloneRemote) {
+				gui.PromptMessage("Google Drive Connected", fmt.Sprintf("Successfully connected Google Drive remote '%s'!", updated.RcloneRemote))
+			} else {
+				gui.PromptMessage("Setup Failed", fmt.Sprintf("Failed to complete automatic setup for '%s'.\nLaunching terminal for manual configuration...", updated.RcloneRemote))
+				_ = bootstrap.LaunchTerminalRcloneConfig(driveClient.GetBinaryPath())
+			}
+		} else if choice == 2 {
+			// Existing / CLI Setup via Terminal or PowerShell
+			_ = bootstrap.LaunchTerminalRcloneConfig(driveClient.GetBinaryPath())
 		}
 	}
 
