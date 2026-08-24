@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"github.com/kh813/unitevault/internal/gui"
 	"strings"
 	"time"
 )
@@ -91,11 +92,21 @@ func NewClient(logFile string) *Client {
 	targetPath, err := GetDefaultRcloneTargetPath()
 	if err == nil {
 		fmt.Printf("rclone binary not found. Downloading rclone for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
-		if err := EnsureRcloneBinary(targetPath); err == nil {
+		
+		// Display downloading dialog
+		loadingDlg := gui.ShowLoadingDialog("UniteVault Setup", "Downloading and installing rclone binary...\nPlease wait a moment.")
+		
+		dlErr := EnsureRcloneBinary(targetPath)
+		if loadingDlg != nil {
+			loadingDlg.Close()
+		}
+
+		if dlErr == nil {
 			fmt.Printf("rclone successfully downloaded to: %s\n", targetPath)
+			gui.PromptMessage("UniteVault Setup", "rclone binary installation completed successfully!")
 			return &Client{rcloneBinary: targetPath, logFile: logFile}
 		} else {
-			log.Printf("Failed to auto-download rclone: %v\n", err)
+			log.Printf("Failed to auto-download rclone: %v\n", dlErr)
 		}
 	}
 

@@ -147,3 +147,67 @@ end tell`, message, title)
 		_ = cmd.Run()
 	}
 }
+
+// LoadingDialog represents a running modal loading dialog that can be closed programmatically.
+type LoadingDialog struct {
+	closeFunc func()
+}
+
+// Close closes the loading dialog.
+func (ld *LoadingDialog) Close() {
+	if ld != nil && ld.closeFunc != nil {
+		ld.closeFunc()
+	}
+}
+
+// ShowLoadingDialog displays a non-blocking modal loading dialog and returns a LoadingDialog object to close it when done.
+func ShowLoadingDialog(title, message string) *LoadingDialog {
+	switch runtime.GOOS {
+	case "darwin":
+		// AppleScript window with progress indicator that closes when process is killed
+		script := fmt.Sprintf(`tell application "System Events"
+	activate
+	display dialog %q with title %q buttons {} giving up after 300
+end tell`, message, title)
+		cmd := exec.Command("osascript", "-e", script)
+		if err := cmd.Start(); err != nil {
+			return nil
+		}
+		return &LoadingDialog{
+			closeFunc: func() {
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+				// Force close AppleScript dialog window
+				_ = exec.Command("osascript", "-e", `tell application "System Events" to kill (processes whose name is "osascript")`).Run()
+			},
+		}
+
+	case "windows":
+		psCmd := fmt.Sprintf(`Add-Type -AssemblyName System.Windows.Forms; $form = New-Object System.Windows.Forms.Form; $form.Text = %q; $form.Size = New-Object System.Drawing.Size(350,130); $form.StartPosition = 'CenterScreen'; $form.FormBorderStyle = 'FixedDialog'; $form.ControlBox = $false; $label = New-Object System.Windows.Forms.Label; $label.Text = %q; $label.AutoSize = $true; $label.Location = New-Object System.Drawing.Point(30,30); $form.Controls.Add($label); $form.ShowDialog()`, title, message)
+		cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
+		if err := cmd.Start(); err != nil {
+			return nil
+		}
+		return &LoadingDialog{
+			closeFunc: func() {
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+			},
+		}
+
+	default:
+		cmd := exec.Command("zenity", "--progress", "--pulsate", "--title="+title, "--text="+message, "--no-cancel", "--auto-close")
+		if err := cmd.Start(); err != nil {
+			return nil
+		}
+		return &LoadingDialog{
+			closeFunc: func() {
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+			},
+		}
+	}
+}
