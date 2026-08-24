@@ -332,6 +332,7 @@ codesign --verify --verbose unitevault-mac-arm64
 ##### 3.6.6.2 Windows向けバイナリ
 - Apple Silicon Macのような「署名必須」の制約は無いが、SmartScreenの警告は表示される。Apple Developer Program相当の証明書購入は今回は必須にしない。
 - 初回実行時、SmartScreenの警告画面で「詳細情報」→「実行」を選択する旨、セットアップ手順に明記する。
+- Settings/トレイGUIはFyne（`fyne.io/fyne/v2`）採用のためCGO必須（8.3節参照）。macOSランナーからWindows向けにクロスコンパイルする際は、`brew install mingw-w64` で取得できる `x86_64-w64-mingw32-gcc` をCコンパイラに指定し、`CGO_ENABLED=1` でビルドする（`release.yml`参照）。
 
 ##### 3.6.6.3 セットアップ手順への反映
 上記の回避策（Mac：右クリック開く or `xattr -d`、Windows：詳細情報→実行）は、**初回セットアップ手順書（README等）に必須項目として明記する**。CIでのアドホック署名により「壊れている」エラー自体は解消されるが、検疫属性による確認ダイアログは製品版の有償署名・公証（3.6.6.4節）を導入しない限り残るため、ユーザーへの案内を省略しないこと。

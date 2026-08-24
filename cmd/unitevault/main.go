@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
-	"fyne.io/systray"
+	"fyne.io/fyne/v2"
 	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/drive"
@@ -60,286 +62,445 @@ func printUsage() {
 	fmt.Println("  promote  Promote current node to Primary node manually")
 }
 
-func runTrayMode() {
-	systray.Run(onTrayReady, onTrayExit)
-}
-
-//go:embed assets/tray/icon.png
+//go:embed assets/tray/icon@2x.png
 var trayIconPNG []byte
 
-//go:embed assets/tray/icon.ico
-var trayIconICO []byte
+// trayApp bundles the long-lived state shared by the tray menu and the
+// Settings window (spec 3.5.2/8.3), so callbacks don't need long parameter
+// lists. All of its methods that touch the GUI either run directly on Fyne's
+// main goroutine (menu/button callbacks) or explicitly hand off to a
+// goroutine and marshal results back via the gui package helpers - see the
+// package doc comment on internal/gui for the threading rules this follows.
+type trayApp struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	cfgMgr *config.ConfigManager
+	menu   *fyne.Menu
+	status *fyne.MenuItem
 
-func onTrayReady() {
-	if runtime.GOOS == "windows" && len(trayIconICO) > 0 {
-		systray.SetIcon(trayIconICO)
-	} else if len(trayIconPNG) > 0 {
-		systray.SetIcon(trayIconPNG)
+	icloudNoticeShown bool
+}
+
+func runTrayMode() {
+	appIcon := fyne.NewStaticResource("unitevault-icon.png", trayIconPNG)
+	gui.InitApp(appIcon)
+
+	// Route rclone's first-time-download progress (see drive.NewClient)
+	// through a Fyne progress dialog instead of the default console logger.
+	drive.ProgressFunc = gui.RunWithProgress
+
+	cfgMgr, err := config.NewConfigManager()
+	if err != nil {
+		gui.Info("UniteVault Error", fmt.Sprintf("Failed to initialize local configuration: %v", err))
+		gui.Run()
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	mStatus := fyne.NewMenuItem("Status: Idle", nil)
+	mStatus.Disabled = true
+	mSyncNow := fyne.NewMenuItem("Sync Now", nil)
+	mSettings := fyne.NewMenuItem("Settings...", nil)
+	mResetConfig := fyne.NewMenuItem("Reset Configuration", nil)
+	mQuit := fyne.NewMenuItem("Quit UniteVault", nil)
+	mQuit.IsQuit = true
+
+	menu := fyne.NewMenu("UniteVault",
+		mStatus,
+		fyne.NewMenuItemSeparator(),
+		mSyncNow,
+		mSettings,
+		mResetConfig,
+		fyne.NewMenuItemSeparator(),
+		mQuit,
+	)
+
+	t := &trayApp{ctx: ctx, cancel: cancel, cfgMgr: cfgMgr, menu: menu, status: mStatus}
+
+	mSyncNow.Action = func() { go t.syncNow() }
+	mSettings.Action = func() { t.openSettingsGUI() }
+	mResetConfig.Action = func() { t.confirmAndResetConfiguration() }
+	mQuit.Action = func() {
+		cancel()
+		gui.Quit()
+	}
+
+	gui.SetTray(appIcon, menu)
+
+	go t.startup()
+
+	gui.Run()
+}
+
+// startup loads local config and either opens Settings (first run / not yet
+// configured) or starts the daemon sync loop. Runs on its own goroutine so it
+// never blocks the Fyne event loop with I/O or the (potentially slow) initial
+// sync cycle.
+func (t *trayApp) startup() {
+	cfg, err := t.cfgMgr.LoadConfig()
+	if err != nil || cfg.VaultPath == "" {
+		gui.SetMenuItemLabel(t.menu, t.status, "Status: Not Initialized")
+		t.openSettingsGUI()
+		return
+	}
+
+	role, _ := t.cfgMgr.LoadRole()
+	if role != "" {
+		gui.SetMenuItemLabel(t.menu, t.status, fmt.Sprintf("Status: Active (%s)", role))
 	} else {
-		systray.SetTitle("UniteVault")
+		gui.SetMenuItemLabel(t.menu, t.status, "Status: Active")
 	}
-	systray.SetTooltip("UniteVault - Obsidian Sync & Backup")
-
-	mStatus := systray.AddMenuItem("Status: Idle", "Current status")
-	mStatus.Disable()
-
-	systray.AddSeparator()
-	mSyncNow := systray.AddMenuItem("Sync Now", "Trigger manual sync cycle")
-	mSettings := systray.AddMenuItem("Settings...", "Open configuration settings")
-	mResetConfig := systray.AddMenuItem("Reset Configuration", "Reset settings to uninitialized state")
-	systray.AddSeparator()
-	mQuit := systray.AddMenuItem("Quit UniteVault", "Quit application")
-
-	go func() {
-		if !ensurePreflightChecks() {
-			mStatus.SetTitle("Status: Preflight Check Failed")
-			return
-		}
-
-		cfgMgr, err := config.NewConfigManager()
-		if err != nil {
-			mStatus.SetTitle("Status: Config Error")
-			return
-		}
-
-		ctx, cancel := context.WithCancel(context.Background())
-
-		cfg, err := cfgMgr.LoadConfig()
-		if err != nil || cfg.VaultPath == "" {
-			mStatus.SetTitle("Status: Not Initialized")
-			// Prompt user for settings automatically on startup if uninitialized
-			openSettingsGUI(cfgMgr)
-		} else {
-			role, _ := cfgMgr.LoadRole()
-			if role != "" {
-				mStatus.SetTitle(fmt.Sprintf("Status: Active (%s)", role))
-			} else {
-				mStatus.SetTitle("Status: Active")
-			}
-			startDaemonLoop(ctx, cfgMgr, cfg, mStatus)
-		}
-
-		for {
-			select {
-			case <-mSyncNow.ClickedCh:
-				c, err := cfgMgr.LoadConfig()
-				if err == nil && c.VaultPath != "" {
-					mStatus.SetTitle("Status: Syncing...")
-					hostname, _ := os.Hostname()
-					eng := engine.NewSyncEngine(cfgMgr, c.VaultPath, hostname, nil)
-					err := eng.RunCycle(ctx)
-					role, _ := cfgMgr.LoadRole()
-					if err != nil {
-						mStatus.SetTitle(fmt.Sprintf("Status: Error (%v)", err))
-					} else {
-						mStatus.SetTitle(fmt.Sprintf("Status: Active (%s) - %s", role, time.Now().Format("15:04")))
-					}
-				} else {
-					mStatus.SetTitle("Status: Not Initialized")
-					openSettingsGUI(cfgMgr)
-				}
-			case <-mSettings.ClickedCh:
-				openSettingsGUI(cfgMgr)
-			case <-mResetConfig.ClickedCh:
-				if confirmDialog("Reset Configuration", "Are you sure you want to reset UniteVault configuration? This will uninitialize this device.") {
-					_ = cfgMgr.ResetConfig()
-					mStatus.SetTitle("Status: Not Initialized")
-					openSettingsGUI(cfgMgr)
-				}
-			case <-mQuit.ClickedCh:
-				cancel()
-				systray.Quit()
-				return
-			}
-		}
-	}()
+	t.runDaemonLoop(cfg)
 }
 
-func startDaemonLoop(ctx context.Context, cfgMgr *config.ConfigManager, cfg *config.Config, mStatus *systray.MenuItem) {
+// runDaemonLoop runs the periodic sync cycle until t.ctx is cancelled (Quit).
+func (t *trayApp) runDaemonLoop(cfg *config.Config) {
 	hostname, _ := os.Hostname()
-	eng := engine.NewSyncEngine(cfgMgr, cfg.VaultPath, hostname, nil)
-	go func() {
-		interval := cfg.IntervalSeconds
-		if interval <= 0 {
-			interval = 120
-		}
-		ticker := time.NewTicker(time.Duration(interval) * time.Second)
-		defer ticker.Stop()
+	eng := engine.NewSyncEngine(t.cfgMgr, cfg.VaultPath, hostname, nil)
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				mStatus.SetTitle("Status: Syncing...")
-				_ = eng.RunCycle(ctx)
-				role, _ := cfgMgr.LoadRole()
-				mStatus.SetTitle(fmt.Sprintf("Status: Active (%s) - %s", role, time.Now().Format("15:04")))
-			}
-		}
-	}()
-}
+	interval := cfg.IntervalSeconds
+	if interval <= 0 {
+		interval = 120
+	}
+	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	defer ticker.Stop()
 
-func ensurePreflightChecks() bool {
-	// 1. Git check & auto-install
-	if !bootstrap.CheckGitInstalled() {
-		msg := "Git is required for 3-way merge conflict resolution in UniteVault, but was not found on your system.\n\nWould you like UniteVault to automatically install Git now?"
-		if confirmDialog("Git Install Required", msg) {
-			if err := bootstrap.AutoInstallGit(); err == nil && bootstrap.CheckGitInstalled() {
-				gui.PromptMessage("Git Installed", "Git was successfully installed!")
-			} else {
-				if runtime.GOOS == "darwin" {
-					gui.PromptMessage("Git Installing", "Git installation process triggered (Command Line Developer Tools / Homebrew).\nPlease complete the installation on screen.")
-				} else {
-					gui.PromptMessage("Git Installing", "Git installer launched / in progress. Please complete the installation window.")
-				}
-			}
-		} else {
-			if confirmDialog("Git Download Page", "Would you like to open the official Git download page in your browser?") {
-				_ = bootstrap.OpenURL(bootstrap.GetGitDownloadURL())
-			}
-			return false
+	for {
+		select {
+		case <-t.ctx.Done():
+			return
+		case <-ticker.C:
+			gui.SetMenuItemLabel(t.menu, t.status, "Status: Syncing...")
+			_ = eng.RunCycle(t.ctx)
+			role, _ := t.cfgMgr.LoadRole()
+			gui.SetMenuItemLabel(t.menu, t.status, fmt.Sprintf("Status: Active (%s) - %s", role, time.Now().Format("15:04")))
 		}
 	}
-
-	// 2. rclone check & auto-download
-	if !bootstrap.CheckRcloneInstalled() {
-		msg := "rclone is required for Google Drive sync/backup, but was not found on your system.\n\nWould you like UniteVault to automatically download rclone now?"
-		if confirmDialog("rclone Download Required", msg) {
-			targetPath, err := drive.GetDefaultRcloneTargetPath()
-			if err == nil {
-				if err := drive.EnsureRcloneBinary(targetPath); err == nil {
-					gui.PromptMessage("rclone Installed", fmt.Sprintf("rclone was successfully downloaded and installed to:\n%s", targetPath))
-					return true
-				}
-			}
-			gui.PromptMessage("rclone Download Failed", "Failed to auto-download rclone.\n\nOpening official download page in browser...")
-			_ = bootstrap.OpenURL(bootstrap.GetRcloneDownloadURL())
-			return false
-		} else {
-			if confirmDialog("rclone Download Page", "Would you like to open the official rclone download page in your browser?") {
-				_ = bootstrap.OpenURL(bootstrap.GetRcloneDownloadURL())
-			}
-			return false
-		}
-	}
-
-	return true
 }
 
-func openSettingsGUI(cfgMgr *config.ConfigManager) {
-	cfg, _ := cfgMgr.LoadConfig()
-	role, _ := cfgMgr.LoadRole()
+// syncNow handles the "Sync Now" tray menu action.
+func (t *trayApp) syncNow() {
+	cfg, err := t.cfgMgr.LoadConfig()
+	if err != nil || cfg.VaultPath == "" {
+		gui.SetMenuItemLabel(t.menu, t.status, "Status: Not Initialized")
+		t.openSettingsGUI()
+		return
+	}
+
+	gui.SetMenuItemLabel(t.menu, t.status, "Status: Syncing...")
+	hostname, _ := os.Hostname()
+	eng := engine.NewSyncEngine(t.cfgMgr, cfg.VaultPath, hostname, nil)
+	err = eng.RunCycle(t.ctx)
+	role, _ := t.cfgMgr.LoadRole()
+	if err != nil {
+		gui.SetMenuItemLabel(t.menu, t.status, fmt.Sprintf("Status: Error (%v)", err))
+	} else {
+		gui.SetMenuItemLabel(t.menu, t.status, fmt.Sprintf("Status: Active (%s) - %s", role, time.Now().Format("15:04")))
+	}
+}
+
+// confirmAndResetConfiguration handles the "Reset Configuration" tray menu
+// action, which (unlike the Settings window's own Reset button, whose click
+// is already gated by a confirm dialog in buildSettingsContent) has not been
+// confirmed yet.
+func (t *trayApp) confirmAndResetConfiguration() {
+	gui.Confirm(
+		"Reset Configuration",
+		"Are you sure you want to reset UniteVault configuration? This will uninitialize this device.",
+		func(confirmed bool) {
+			if confirmed {
+				t.performReset()
+			}
+		},
+	)
+}
+
+// performReset clears local config/role state and reopens Settings.
+func (t *trayApp) performReset() {
+	_ = t.cfgMgr.ResetConfig()
+	t.icloudNoticeShown = false
+	gui.SetMenuItemLabel(t.menu, t.status, "Status: Not Initialized")
+	t.openSettingsGUI()
+}
+
+func engineLogPath() string {
+	dir, err := config.GetConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "engine.log")
+}
+
+// buildFormData gathers everything shown in the Settings window (spec
+// 3.5.2/8.3): tool install status, device role, saved config, and rclone
+// remote status. It never triggers a rclone/Git install by itself (uses
+// bootstrap.CheckGitInstalled / drive.FindRcloneBinary, which only probe -
+// they never download anything) so it's always safe to call directly on the
+// Fyne main goroutine, e.g. right before showing the window.
+func (t *trayApp) buildFormData() gui.SettingsFormData {
+	cfg, _ := t.cfgMgr.LoadConfig()
+	role, _ := t.cfgMgr.LoadRole()
 	if role == "" {
 		role = "Not Initialized"
 	}
 
-	client := drive.NewClient("")
 	gitStatus := "Not Found"
 	if bootstrap.CheckGitInstalled() {
 		gitStatus = "Installed"
 	}
 
 	rcloneStatus := "Not Found"
-	if bootstrap.CheckRcloneInstalled() {
+	rcloneExecPath := ""
+	if p, ok := drive.FindRcloneBinary(); ok {
 		rcloneStatus = "Installed"
+		rcloneExecPath = p
 	}
 
-	currentData := gui.SettingsFormData{
+	data := gui.SettingsFormData{
 		GitStatus:        gitStatus,
 		RcloneStatus:     rcloneStatus,
 		DeviceRole:       role,
-		VaultPath:        "",
 		RcloneRemote:     "gdrive",
 		RclonePath:       "VaultBackup",
 		IntervalSeconds:  120,
-		RcloneExecPath:   client.GetBinaryPath(),
-		RcloneRemoteInfo: "OK",
+		RcloneExecPath:   rcloneExecPath,
+		RcloneRemoteInfo: "rclone not installed yet",
 	}
 
 	if cfg != nil {
-		currentData.VaultPath = cfg.VaultPath
+		data.VaultPath = cfg.VaultPath
 		if cfg.RcloneRemote != "" {
-			currentData.RcloneRemote = cfg.RcloneRemote
+			data.RcloneRemote = cfg.RcloneRemote
 		}
 		if cfg.RclonePath != "" {
-			currentData.RclonePath = cfg.RclonePath
+			data.RclonePath = cfg.RclonePath
 		}
 		if cfg.IntervalSeconds > 0 {
-			currentData.IntervalSeconds = cfg.IntervalSeconds
+			data.IntervalSeconds = cfg.IntervalSeconds
 		}
 	}
 
-	if !client.IsRemoteConfigured(context.Background(), currentData.RcloneRemote) {
-		currentData.RcloneRemoteInfo = fmt.Sprintf("⚠️ Remote '%s' NOT configured in rclone yet", currentData.RcloneRemote)
-	} else {
-		currentData.RcloneRemoteInfo = fmt.Sprintf("OK (Configured: %s)", currentData.RcloneRemote)
-	}
-
-	// Windows iCloud Drive Notice for new setups
-	if runtime.GOOS == "windows" && (cfg == nil || cfg.VaultPath == "") {
-		icloudMsg := "Notice for Windows Users:\n\nIf you plan to sync this Vault with an iPhone (iOS), 'iCloud for Windows' must be installed and your Vault folder should be stored inside your iCloud Drive folder.\n\nWould you like to open the 'iCloud for Windows' download page?"
-		if confirmDialog("iPhone / iCloud Drive Setup Notice", icloudMsg) {
-			_ = bootstrap.OpenURL(bootstrap.GetICloudDownloadURL())
+	// Only probe "rclone listremotes" if a binary is actually present -
+	// avoids triggering drive.NewClient's auto-download side effect just to
+	// render the window.
+	if rcloneExecPath != "" {
+		client := drive.NewClient(engineLogPath())
+		if client.IsRemoteConfigured(context.Background(), data.RcloneRemote) {
+			data.RcloneRemoteInfo = fmt.Sprintf("Configured (%s)", data.RcloneRemote)
+		} else {
+			data.RcloneRemoteInfo = fmt.Sprintf("Not configured - remote '%s' not found in rclone", data.RcloneRemote)
 		}
 	}
 
-	updated, ok := gui.PromptSettingsWindow("UniteVault Settings", currentData)
-	if !ok || updated.VaultPath == "" {
+	return data
+}
+
+// openSettingsGUI (re)builds and shows the single-window Settings GUI (spec
+// 3.5.2/8.3). It always shows the window immediately regardless of Git/rclone
+// install state - the Status section surfaces "Not Found" with inline
+// install actions instead of blocking the window from appearing.
+func (t *trayApp) openSettingsGUI() {
+	data := t.buildFormData()
+
+	gui.ShowSettingsWindow(data, gui.SettingsHandlers{
+		OnInstallGit:      t.installGit,
+		OnInstallRclone:   t.installRclone,
+		OnConfigureRemote: t.configureRemote,
+		OnSave:            t.saveSettings,
+		OnReset:           t.performReset,
+	})
+
+	if runtime.GOOS == "windows" && !t.icloudNoticeShown && data.VaultPath == "" {
+		t.icloudNoticeShown = true
+		gui.Confirm(
+			"iPhone / iCloud Drive Setup Notice",
+			"If you plan to sync this Vault with an iPhone (iOS), 'iCloud for Windows' must be installed and your Vault folder should be stored inside your iCloud Drive folder.\n\nWould you like to open the 'iCloud for Windows' download page?",
+			func(confirmed bool) {
+				if confirmed {
+					_ = bootstrap.OpenURL(bootstrap.GetICloudDownloadURL())
+				}
+			},
+		)
+	}
+}
+
+// installGit handles the Status section's "Install Git..." button.
+func (t *trayApp) installGit() {
+	go func() {
+		_ = gui.RunWithProgress(
+			"Installing Git",
+			"Attempting to automatically install Git (Homebrew / Xcode Command Line Tools on macOS, winget / official installer on Windows)...\nThis may take a moment.",
+			func() error { return bootstrap.AutoInstallGit() },
+		)
+
+		if bootstrap.CheckGitInstalled() {
+			gui.Info("Git Installed", "Git was successfully installed!")
+		} else {
+			gui.Info(
+				"Git Installation In Progress",
+				"The Git installer was launched. Please complete the on-screen installation, then reopen this Status section to confirm.",
+			)
+		}
+		t.openSettingsGUI()
+	}()
+}
+
+// installRclone handles the Status section's "Install rclone..." button.
+func (t *trayApp) installRclone() {
+	go func() {
+		targetPath, err := drive.GetDefaultRcloneTargetPath()
+		if err != nil {
+			gui.Info("rclone Install Failed", fmt.Sprintf("Could not determine an install location: %v", err))
+			t.openSettingsGUI()
+			return
+		}
+
+		installErr := gui.RunWithProgress(
+			"Installing rclone",
+			"Downloading the official rclone binary for your platform...",
+			func() error { return drive.EnsureRcloneBinary(targetPath) },
+		)
+
+		if installErr == nil {
+			gui.Info("rclone Installed", fmt.Sprintf("rclone was successfully installed to:\n%s", targetPath))
+		} else {
+			gui.Info(
+				"rclone Install Failed",
+				fmt.Sprintf("Automatic download failed: %v\n\nYou can download it manually from:\n%s", installErr, bootstrap.GetRcloneDownloadURL()),
+			)
+		}
+		t.openSettingsGUI()
+	}()
+}
+
+// configureRemote handles the rclone section's "Configure Google Drive
+// Remote..." button, letting the user set up OAuth (or a manual/CLI config)
+// without needing to Save first.
+func (t *trayApp) configureRemote(remoteName string) {
+	remoteName = strings.TrimSpace(remoteName)
+	if remoteName == "" {
+		remoteName = "gdrive"
+	}
+
+	if _, ok := drive.FindRcloneBinary(); !ok {
+		gui.Info("rclone Required", "Please install rclone first (see the Status section) before configuring a Google Drive remote.")
 		return
 	}
 
-	driveClient := drive.NewClient("")
-
-	// Check if rclone remote is configured
-	if !driveClient.IsRemoteConfigured(context.Background(), updated.RcloneRemote) {
-		msg := fmt.Sprintf("Google Drive Remote '%s' is not configured yet.\n\nPlease select how you want to set up Google Drive:", updated.RcloneRemote)
-		btn1 := "New Setup (Recommended)"
-		btn2 := "Existing/CLI Config"
-		
-		choice := gui.PromptChoice("rclone Setup Mode", msg, btn1, btn2)
-		if choice == 1 {
-			// Auto GUI OAuth setup via rclone config create <remote> drive
-			loadingDlg := gui.ShowLoadingDialog("Google Drive Setup", "Opening browser for Google Drive authentication...\nPlease grant permissions in your browser.")
-			err := driveClient.CreateGoogleDriveRemote(context.Background(), updated.RcloneRemote)
-			if loadingDlg != nil {
-				loadingDlg.Close()
+	gui.Choice(
+		"Configure Google Drive Remote",
+		fmt.Sprintf("Set up how UniteVault should connect to Google Drive remote '%s':", remoteName),
+		"New Setup (Recommended)",
+		"Existing / CLI Config",
+		func(choice int) {
+			client := drive.NewClient(engineLogPath())
+			switch choice {
+			case 1:
+				go func() {
+					err := gui.RunWithProgress(
+						"Google Drive Setup",
+						"Opening your browser for Google Drive authentication...\nPlease grant permissions, then return here.",
+						func() error { return client.CreateGoogleDriveRemote(context.Background(), remoteName) },
+					)
+					if err != nil || !client.IsRemoteConfigured(context.Background(), remoteName) {
+						gui.Info("Setup Failed", "Automatic setup did not complete. Launching a terminal for manual configuration instead...")
+						_ = bootstrap.LaunchTerminalRcloneConfig(client.GetBinaryPath())
+					} else {
+						gui.Info("Google Drive Connected", fmt.Sprintf("Successfully connected Google Drive remote '%s'!", remoteName))
+					}
+					t.openSettingsGUI()
+				}()
+			case 2:
+				_ = bootstrap.LaunchTerminalRcloneConfig(client.GetBinaryPath())
+				gui.Info("Terminal Launched", "Complete the rclone configuration in the opened terminal window, then come back and press Save Settings.")
 			}
-			if err == nil && driveClient.IsRemoteConfigured(context.Background(), updated.RcloneRemote) {
-				gui.PromptMessage("Google Drive Connected", fmt.Sprintf("Successfully connected Google Drive remote '%s'!", updated.RcloneRemote))
-			} else {
-				gui.PromptMessage("Setup Failed", fmt.Sprintf("Failed to complete automatic setup for '%s'.\nLaunching terminal for manual configuration...", updated.RcloneRemote))
+		},
+	)
+}
+
+// saveSettings handles the "Save Settings" button: validates input, saves
+// config.json, ensures the Google Drive remote is configured, and runs
+// primary/secondary node initialization (spec 3.6.1.1).
+func (t *trayApp) saveSettings(data gui.SettingsFormData) {
+	if data.VaultPath == "" {
+		gui.Info("Vault Required", "Please select your Obsidian Vault directory before saving.")
+		return
+	}
+
+	go func() {
+		driveClient := drive.NewClient(engineLogPath())
+
+		if !driveClient.IsRemoteConfigured(context.Background(), data.RcloneRemote) {
+			choiceCh := make(chan int, 1)
+			gui.Choice(
+				"Configure Google Drive Remote",
+				fmt.Sprintf("Google Drive remote '%s' is not configured yet.\n\nChoose how you'd like to set it up:", data.RcloneRemote),
+				"New Setup (Recommended)",
+				"Existing / CLI Config",
+				func(choice int) { choiceCh <- choice },
+			)
+
+			switch <-choiceCh {
+			case 1:
+				err := gui.RunWithProgress(
+					"Google Drive Setup",
+					"Opening your browser for Google Drive authentication...\nPlease grant permissions, then return here.",
+					func() error { return driveClient.CreateGoogleDriveRemote(context.Background(), data.RcloneRemote) },
+				)
+				if err != nil || !driveClient.IsRemoteConfigured(context.Background(), data.RcloneRemote) {
+					gui.Info("Setup Failed", "Automatic setup did not complete. Launching a terminal for manual configuration; please retry Save afterwards.")
+					_ = bootstrap.LaunchTerminalRcloneConfig(driveClient.GetBinaryPath())
+					return
+				}
+			case 2:
 				_ = bootstrap.LaunchTerminalRcloneConfig(driveClient.GetBinaryPath())
+				gui.Info("Terminal Launched", "Complete the rclone configuration in the opened terminal window, then press Save Settings again.")
+				return
+			default:
+				return
 			}
-		} else if choice == 2 {
-			// Existing / CLI Setup via Terminal or PowerShell
-			_ = bootstrap.LaunchTerminalRcloneConfig(driveClient.GetBinaryPath())
 		}
-	}
 
-	newCfg := &config.Config{
-		VaultPath:       updated.VaultPath,
-		RcloneRemote:    updated.RcloneRemote,
-		RclonePath:      updated.RclonePath,
-		IntervalSeconds: updated.IntervalSeconds,
-	}
-	_ = cfgMgr.SaveConfig(newCfg)
+		newCfg := &config.Config{
+			VaultPath:       data.VaultPath,
+			RcloneRemote:    data.RcloneRemote,
+			RclonePath:      data.RclonePath,
+			IntervalSeconds: data.IntervalSeconds,
+		}
+		if err := t.cfgMgr.SaveConfig(newCfg); err != nil {
+			gui.Info("Save Failed", fmt.Sprintf("Failed to save configuration: %v", err))
+			return
+		}
 
-	// Initialize node
-	hostname, _ := os.Hostname()
-	bootstrapper := bootstrap.NewBootstrapper(cfgMgr, driveClient)
-	remoteTarget := fmt.Sprintf("%s:%s", updated.RcloneRemote, updated.RclonePath)
-	newRole, _ := bootstrapper.InitializeNode(context.Background(), updated.VaultPath, remoteTarget, hostname)
+		hostname, _ := os.Hostname()
+		bootstrapper := bootstrap.NewBootstrapper(t.cfgMgr, driveClient)
+		remoteTarget := fmt.Sprintf("%s:%s", data.RcloneRemote, data.RclonePath)
 
-	gui.PromptMessage("UniteVault Configured", fmt.Sprintf("UniteVault settings saved successfully!\n\nVault: %s\nRemote Target: %s\nSync Interval: %d seconds\nRole: %s", updated.VaultPath, remoteTarget, updated.IntervalSeconds, newRole))
-}
+		var newRole string
+		err := gui.RunWithProgress(
+			"Initializing UniteVault",
+			"Determining Primary/Secondary role and syncing initial state with Google Drive...",
+			func() error {
+				var initErr error
+				newRole, initErr = bootstrapper.InitializeNode(context.Background(), data.VaultPath, remoteTarget, hostname)
+				return initErr
+			},
+		)
+		if err != nil {
+			gui.Info("Initialization Failed", fmt.Sprintf("UniteVault could not finish initializing: %v", err))
+			return
+		}
 
-func confirmDialog(title, message string) bool {
-	return gui.PromptConfirm(title, message)
-}
+		gui.SetMenuItemLabel(t.menu, t.status, fmt.Sprintf("Status: Active (%s)", newRole))
+		gui.Info("UniteVault Configured", fmt.Sprintf(
+			"Settings saved successfully!\n\nVault: %s\nRemote Target: %s\nSync Interval: %d seconds\nRole: %s",
+			data.VaultPath, remoteTarget, data.IntervalSeconds, newRole,
+		))
+		gui.HideWindow()
 
-func onTrayExit() {
-	// Cleanup on exit
+		go t.runDaemonLoop(newCfg)
+	}()
 }
 
 func handleInit(args []string) {

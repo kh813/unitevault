@@ -12,10 +12,19 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"github.com/kh813/unitevault/internal/gui"
 	"strings"
 	"time"
 )
+
+// ProgressFunc wraps long-running operations (such as the first-time rclone
+// download triggered by NewClient) so a UI layer can surface progress to the
+// user. It defaults to a plain console logger so CLI subcommands work without
+// any GUI toolkit involved; the GUI layer overrides this once it starts up
+// (see gui.RunWithProgress), keeping this package free of any GUI dependency.
+var ProgressFunc = func(title, message string, work func() error) error {
+	fmt.Printf("%s: %s\n", title, message)
+	return work()
+}
 
 // RcloneRunner defines the interface for executing rclone commands (allows mocking in tests)
 type RcloneRunner interface {
@@ -92,22 +101,16 @@ func NewClient(logFile string) *Client {
 	targetPath, err := GetDefaultRcloneTargetPath()
 	if err == nil {
 		fmt.Printf("rclone binary not found. Downloading rclone for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
-		
-		// Display downloading dialog
-		loadingDlg := gui.ShowLoadingDialog("UniteVault Setup", "Downloading and installing rclone binary...\nPlease wait a moment.")
-		
-		dlErr := EnsureRcloneBinary(targetPath)
-		if loadingDlg != nil {
-			loadingDlg.Close()
-		}
+
+		dlErr := ProgressFunc("UniteVault Setup", "Downloading and installing rclone binary...\nPlease wait a moment.", func() error {
+			return EnsureRcloneBinary(targetPath)
+		})
 
 		if dlErr == nil {
 			fmt.Printf("rclone successfully downloaded to: %s\n", targetPath)
-			gui.PromptMessage("UniteVault Setup", "rclone binary installation completed successfully!")
 			return &Client{rcloneBinary: targetPath, logFile: logFile}
-		} else {
-			log.Printf("Failed to auto-download rclone: %v\n", dlErr)
 		}
+		log.Printf("Failed to auto-download rclone: %v\n", dlErr)
 	}
 
 	binName := "rclone"

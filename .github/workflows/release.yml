@@ -22,7 +22,7 @@ jobs:
       - name: Build Apple Silicon Mac binary
         run: |
           mkdir -p dist
-          go build -o dist/unitevault-binary-arm64 ./cmd/unitevault
+          CGO_ENABLED=1 go build -o dist/unitevault-binary-arm64 ./cmd/unitevault
 
       - name: Create macOS .app Bundle
         run: |
@@ -47,7 +47,7 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>0.0.27</string>
+              <string>0.0.28</string>
               <key>LSUIElement</key>
               <true/>
           </dict>
@@ -62,9 +62,17 @@ jobs:
         run: |
           (cd dist && zip -r UniteVault-mac-arm64.app.zip UniteVault-mac-arm64.app)
 
+      # The Settings/tray GUI is built on Fyne, which requires CGO (it binds
+      # to native OpenGL/Win32 APIs). Cross-compiling a CGO-enabled Windows
+      # binary from this macOS runner needs a mingw-w64 cross C toolchain.
+      - name: Install Windows cross-compile toolchain (mingw-w64)
+        run: brew install mingw-w64
+
       - name: Build Windows binary & Create ZIP
         run: |
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o dist/UniteVault.exe ./cmd/unitevault
+          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
+            CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ \
+            go build -ldflags "-H=windowsgui" -o dist/UniteVault.exe ./cmd/unitevault
           (cd dist && zip UniteVault-windows-amd64.zip UniteVault.exe)
 
       - name: Release artifacts
