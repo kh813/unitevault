@@ -184,9 +184,9 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
 - 通知は3.5.2節の方針に準じる（初期はログ出力のみ、将来デスクトップ通知に拡張）。
 
 #### 3.5.2 コンフリクト通知・処理結果およびGUI UI仕様
-- **起動時フロー**:
-  - `config.json` が未存在または未設定（VaultPath未指定）の場合：起動時に自動的に **Settings（設定）ダイアログ** を開き、必要な設定入力を促す。
-  - `config.json` が設定済みの場合：ダイアログ等を表示せず、静かにメニューバー（システムトレイ）へ常駐し、設定された間隔でバックグラウンド同期を開始する。
+- **起動時・Settings起動フロー**:
+  - `Settings...` または未初期化時の設定画面表示は、**Git や rclone のインストール状態にかかわらず即座に単一GUIウィンドウとして起動**する。表示前のダイアログブロックやフリーズを徹底排除する。
+  - rclone や Git が未検出の場合は、設定画面の **Status セクション** に `Not Found` と表示され、画面内のアクションボタンからダウンロードやセットアップを安全に起動できる。
 - **Settings（設定画面）機能とレイアウト仕様**:
   - **単一統合 GUI ウィンドウ**: ステップごとの個別プロンプトではなく、1つのウィンドウ内にステータス・設定フォーム・rclone情報を視覚的に整理して表示する。
   - **[ Status セクション ]**:
@@ -194,7 +194,7 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
     - rclone インストール状態 (`rclone status: Installed / Not Found`)
     - デバイス役割 (`Device Role: Primary / Secondary`)
   - **[ Config 設定フォームセクション ]**:
-    - **Vault Directory Path**: テキスト入力 ＋ `[ Select ]` ボタン（フォルダ選択ダイアログ）
+    - **Vault Directory Path**: テキスト入力 ＋ `[ Select Folder ]` ボタン（フォルダ選択ダイアログ）
     - **Google Drive Target Folder Path**: 転送先フォルダパス（デフォルト `VaultBackup`）
     - **Sync Interval**: 同期間隔（秒単位、デフォルト `120` 秒）
   - **[ rclone Status セクション ]**:

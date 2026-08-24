@@ -228,10 +228,6 @@ func ensurePreflightChecks() bool {
 }
 
 func openSettingsGUI(cfgMgr *config.ConfigManager) {
-	if !ensurePreflightChecks() {
-		return
-	}
-
 	cfg, _ := cfgMgr.LoadConfig()
 	role, _ := cfgMgr.LoadRole()
 	if role == "" {
