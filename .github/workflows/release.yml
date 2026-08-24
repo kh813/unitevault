@@ -24,7 +24,7 @@ jobs:
           mkdir -p dist
 
           # Build arm64 binary & .app Bundle (Apple Silicon Mac)
-          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o dist/unitevault-binary-arm64 ./cmd/unitevault
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o dist/unitevault-binary-arm64 ./cmd/unitevault
           mkdir -p "dist/UniteVault-mac-arm64.app/Contents/MacOS"
           mkdir -p "dist/UniteVault-mac-arm64.app/Contents/Resources"
           cp dist/unitevault-binary-arm64 "dist/UniteVault-mac-arm64.app/Contents/MacOS/UniteVault"
@@ -45,7 +45,7 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>0.0.10</string>
+              <string>0.0.11</string>
               <key>LSUIElement</key>
               <true/>
           </dict>
