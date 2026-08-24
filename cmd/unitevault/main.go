@@ -183,12 +183,25 @@ func startDaemonLoop(ctx context.Context, cfgMgr *config.ConfigManager, cfg *con
 }
 
 func ensurePreflightChecks() bool {
-	// 1. Git check
+	// 1. Git check & auto-install
 	if !bootstrap.CheckGitInstalled() {
-		if confirmDialog("Git Required", "Git is required for 3-way merge conflict resolution in UniteVault, but it was not found on your system.\n\nWould you like to open the Git download page in your browser?") {
-			_ = bootstrap.OpenURL(bootstrap.GetGitDownloadURL())
+		msg := "Git is required for 3-way merge conflict resolution in UniteVault, but was not found on your system.\n\nWould you like UniteVault to automatically install Git now?"
+		if confirmDialog("Git Install Required", msg) {
+			if err := bootstrap.AutoInstallGit(); err == nil && bootstrap.CheckGitInstalled() {
+				dialog.Message("Git was successfully installed!").Title("Git Installed").Info()
+			} else {
+				if runtime.GOOS == "darwin" {
+					dialog.Message("Git installation process triggered (Command Line Developer Tools / Homebrew).\nPlease complete the installation on screen.").Title("Git Installing").Info()
+				} else {
+					dialog.Message("Git installer launched / in progress. Please complete the installation window.").Title("Git Installing").Info()
+				}
+			}
+		} else {
+			if confirmDialog("Git Download Page", "Would you like to open the official Git download page in your browser?") {
+				_ = bootstrap.OpenURL(bootstrap.GetGitDownloadURL())
+			}
+			return false
 		}
-		return false
 	}
 
 	// 2. rclone check & auto-download

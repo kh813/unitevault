@@ -452,9 +452,12 @@ unitevault/                         ← ソースコードリポジトリ（GitH
 ### 8.2 事前環境チェック（Preflight Checks）と依存管理
 アプリケーション起動時および初期設定・設定変更時に、動作に必要な外部コマンドの事前判定を行う。
 
-1. **Git の自動検知とインストール案内**:
-   - `exec.LookPath("git")` により `git` の存在を確認する。
-   - 未検出の場合、`3-way merge` 機能が動作不能となるため、ダイアログで「Gitが必要です」と通知し、`https://git-scm.com/download/mac`（Mac）または `https://gitforwindows.org/`（Windows）のダウンロードページを自動表示する。
+1. **Git の自動検知と自動インストール機能**:
+   - システム `PATH` および標準インストールパス（`C:\Program Files\Git\cmd\git.exe` や `/usr/local/bin/git`, `/opt/homebrew/bin/git` 等）で `git` の存在を動的チェックする。
+   - 未検出の場合、ダイアログで「Gitを自動インストールしますか？」と提示する。
+     - **macOS**: Homebrew (`brew install git`) または Apple Developer Command Line Tools のシステムインストールダイアログ (`xcode-select --install`) を自動起動。
+     - **Windows**: Windows Package Manager (`winget install --id Git.Git --silent`) を試行し、不可の場合は公式 Git インストーラー (`Git-Installer.exe`) を一時フォルダへ自動ダウンロードしてサイレント/GUIインストーラーを自動起動。
+   - 自動インストールが辞退・失敗した場合は、公式ダウンロードページ（`https://git-scm.com/download/mac` / `https://gitforwindows.org/`）のブラウザ案内を提供する。
 2. **rclone の自動検知・自動ダウンロード**:
    - システム `PATH` およびユーザーローカル領域（`~/.unitevault/bin/rclone` または `%APPDATA%\unitevault\bin\rclone.exe`）を検索する。
    - 未検出の場合、アプリバンドル内ではなく**書き込み権限が確実に存在するユーザー設定領域**（`~/.unitevault/bin/`）へ、OS/アーキテクチャに応じた最新の official `rclone` バイナリを自動ダウンロード・解凍配置するダイアログを提示する。
