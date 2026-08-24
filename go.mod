@@ -1,6 +1,6 @@
 module github.com/kh813/unitevault
 
-go 1.26.4
+go 1.22
 
 require (
 	fyne.io/systray v1.12.2 // indirect
