@@ -16,6 +16,5 @@ require (
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c // indirect
-	github.com/sqweek/dialog v0.0.0-20260123140253-64c163d53aac // indirect
 	golang.org/x/sys v0.15.0 // indirect
 )

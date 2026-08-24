@@ -8,17 +8,16 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
 	"fyne.io/systray"
-	"github.com/sqweek/dialog"
 	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/drive"
 	"github.com/kh813/unitevault/internal/engine"
 	"github.com/kh813/unitevault/internal/gui"
-	"strings"
 )
 
 func main() {
@@ -188,12 +187,12 @@ func ensurePreflightChecks() bool {
 		msg := "Git is required for 3-way merge conflict resolution in UniteVault, but was not found on your system.\n\nWould you like UniteVault to automatically install Git now?"
 		if confirmDialog("Git Install Required", msg) {
 			if err := bootstrap.AutoInstallGit(); err == nil && bootstrap.CheckGitInstalled() {
-				dialog.Message("Git was successfully installed!").Title("Git Installed").Info()
+				gui.PromptMessage("Git Installed", "Git was successfully installed!")
 			} else {
 				if runtime.GOOS == "darwin" {
-					dialog.Message("Git installation process triggered (Command Line Developer Tools / Homebrew).\nPlease complete the installation on screen.").Title("Git Installing").Info()
+					gui.PromptMessage("Git Installing", "Git installation process triggered (Command Line Developer Tools / Homebrew).\nPlease complete the installation on screen.")
 				} else {
-					dialog.Message("Git installer launched / in progress. Please complete the installation window.").Title("Git Installing").Info()
+					gui.PromptMessage("Git Installing", "Git installer launched / in progress. Please complete the installation window.")
 				}
 			}
 		} else {
@@ -211,11 +210,11 @@ func ensurePreflightChecks() bool {
 			targetPath, err := drive.GetDefaultRcloneTargetPath()
 			if err == nil {
 				if err := drive.EnsureRcloneBinary(targetPath); err == nil {
-					dialog.Message("rclone was successfully downloaded and installed to:\n%s", targetPath).Title("rclone Installed").Info()
+					gui.PromptMessage("rclone Installed", fmt.Sprintf("rclone was successfully downloaded and installed to:\n%s", targetPath))
 					return true
 				}
 			}
-			dialog.Message("Failed to auto-download rclone.\n\nWould you like to open the rclone download page in your browser?").Title("rclone Download Failed").Error()
+			gui.PromptMessage("rclone Download Failed", "Failed to auto-download rclone.\n\nOpening official download page in browser...")
 			_ = bootstrap.OpenURL(bootstrap.GetRcloneDownloadURL())
 			return false
 		} else {
@@ -272,8 +271,8 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 	}
 
 	// 1. Vault Directory Picker
-	vPath, err := dialog.Directory().Title("Select Obsidian Vault Directory").Browse()
-	if err != nil || vPath == "" {
+	vPath, ok := gui.PromptFolder("Select Obsidian Vault Directory")
+	if !ok || vPath == "" {
 		return
 	}
 
@@ -313,11 +312,11 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 	remoteTarget := fmt.Sprintf("%s:%s", rRemote, rPath)
 	role, _ := bootstrapper.InitializeNode(context.Background(), vPath, remoteTarget, hostname)
 
-	dialog.Message("UniteVault has been successfully configured and initialized!\n\nVault: %s\nRemote Target: %s\nRole: %s", vPath, remoteTarget, role).Title("UniteVault Initialized").Info()
+	gui.PromptMessage("UniteVault Initialized", fmt.Sprintf("UniteVault has been successfully configured and initialized!\n\nVault: %s\nRemote Target: %s\nRole: %s", vPath, remoteTarget, role))
 }
 
 func confirmDialog(title, message string) bool {
-	return dialog.Message("%s", message).Title(title).YesNo()
+	return gui.PromptConfirm(title, message)
 }
 
 func onTrayExit() {
