@@ -233,11 +233,32 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 	}
 
 	cfg, _ := cfgMgr.LoadConfig()
+	role, _ := cfgMgr.LoadRole()
+	if role == "" {
+		role = "Not Initialized"
+	}
+
+	client := drive.NewClient("")
+	gitStatus := "Not Found"
+	if bootstrap.CheckGitInstalled() {
+		gitStatus = "Installed"
+	}
+
+	rcloneStatus := "Not Found"
+	if bootstrap.CheckRcloneInstalled() {
+		rcloneStatus = "Installed"
+	}
+
 	currentData := gui.SettingsFormData{
-		VaultPath:       "",
-		RcloneRemote:    "gdrive",
-		RclonePath:      "VaultBackup",
-		IntervalSeconds: 120,
+		GitStatus:        gitStatus,
+		RcloneStatus:     rcloneStatus,
+		DeviceRole:       role,
+		VaultPath:        "",
+		RcloneRemote:     "gdrive",
+		RclonePath:       "VaultBackup",
+		IntervalSeconds:  120,
+		RcloneExecPath:   client.GetBinaryPath(),
+		RcloneRemoteInfo: "OK",
 	}
 
 	if cfg != nil {
@@ -251,6 +272,12 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 		if cfg.IntervalSeconds > 0 {
 			currentData.IntervalSeconds = cfg.IntervalSeconds
 		}
+	}
+
+	if !client.IsRemoteConfigured(context.Background(), currentData.RcloneRemote) {
+		currentData.RcloneRemoteInfo = fmt.Sprintf("⚠️ Remote '%s' NOT configured in rclone yet", currentData.RcloneRemote)
+	} else {
+		currentData.RcloneRemoteInfo = fmt.Sprintf("OK (Configured: %s)", currentData.RcloneRemote)
 	}
 
 	// Windows iCloud Drive Notice for new setups
@@ -288,9 +315,9 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 	hostname, _ := os.Hostname()
 	bootstrapper := bootstrap.NewBootstrapper(cfgMgr, driveClient)
 	remoteTarget := fmt.Sprintf("%s:%s", updated.RcloneRemote, updated.RclonePath)
-	role, _ := bootstrapper.InitializeNode(context.Background(), updated.VaultPath, remoteTarget, hostname)
+	newRole, _ := bootstrapper.InitializeNode(context.Background(), updated.VaultPath, remoteTarget, hostname)
 
-	gui.PromptMessage("UniteVault Configured", fmt.Sprintf("UniteVault settings saved successfully!\n\nVault: %s\nRemote Target: %s\nSync Interval: %d seconds\nRole: %s", updated.VaultPath, remoteTarget, updated.IntervalSeconds, role))
+	gui.PromptMessage("UniteVault Configured", fmt.Sprintf("UniteVault settings saved successfully!\n\nVault: %s\nRemote Target: %s\nSync Interval: %d seconds\nRole: %s", updated.VaultPath, remoteTarget, updated.IntervalSeconds, newRole))
 }
 
 func confirmDialog(title, message string) bool {

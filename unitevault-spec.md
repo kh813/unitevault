@@ -187,13 +187,22 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
 - **起動時フロー**:
   - `config.json` が未存在または未設定（VaultPath未指定）の場合：起動時に自動的に **Settings（設定）ダイアログ** を開き、必要な設定入力を促す。
   - `config.json` が設定済みの場合：ダイアログ等を表示せず、静かにメニューバー（システムトレイ）へ常駐し、設定された間隔でバックグラウンド同期を開始する。
-- **Settings（設定画面）機能**:
-  - **単一統合 GUI ウィンドウ**: ステップごとの個別プロンプトではなく、1つのウィンドウ内に「Obsidian Vault Path」「rclone Remote Name」「Google Drive Target Folder Path」「Sync Interval (seconds)」の全項目をインライン表示・編集可能なフォーム形式とする。
-  - **Vault Directory Path**: テキスト入力 ＋ `Browse...` ボタン（ネイティブフォルダ選択ダイアログ）
-  - **rclone Remote Name / Target Path**: リモート名（デフォルト `gdrive`）と転送先パス（デフォルト `VaultBackup`）
-  - **Sync Interval**: 同期間隔（秒単位、デフォルト `120` 秒）
-  - **Save ボタン**: 全設定を一括保存し、自動的に `init` 処理（初回セットアップ・役割判定）を実行して同期ループへ反映する
-  - **Cancel ボタン**: 変更を行わずに設定画面を閉じる
+- **Settings（設定画面）機能とレイアウト仕様**:
+  - **単一統合 GUI ウィンドウ**: ステップごとの個別プロンプトではなく、1つのウィンドウ内にステータス・設定フォーム・rclone情報を視覚的に整理して表示する。
+  - **[ Status セクション ]**:
+    - Git インストール状態 (`Git status: Installed / Not Found`)
+    - rclone インストール状態 (`rclone status: Installed / Not Found`)
+    - デバイス役割 (`Device Role: Primary / Secondary`)
+  - **[ Config 設定フォームセクション ]**:
+    - **Vault Directory Path**: テキスト入力 ＋ `[ Select ]` ボタン（フォルダ選択ダイアログ）
+    - **Google Drive Target Folder Path**: 転送先フォルダパス（デフォルト `VaultBackup`）
+    - **Sync Interval**: 同期間隔（秒単位、デフォルト `120` 秒）
+  - **[ rclone Status セクション ]**:
+    - **Remote Name**: 設定されているリモート名（デフォルト `gdrive`）と設定状態 (`Configured / Not Configured`)
+    - **Executable**: 検出・利用中の `rclone` バイナリの実行パス
+  - **操作ボタン**:
+    - **Save Settings ボタン**: 全設定を一括保存し、自動的に `init` 処理（初回セットアップ・役割判定）を実行して同期ループへ反映する
+    - **Cancel ボタン**: 変更を行わずに設定画面を閉じる
   - **Reset Configuration**: 設定およびローカルの役割情報をクリアし、初期設定状態へ戻す（誤設定時やVault再設定時に使用）
 - **ビジュアルデザイン・アイコン仕様**:
   - アプリアイコンおよびメニューバー／タスクレイアイコンは、**純白ベース**の背景に **Obsidian テーマカラー（パープル #7C3AED）** のアクセント図形を配置し、小さな常駐アイコンサイズでも高い視認性を確保する。

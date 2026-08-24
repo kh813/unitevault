@@ -117,12 +117,22 @@ func PromptConfirm(title, message string) bool {
 	}
 }
 
-// SettingsFormData represents the configurable parameters in the Settings Window
+// SettingsFormData represents the status and configurable parameters in the Settings Window
 type SettingsFormData struct {
+	// Status Info
+	GitStatus    string
+	RcloneStatus string
+	DeviceRole   string
+
+	// Configurable Form
 	VaultPath       string
 	RcloneRemote    string
 	RclonePath      string
 	IntervalSeconds int
+
+	// rclone Details
+	RcloneExecPath   string
+	RcloneRemoteInfo string
 }
 
 // PromptMessage shows an informational alert dialog.
