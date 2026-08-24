@@ -28,6 +28,41 @@ func GetICloudDownloadURL() string {
 	return "https://support.apple.com/ja-jp/108994"
 }
 
+// GetRcloneDownloadURL returns the official download URL for rclone.
+func GetRcloneDownloadURL() string {
+	return "https://rclone.org/downloads/"
+}
+
+// CheckRcloneInstalled checks if rclone is available in PATH or user config bin folder.
+func CheckRcloneInstalled() bool {
+	binName := "rclone"
+	if runtime.GOOS == "windows" {
+		binName = "rclone.exe"
+	}
+	if _, err := exec.LookPath(binName); err == nil {
+		return true
+	}
+	// Check user config bin folder
+	home, err := os.UserHomeDir()
+	if err == nil {
+		var baseDir string
+		if runtime.GOOS == "windows" {
+			appData := os.Getenv("APPDATA")
+			if appData == "" {
+				appData = filepath.Join(home, "AppData", "Roaming")
+			}
+			baseDir = filepath.Join(appData, "unitevault")
+		} else {
+			baseDir = filepath.Join(home, ".unitevault")
+		}
+		targetPath := filepath.Join(baseDir, "bin", binName)
+		if _, err := os.Stat(targetPath); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // OpenURL opens a URL in the default web browser.
 func OpenURL(urlStr string) error {
 	var cmd *exec.Cmd

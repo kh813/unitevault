@@ -30,8 +30,34 @@ type Client struct {
 	logFile      string
 }
 
-// NewClient creates a new Client instance, auto-downloading rclone if not found in PATH or app directory.
-func NewClient(logFile string) *Client {
+// GetDefaultRcloneTargetPath returns the path where auto-downloaded rclone binary should be stored (~/.unitevault/bin/rclone or %APPDATA%\unitevault\bin\rclone.exe)
+func GetDefaultRcloneTargetPath() (string, error) {
+	binName := "rclone"
+	if runtime.GOOS == "windows" {
+		binName = "rclone.exe"
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	var baseDir string
+	if runtime.GOOS == "windows" {
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			appData = filepath.Join(home, "AppData", "Roaming")
+		}
+		baseDir = filepath.Join(appData, "unitevault")
+	} else {
+		baseDir = filepath.Join(home, ".unitevault")
+	}
+
+	return filepath.Join(baseDir, "bin", binName), nil
+}
+
+// FindRcloneBinary searches system PATH and user config bin folder for rclone
+func FindRcloneBinary() (string, bool) {
 	binName := "rclone"
 	if runtime.GOOS == "windows" {
 		binName = "rclone.exe"
@@ -40,28 +66,42 @@ func NewClient(logFile string) *Client {
 	// 1. Check system PATH
 	rcloneBin, err := exec.LookPath(binName)
 	if err == nil {
-		return &Client{rcloneBinary: rcloneBin, logFile: logFile}
+		return rcloneBin, true
 	}
 
-	// 2. Check next to executable
-	execPath, err := os.Executable()
+	// 2. Check user config bin folder
+	targetPath, err := GetDefaultRcloneTargetPath()
 	if err == nil {
-		appDir := filepath.Dir(execPath)
-		localBin := filepath.Join(appDir, binName)
-		if _, err := os.Stat(localBin); err == nil {
-			return &Client{rcloneBinary: localBin, logFile: logFile}
+		if _, err := os.Stat(targetPath); err == nil {
+			return targetPath, true
 		}
+	}
 
-		// 3. Auto-download if missing
+	return "", false
+}
+
+// NewClient creates a new Client instance, auto-downloading rclone if not found in PATH or app directory.
+func NewClient(logFile string) *Client {
+	binPath, found := FindRcloneBinary()
+	if found {
+		return &Client{rcloneBinary: binPath, logFile: logFile}
+	}
+
+	targetPath, err := GetDefaultRcloneTargetPath()
+	if err == nil {
 		fmt.Printf("rclone binary not found. Downloading rclone for %s/%s...\n", runtime.GOOS, runtime.GOARCH)
-		if err := EnsureRcloneBinary(localBin); err == nil {
-			fmt.Printf("rclone successfully downloaded to: %s\n", localBin)
-			return &Client{rcloneBinary: localBin, logFile: logFile}
+		if err := EnsureRcloneBinary(targetPath); err == nil {
+			fmt.Printf("rclone successfully downloaded to: %s\n", targetPath)
+			return &Client{rcloneBinary: targetPath, logFile: logFile}
 		} else {
 			log.Printf("Failed to auto-download rclone: %v\n", err)
 		}
 	}
 
+	binName := "rclone"
+	if runtime.GOOS == "windows" {
+		binName = "rclone.exe"
+	}
 	return &Client{
 		rcloneBinary: binName,
 		logFile:      logFile,

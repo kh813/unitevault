@@ -17,6 +17,8 @@ import (
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/drive"
 	"github.com/kh813/unitevault/internal/engine"
+	"github.com/kh813/unitevault/internal/gui"
+	"strings"
 )
 
 func main() {
@@ -90,11 +92,8 @@ func onTrayReady() {
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit UniteVault", "Quit application")
 
-	if !bootstrap.CheckGitInstalled() {
-		mStatus.SetTitle("Status: Git Missing")
-		if confirmDialog("Git Required", "Git is required for 3-way merge conflict resolution in UniteVault, but it was not found on your system.\n\nWould you like to open the Git download page in your browser?") {
-			_ = bootstrap.OpenURL(bootstrap.GetGitDownloadURL())
-		}
+	if !ensurePreflightChecks() {
+		mStatus.SetTitle("Status: Preflight Check Failed")
 		return
 	}
 
@@ -183,14 +182,69 @@ func startDaemonLoop(ctx context.Context, cfgMgr *config.ConfigManager, cfg *con
 	}()
 }
 
-func openSettingsGUI(cfgMgr *config.ConfigManager) {
+func ensurePreflightChecks() bool {
+	// 1. Git check
 	if !bootstrap.CheckGitInstalled() {
 		if confirmDialog("Git Required", "Git is required for 3-way merge conflict resolution in UniteVault, but it was not found on your system.\n\nWould you like to open the Git download page in your browser?") {
 			_ = bootstrap.OpenURL(bootstrap.GetGitDownloadURL())
 		}
+		return false
+	}
+
+	// 2. rclone check & auto-download
+	if !bootstrap.CheckRcloneInstalled() {
+		msg := "rclone is required for Google Drive sync/backup, but was not found on your system.\n\nWould you like UniteVault to automatically download rclone now?"
+		if confirmDialog("rclone Download Required", msg) {
+			targetPath, err := drive.GetDefaultRcloneTargetPath()
+			if err == nil {
+				if err := drive.EnsureRcloneBinary(targetPath); err == nil {
+					dialog.Message("rclone was successfully downloaded and installed to:\n%s", targetPath).Title("rclone Installed").Info()
+					return true
+				}
+			}
+			dialog.Message("Failed to auto-download rclone.\n\nWould you like to open the rclone download page in your browser?").Title("rclone Download Failed").Error()
+			_ = bootstrap.OpenURL(bootstrap.GetRcloneDownloadURL())
+			return false
+		} else {
+			if confirmDialog("rclone Download Page", "Would you like to open the official rclone download page in your browser?") {
+				_ = bootstrap.OpenURL(bootstrap.GetRcloneDownloadURL())
+			}
+			return false
+		}
+	}
+
+	return true
+}
+
+func openSettingsGUI(cfgMgr *config.ConfigManager) {
+	if !ensurePreflightChecks() {
 		return
 	}
 
+	cfg, _ := cfgMgr.LoadConfig()
+	currentVaultPath := ""
+	currentRemote := "gdrive"
+	currentPath := "VaultBackup"
+
+	if cfg != nil && cfg.VaultPath != "" {
+		currentVaultPath = cfg.VaultPath
+		if cfg.RcloneRemote != "" {
+			currentRemote = cfg.RcloneRemote
+		}
+		if cfg.RclonePath != "" {
+			currentPath = cfg.RclonePath
+		}
+
+		role, _ := cfgMgr.LoadRole()
+		msg := fmt.Sprintf("Current Configuration:\n\n- Vault Directory: %s\n- rclone Remote: %s\n- Remote Backup Path: %s\n- Sync Interval: %d seconds\n- Node Role: %s\n\nWould you like to edit these settings?",
+			currentVaultPath, currentRemote, currentPath, cfg.IntervalSeconds, role)
+
+		if !confirmDialog("UniteVault Settings", msg) {
+			return
+		}
+	}
+
+	// Windows iCloud Drive Notice
 	if runtime.GOOS == "windows" {
 		icloudMsg := "Notice for Windows Users:\n\nIf you plan to sync this Vault with an iPhone (iOS), 'iCloud for Windows' must be installed and your Vault folder should be stored inside your iCloud Drive folder.\n\nWould you like to open the 'iCloud for Windows' download page?"
 		if confirmDialog("iPhone / iCloud Drive Setup Notice", icloudMsg) {
@@ -198,26 +252,23 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 		}
 	}
 
-	cfg, _ := cfgMgr.LoadConfig()
-	currentRemote := "gdrive"
-	currentPath := "VaultBackup"
-
-	if cfg != nil {
-		if cfg.RcloneRemote != "" {
-			currentRemote = cfg.RcloneRemote
-		}
-		if cfg.RclonePath != "" {
-			currentPath = cfg.RclonePath
-		}
-	}
-
+	// 1. Vault Directory Picker
 	vPath, err := dialog.Directory().Title("Select Obsidian Vault Directory").Browse()
 	if err != nil || vPath == "" {
 		return
 	}
 
-	rRemote := currentRemote
-	rPath := currentPath
+	// 2. Remote Name Input
+	rRemote, ok := gui.PromptTextInput("rclone Remote Name", "Enter rclone remote name (default: gdrive):", currentRemote)
+	if !ok || strings.TrimSpace(rRemote) == "" {
+		rRemote = "gdrive"
+	}
+
+	// 3. Remote Path Input
+	rPath, ok := gui.PromptTextInput("Google Drive Target Folder", "Enter target folder path on Google Drive:", currentPath)
+	if !ok || strings.TrimSpace(rPath) == "" {
+		rPath = "VaultBackup"
+	}
 
 	newCfg := &config.Config{
 		VaultPath:       vPath,
@@ -232,9 +283,9 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 	client := drive.NewClient("")
 	bootstrapper := bootstrap.NewBootstrapper(cfgMgr, client)
 	remoteTarget := fmt.Sprintf("%s:%s", rRemote, rPath)
-	_, _ = bootstrapper.InitializeNode(context.Background(), vPath, remoteTarget, hostname)
+	role, _ := bootstrapper.InitializeNode(context.Background(), vPath, remoteTarget, hostname)
 
-	dialog.Message("UniteVault has been successfully configured and initialized!\n\nVault: %s\nTarget: %s", vPath, remoteTarget).Title("UniteVault Initialized").Info()
+	dialog.Message("UniteVault has been successfully configured and initialized!\n\nVault: %s\nRemote Target: %s\nRole: %s", vPath, remoteTarget, role).Title("UniteVault Initialized").Info()
 }
 
 func confirmDialog(title, message string) bool {

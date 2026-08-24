@@ -438,3 +438,37 @@ unitevault/                         ← ソースコードリポジトリ（GitH
 | PlaywrightによるGoogle Drive Web UI自動操作 | UI変更に弱い、規約上のリスク、git転送プロトコルとして機能しない、iOS上で実行不可 |
 | Syncthingの導入 | Mac⇔iPhone間の同期は既にiCloudが担っており、Syncthing独自の競合解決（`.sync-conflict`）と自作ログ機構が二重に働き複雑化する。iOS版が非公式で有料アプリ経由になる点も負担増 |
 | rclone bisync（双方向同期） | ベータ品質であり、Google Drive側を人間が直接編集しない運用のため、双方向は過剰。一方向の`sync`で要件を満たせる |
+
+---
+
+## 8. GUI・デザイン・事前チェック詳細仕様
+
+### 8.1 メニューバー / システムトレイアイコン仕様
+- **視認性向上デザイン**: macOS（ダークモード／ライトモード）および Windows システムトレイ上での視認性を担保するため、明るいシアン/ブルーのベースカラーと立体的なジオメトリックVault＋同期矢印の高コントラストアイコンを採用する。
+- **アセット構成**:
+  - macOS App アイコン: `assets/AppIcon.icns`
+  - トレイ用アイコン: `assets/tray/icon.png` (32x32), `assets/tray/icon@2x.png` (64x64), `assets/tray/icon.ico` (256x256)
+
+### 8.2 事前環境チェック（Preflight Checks）と依存管理
+アプリケーション起動時および初期設定・設定変更時に、動作に必要な外部コマンドの事前判定を行う。
+
+1. **Git の自動検知とインストール案内**:
+   - `exec.LookPath("git")` により `git` の存在を確認する。
+   - 未検出の場合、`3-way merge` 機能が動作不能となるため、ダイアログで「Gitが必要です」と通知し、`https://git-scm.com/download/mac`（Mac）または `https://gitforwindows.org/`（Windows）のダウンロードページを自動表示する。
+2. **rclone の自動検知・自動ダウンロード**:
+   - システム `PATH` およびユーザーローカル領域（`~/.unitevault/bin/rclone` または `%APPDATA%\unitevault\bin\rclone.exe`）を検索する。
+   - 未検出の場合、アプリバンドル内ではなく**書き込み権限が確実に存在するユーザー設定領域**（`~/.unitevault/bin/`）へ、OS/アーキテクチャに応じた最新の official `rclone` バイナリを自動ダウンロード・解凍配置するダイアログを提示する。
+   - 自動ダウンロード失敗時またはユーザー拒否時は、公式ダウンロードページ（`https://rclone.org/downloads/`）の案内ブラウザリンクを提供する。
+3. **iCloud for Windows のセットアップ案内（Windows環境）**:
+   - Windows側でiPhone（iOS）との同期を行う場合、Vaultフォルダが iCloud Drive 配下にある必要があるため、初期設定時に「iCloud for Windows」のインストール確認および案内リンク（Appleサポート／Microsoft Store）を表示する。
+
+### 8.3 設定画面（GUI Settings Window / Setup Wizard）仕様
+メニューバーの「Settings...」選択時および未初期化時の起動フロー：
+
+- **設定一覧表示機能**:
+  - すでに設定済みの状態で「Settings...」を開いた場合、現在の設定内容（Vaultパス、rcloneリモート名、バックアップ先パス、同期インターバル、現在のノード役割）を要約表示し、変更を行うか確認する。
+- **インタラクティブ設定ウィザード**:
+  1. **Vault フォルダ選択**: OS標準のフォルダ選択ダイアログで指定。
+  2. **rclone リモート名設定**: テキスト入力ダイアログ（デフォルト: `gdrive`）。
+  3. **Google Drive バックアップ先パス設定**: テキスト入力ダイアログ（デフォルト: `VaultBackup`）。
+  4. **設定保存とノード初期化**: `config.json` への保存およびノード役割判定（`PRIMARY_MARKER.json`の検証）を自動実行し、完了ダイアログを表示する。
