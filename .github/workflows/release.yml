@@ -45,7 +45,7 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>0.0.5</string>
+              <string>0.0.6</string>
               <key>LSUIElement</key>
               <true/>
           </dict>
@@ -54,15 +54,16 @@ jobs:
           codesign --force --deep --sign - "dist/UniteVault-mac-arm64.app"
           (cd dist && zip -r UniteVault-mac-arm64.app.zip UniteVault-mac-arm64.app)
 
-      - name: Build Windows binary
+      - name: Build Windows binary & Create ZIP
         run: |
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o dist/unitevault-windows-amd64.exe ./cmd/unitevault
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o dist/UniteVault.exe ./cmd/unitevault
+          (cd dist && zip UniteVault-windows-amd64.zip UniteVault.exe)
 
       - name: Release artifacts
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/UniteVault-mac-arm64.app.zip
-            dist/unitevault-windows-amd64.exe
+            dist/UniteVault-windows-amd64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

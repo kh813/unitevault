@@ -90,6 +90,14 @@ func onTrayReady() {
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit UniteVault", "Quit application")
 
+	if !bootstrap.CheckGitInstalled() {
+		mStatus.SetTitle("Status: Git Missing")
+		if confirmDialog("Git Required", "Git is required for 3-way merge conflict resolution in UniteVault, but it was not found on your system.\n\nWould you like to open the Git download page in your browser?") {
+			_ = bootstrap.OpenURL(bootstrap.GetGitDownloadURL())
+		}
+		return
+	}
+
 	cfgMgr, err := config.NewConfigManager()
 	if err != nil {
 		mStatus.SetTitle("Status: Config Error")
@@ -176,6 +184,20 @@ func startDaemonLoop(ctx context.Context, cfgMgr *config.ConfigManager, cfg *con
 }
 
 func openSettingsGUI(cfgMgr *config.ConfigManager) {
+	if !bootstrap.CheckGitInstalled() {
+		if confirmDialog("Git Required", "Git is required for 3-way merge conflict resolution in UniteVault, but it was not found on your system.\n\nWould you like to open the Git download page in your browser?") {
+			_ = bootstrap.OpenURL(bootstrap.GetGitDownloadURL())
+		}
+		return
+	}
+
+	if runtime.GOOS == "windows" {
+		icloudMsg := "Notice for Windows Users:\n\nIf you plan to sync this Vault with an iPhone (iOS), 'iCloud for Windows' must be installed and your Vault folder should be stored inside your iCloud Drive folder.\n\nWould you like to open the 'iCloud for Windows' download page?"
+		if confirmDialog("iPhone / iCloud Drive Setup Notice", icloudMsg) {
+			_ = bootstrap.OpenURL(bootstrap.GetICloudDownloadURL())
+		}
+	}
+
 	cfg, _ := cfgMgr.LoadConfig()
 	currentRemote := "gdrive"
 	currentPath := "VaultBackup"
@@ -237,6 +259,11 @@ func handleInit(args []string) {
 		os.Exit(1)
 	}
 
+	if !bootstrap.CheckGitInstalled() {
+		fmt.Printf("Error: Git is required for 3-way merge conflict resolution, but was not found in PATH.\nPlease download and install Git from: %s\n", bootstrap.GetGitDownloadURL())
+		os.Exit(1)
+	}
+
 	hostname, _ := os.Hostname()
 	if *label == "" {
 		*label = hostname
@@ -289,6 +316,11 @@ func handleRun(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	once := fs.Bool("once", false, "Run a single sync cycle and exit")
 	_ = fs.Parse(args)
+
+	if !bootstrap.CheckGitInstalled() {
+		fmt.Printf("Error: Git is required for 3-way merge conflict resolution, but was not found in PATH.\nPlease download and install Git from: %s\n", bootstrap.GetGitDownloadURL())
+		os.Exit(1)
+	}
 
 	cfgMgr, err := config.NewConfigManager()
 	if err != nil {
