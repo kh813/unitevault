@@ -19,12 +19,13 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Build Apple Silicon Mac binary, create macOS .app Bundle & Ad-hoc Sign
+      - name: Build Apple Silicon Mac binary
         run: |
           mkdir -p dist
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o dist/unitevault-binary-arm64 ./cmd/unitevault
 
-          # Build arm64 binary & .app Bundle (Apple Silicon Mac)
-          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o dist/unitevault-binary-arm64 ./cmd/unitevault
+      - name: Create macOS .app Bundle
+        run: |
           mkdir -p "dist/UniteVault-mac-arm64.app/Contents/MacOS"
           mkdir -p "dist/UniteVault-mac-arm64.app/Contents/Resources"
           cp dist/unitevault-binary-arm64 "dist/UniteVault-mac-arm64.app/Contents/MacOS/UniteVault"
@@ -45,13 +46,19 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>0.0.12</string>
+              <string>0.0.13</string>
               <key>LSUIElement</key>
               <true/>
           </dict>
           </plist>
           EOF
+
+      - name: Ad-hoc Sign macOS .app Bundle
+        run: |
           codesign --force --deep --sign - "dist/UniteVault-mac-arm64.app" || true
+
+      - name: Zip macOS .app Bundle
+        run: |
           (cd dist && zip -r UniteVault-mac-arm64.app.zip UniteVault-mac-arm64.app)
 
       - name: Build Windows binary & Create ZIP
