@@ -221,6 +221,7 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 		return
 	}
 
+	client := drive.NewClient("")
 	cfg, _ := cfgMgr.LoadConfig()
 	currentVaultPath := ""
 	currentRemote := "gdrive"
@@ -236,8 +237,13 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 		}
 
 		role, _ := cfgMgr.LoadRole()
-		msg := fmt.Sprintf("Current Configuration:\n\n- Vault Directory: %s\n- rclone Remote: %s\n- Remote Backup Path: %s\n- Sync Interval: %d seconds\n- Node Role: %s\n\nWould you like to edit these settings?",
-			currentVaultPath, currentRemote, currentPath, cfg.IntervalSeconds, role)
+		remoteStatus := "OK (Configured in rclone)"
+		if !client.IsRemoteConfigured(context.Background(), currentRemote) {
+			remoteStatus = fmt.Sprintf("⚠️ WARNING: Remote '%s' is NOT configured in rclone yet", currentRemote)
+		}
+
+		msg := fmt.Sprintf("Current Configuration:\n\n- Vault Directory: %s\n- rclone Executable: %s\n- rclone Remote: %s\n- Remote Status: %s\n- Remote Backup Path: %s\n- Sync Interval: %d seconds\n- Node Role: %s\n\nWould you like to edit these settings?",
+			currentVaultPath, client.GetBinaryPath(), currentRemote, remoteStatus, currentPath, cfg.IntervalSeconds, role)
 
 		if !confirmDialog("UniteVault Settings", msg) {
 			return
@@ -262,6 +268,14 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 	rRemote, ok := gui.PromptTextInput("rclone Remote Name", "Enter rclone remote name (default: gdrive):", currentRemote)
 	if !ok || strings.TrimSpace(rRemote) == "" {
 		rRemote = "gdrive"
+	}
+
+	// Check if rRemote is configured in rclone
+	if !client.IsRemoteConfigured(context.Background(), rRemote) {
+		warnMsg := fmt.Sprintf("Notice: rclone remote '%s' is not configured on this computer yet.\n\nTo backup to Google Drive, please run 'rclone config' in your terminal or set up OAuth.\n\nWould you like to open the rclone Google Drive setup guide in your browser?", rRemote)
+		if confirmDialog("rclone Remote Setup Notice", warnMsg) {
+			_ = bootstrap.OpenURL(bootstrap.GetRcloneDriveGuideURL())
+		}
 	}
 
 	// 3. Remote Path Input

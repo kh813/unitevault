@@ -12,7 +12,7 @@ import (
 	"github.com/kh813/unitevault/internal/drive"
 )
 
-const AppVersion = "0.0.7"
+const AppVersion = "0.0.8"
 const PrimaryMarkerRelPath = "_sync/PRIMARY_MARKER.json"
 
 // PrimaryMarker represents the PRIMARY_MARKER.json structure specified in spec section 3.6.1.1

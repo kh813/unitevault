@@ -270,3 +270,44 @@ func (c *Client) DownloadFile(ctx context.Context, remoteSourceFile, localDstFil
 func (c *Client) UploadFile(ctx context.Context, localSrcFile, remoteTargetFile string) error {
 	return c.executeWithRetry(ctx, "copyto", localSrcFile, remoteTargetFile)
 }
+
+// ListRemotes executes `rclone listremotes` and returns configured remote names without trailing colon.
+func (c *Client) ListRemotes(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, c.rcloneBinary, "listremotes")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(stdout.String(), "\n")
+	var remotes []string
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if trimmed != "" {
+			trimmed = strings.TrimSuffix(trimmed, ":")
+			remotes = append(remotes, trimmed)
+		}
+	}
+	return remotes, nil
+}
+
+// IsRemoteConfigured checks if remoteName is present in `rclone listremotes`
+func (c *Client) IsRemoteConfigured(ctx context.Context, remoteName string) bool {
+	remotes, err := c.ListRemotes(ctx)
+	if err != nil {
+		return false
+	}
+	target := strings.TrimSuffix(remoteName, ":")
+	for _, r := range remotes {
+		if strings.EqualFold(r, target) {
+			return true
+		}
+	}
+	return false
+}
+
+// GetBinaryPath returns the resolved rclone executable path
+func (c *Client) GetBinaryPath() string {
+	return c.rcloneBinary
+}

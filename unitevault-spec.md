@@ -465,10 +465,17 @@ unitevault/                         ← ソースコードリポジトリ（GitH
 ### 8.3 設定画面（GUI Settings Window / Setup Wizard）仕様
 メニューバーの「Settings...」選択時および未初期化時の起動フロー：
 
-- **設定一覧表示機能**:
-  - すでに設定済みの状態で「Settings...」を開いた場合、現在の設定内容（Vaultパス、rcloneリモート名、バックアップ先パス、同期インターバル、現在のノード役割）を要約表示し、変更を行うか確認する。
-- **インタラクティブ設定ウィザード**:
+- **設定一覧表示および rclone リモート接続状態の確認**:
+  - すでに設定済みの状態で「Settings...」を開いた場合、以下の現在の設定一覧を要約ダイアログ表示し、変更を行うか確認する：
+    1. Vault ディレクトリパス
+    2. rclone バイナリの参照パス
+    3. rclone リモート名 (`rclone_remote`)
+    4. **rclone リモートの接続設定状態** (`rclone listremotes` を実行し、指定リモートが rclone 側に登録済みか動的チェック)
+    5. Google Drive バックアップ先パス (`rclone_path`)
+    6. 同期インターバル秒数 (`interval_seconds`)
+    7. ノード役割 (Primary / Secondary)
+- **インタラクティブ設定ウィザードとリモート検証**:
   1. **Vault フォルダ選択**: OS標準のフォルダ選択ダイアログで指定。
-  2. **rclone リモート名設定**: テキスト入力ダイアログ（デフォルト: `gdrive`）。
+  2. **rclone リモート名設定と検証**: テキスト入力ダイアログ（デフォルト: `gdrive`）。入力されたリモート名が `rclone listremotes` に存在しない場合、「リモートが未設定です。端末で `rclone config` を実行するかガイドを参照してください」との注意ダイアログを表示し、Google Drive セットアップガイド（`https://rclone.org/drive/`）を開く案内を提供する。
   3. **Google Drive バックアップ先パス設定**: テキスト入力ダイアログ（デフォルト: `VaultBackup`）。
   4. **設定保存とノード初期化**: `config.json` への保存およびノード役割判定（`PRIMARY_MARKER.json`の検証）を自動実行し、完了ダイアログを表示する。

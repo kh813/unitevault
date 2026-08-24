@@ -33,6 +33,11 @@ func GetRcloneDownloadURL() string {
 	return "https://rclone.org/downloads/"
 }
 
+// GetRcloneDriveGuideURL returns the setup guide URL for Google Drive in rclone.
+func GetRcloneDriveGuideURL() string {
+	return "https://rclone.org/drive/"
+}
+
 // CheckRcloneInstalled checks if rclone is available in PATH or user config bin folder.
 func CheckRcloneInstalled() bool {
 	binName := "rclone"
