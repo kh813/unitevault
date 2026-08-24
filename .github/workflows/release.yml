@@ -22,7 +22,8 @@ jobs:
       - name: Build Apple Silicon Mac binary
         run: |
           mkdir -p dist
-          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o dist/unitevault-binary-arm64 ./cmd/unitevault
+          go mod tidy
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -v -o dist/unitevault-binary-arm64 ./cmd/unitevault
 
       - name: Create macOS .app Bundle
         run: |
@@ -46,7 +47,7 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>0.0.13</string>
+              <string>0.0.14</string>
               <key>LSUIElement</key>
               <true/>
           </dict>
