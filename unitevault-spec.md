@@ -21,9 +21,10 @@ Obsidian Vault（Markdownファイル群）を Mac / iPhone 間で安全に利�
 | 競合検出・履歴管理 | 独自の「デバイス別diffログ」＋ 3-way merge（`git merge-file`を部品として利用） |
 | Google Drive への転送 | rclone による一方向ミラー（`rclone sync`） |
 | Google Drive 認証 | rclone の OAuth ブラウザ連携（APIキー手動発行不要） |
+| 依存ツールの自動セットアップ | Git（brew / xcode-select / winget / インストーラー自動起動）および rclone（ユーザー設定領域 `~/.unitevault/bin/` へ自動取得）の全自動検知・インストール |
 | 処理実装言語 | Go（単一の静的バイナリ / macOS `.app` バンドルにクロスコンパイルし、Mac/Windowsにランタイム不要で配布するため） |
 | マージ処理・Drive転送の実行主体 | 「プライマリノード」役を1台に固定する方式を基本とする（1.4節参照） |
-| 動作形態 | **メニューバー（システムトレイ）常駐GUIアプリ** または CLIバッチ。`config.json`の指定間隔（デフォルト120秒）で自動ループ実行。「Sync Now」ボタンでの手動同期も可能 |
+| 動作形態・GUI | **高コントラスト常駐アイコン対応 メニューバー/システムトレイGUI**。設定要約確認・リモート検証（`rclone listremotes`）・対話的ウィザード（Vault・Remote・Target Path）対応 |
 | macOS配布形式 | **`UniteVault.app` バンドル**（.app.zip）および CLI単一バイナリ。アドホック署名付き |
 | iPhone側の追加インストール | なし（iCloud同期のみで完結） |
 
@@ -264,23 +265,24 @@ Windows環境のエディタや `core.autocrlf` 設定により、内容が同�
 - **パス区切り文字**：Go標準の `path/filepath` パッケージを使い、OSごとの `/` と `\` の差異を吸収する。
 - **ファイル名の大小文字**：Windows/macOSの標準ファイルシステムは大文字小文字を区別しない設定が一般的なため、大文字小文字のみが異なる同名ファイルを作らないよう運用上の注意を促す（自動検出は任意）。
 
-#### 3.6.4 各OSで必要なインストール要件
+#### 3.6.4 各OSで必要なインストール要件と自動セットアップ
+
+UniteVault は事前チェック機能（Preflight Checks）を備えており、以下のツールが未インストールの場合は起動時・設定時に自動ダウンロード・自動インストール処理をトリガーする。
 
 **Mac側：**
-| 項目 | 用途 |
-|---|---|
-| Git（Xcode Command Line Tools または Homebrew） | `git merge-file` コマンドの利用 |
-| rclone（macOS版バイナリ） | Google Driveへのミラー転送 |
-| 同期エンジン（Go製、Mac向けにビルドした単一バイナリ） | 追加ランタイム不要。実行ファイルを配置するだけでよい |
+| 項目 | 用途 | 自動インストール機能 |
+|---|---|---|
+| Git | `git merge-file` コマンドの利用 | 未検出時、Homebrew (`brew install git`) または Xcode Command Line Tools のシステムダイアログ (`xcode-select --install`) を自動起動 |
+| rclone | Google Driveへのミラー転送 | 未検出時、ユーザー設定領域 (`~/.unitevault/bin/rclone`) へ公式最新バイナリを自動取得・解凍配置 |
+| 同期エンジン (`UniteVault.app`) | 高コントラスト常駐メニューバーGUI | 単一バンドル。アドホック署名済み |
 
 **Windows側：**
-| 項目 | 用途 |
-|---|---|
-| Git for Windows | `git merge-file` コマンドの利用（インストール時にPATHへの追加が必要） |
-| rclone（Windows版バイナリ） | Google Driveへのミラー転送（macOS版と設定手順は同じ） |
-| 同期エンジン（Go製、Windows向けにクロスコンパイルした単一exe） | 追加ランタイム不要。実行ファイルを配置するだけでよい |
-| iCloud for Windows | Apple公式アプリ。File Explorerと統合され、Mac同様のオンデマンドダウンロード機構を持つ（`.git`同様、高頻度書き込みファイルとの相性には注意） |
-| タスクスケジューラでのジョブ登録 | cron/launchd相当の定期実行 |
+| 項目 | 用途 | 自動インストール機能 |
+|---|---|---|
+| Git for Windows | `git merge-file` コマンドの利用 | 未検出時、`winget install --id Git.Git` を試行し、不可の場合は公式 `Git-Installer.exe` を一時フォルダへ自動取得・起動 |
+| rclone | Google Driveへのミラー転送 | 未検出時、ユーザー設定領域 (`%APPDATA%\unitevault\bin\rclone.exe`) へ公式最新バイナリを自動取得・解凍配置 |
+| 同期エンジン (`UniteVault.exe`) | システムトレイ常駐GUI | ZIP形式ポータブル版（`UniteVault-windows-amd64.zip`）で配布 |
+| iCloud for Windows | iPhoneとのiCloud Drive同期 | 初期設定時にインストール確認および Appleサポート／Microsoft Store 案内リンクを提示 |
 
 #### 3.6.5 実装言語としてGoを採用する理由
 - 単一の静的バイナリにクロスコンパイルできるため、Mac/Windowsとも「実行ファイルを置くだけ」で動き、Python等のようにランタイムやパッケージ管理（pip等）の整備が不要。
