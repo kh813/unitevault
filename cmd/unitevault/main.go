@@ -6,14 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"runtime"
-	"strconv"
 	"syscall"
 	"time"
 
 	"fyne.io/systray"
+	"github.com/sqweek/dialog"
 	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/drive"
@@ -178,85 +177,46 @@ func startDaemonLoop(ctx context.Context, cfgMgr *config.ConfigManager, cfg *con
 
 func openSettingsGUI(cfgMgr *config.ConfigManager) {
 	cfg, _ := cfgMgr.LoadConfig()
-	currentVault := ""
 	currentRemote := "gdrive"
 	currentPath := "VaultBackup"
-	currentInterval := "120"
 
 	if cfg != nil {
-		currentVault = cfg.VaultPath
 		if cfg.RcloneRemote != "" {
 			currentRemote = cfg.RcloneRemote
 		}
 		if cfg.RclonePath != "" {
 			currentPath = cfg.RclonePath
 		}
-		if cfg.IntervalSeconds > 0 {
-			currentInterval = strconv.Itoa(cfg.IntervalSeconds)
-		}
 	}
 
-	if runtime.GOOS == "darwin" {
-		script := fmt.Sprintf(`
-		set vaultPath to text returned of (display dialog "Enter Obsidian Vault Directory Path:" default answer "%s" buttons {"Cancel", "Browse...", "Save"} default button "Save")
-		`, currentVault)
-
-		// Simple AppleScript GUI prompt for macOS
-		out, err := exec.Command("osascript", "-e", fmt.Sprintf(`
-		set chosenFolder to ""
-		try
-			set folderChoice to choose folder with prompt "Select Obsidian Vault Directory:"
-			set chosenFolder to POSIX path of folderChoice
-		end try
-		if chosenFolder is not "" then
-			set remoteName to text returned of (display dialog "rclone Remote Name:" default answer "%s" buttons {"Cancel", "OK"} default button "OK")
-			set remotePath to text returned of (display dialog "Remote Backup Folder:" default answer "%s" buttons {"Cancel", "OK"} default button "OK")
-			return chosenFolder & "::" & remoteName & "::" & remotePath
-		end if
-		`, currentRemote, currentPath)).Output()
-
-		if err == nil {
-			result := string(out)
-			var vPath, rRemote, rPath string
-			fmt.Sscanf(result, "%s::%s::%s", &vPath, &rRemote, &rPath)
-			if vPath != "" {
-				if rRemote == "" {
-					rRemote = "gdrive"
-				}
-				if rPath == "" {
-					rPath = "VaultBackup"
-				}
-				intervalInt, _ := strconv.Atoi(currentInterval)
-				if intervalInt <= 0 {
-					intervalInt = 120
-				}
-				newCfg := &config.Config{
-					VaultPath:       vPath,
-					RcloneRemote:    rRemote,
-					RclonePath:      rPath,
-					IntervalSeconds: intervalInt,
-				}
-				_ = cfgMgr.SaveConfig(newCfg)
-
-				// Initialize node
-				hostname, _ := os.Hostname()
-				client := drive.NewClient("")
-				bootstrapper := bootstrap.NewBootstrapper(cfgMgr, client)
-				remoteTarget := fmt.Sprintf("%s:%s", rRemote, rPath)
-				_, _ = bootstrapper.InitializeNode(context.Background(), vPath, remoteTarget, hostname)
-			}
-		}
-		_ = script
+	vPath, err := dialog.Directory().Title("Select Obsidian Vault Directory").Browse()
+	if err != nil || vPath == "" {
+		return
 	}
+
+	rRemote := currentRemote
+	rPath := currentPath
+
+	newCfg := &config.Config{
+		VaultPath:       vPath,
+		RcloneRemote:    rRemote,
+		RclonePath:      rPath,
+		IntervalSeconds: 120,
+	}
+	_ = cfgMgr.SaveConfig(newCfg)
+
+	// Initialize node
+	hostname, _ := os.Hostname()
+	client := drive.NewClient("")
+	bootstrapper := bootstrap.NewBootstrapper(cfgMgr, client)
+	remoteTarget := fmt.Sprintf("%s:%s", rRemote, rPath)
+	_, _ = bootstrapper.InitializeNode(context.Background(), vPath, remoteTarget, hostname)
+
+	dialog.Message("UniteVault has been successfully configured and initialized!\n\nVault: %s\nTarget: %s", vPath, remoteTarget).Title("UniteVault Initialized").Info()
 }
 
 func confirmDialog(title, message string) bool {
-	if runtime.GOOS == "darwin" {
-		cmd := fmt.Sprintf(`display dialog "%s" with title "%s" buttons {"Cancel", "OK"} default button "OK"`, message, title)
-		err := exec.Command("osascript", "-e", cmd).Run()
-		return err == nil
-	}
-	return true
+	return dialog.Message("%s", message).Title(title).YesNo()
 }
 
 func onTrayExit() {

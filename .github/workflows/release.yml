@@ -45,7 +45,7 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>0.0.4</string>
+              <string>0.0.5</string>
               <key>LSUIElement</key>
               <true/>
           </dict>
@@ -56,7 +56,7 @@ jobs:
 
       - name: Build Windows binary
         run: |
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o dist/unitevault-windows-amd64.exe ./cmd/unitevault
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o dist/unitevault-windows-amd64.exe ./cmd/unitevault
 
       - name: Release artifacts
         uses: softprops/action-gh-release@v2
