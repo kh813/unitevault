@@ -143,111 +143,36 @@ func PromptSettingsWindow(title string, current SettingsFormData) (SettingsFormD
 
 	switch runtime.GOOS {
 	case "darwin":
-		// Native macOS window with multiple input fields, browse button, and Save/Cancel buttons using AppleScript AppKit Cocoa dialog
-		script := fmt.Sprintf(`
-		use framework "AppKit"
-		use scripting additions
+		// Multi-input form dialog for macOS using native AppleScript
+		script := fmt.Sprintf(`tell application "System Events"
+	activate
+	set currentVault to %q
+	set currentRemote to %q
+	set currentPath to %q
+	set currentInterval to %q
 
-		on run
-			set mainApp to current application
-			mainApp's NSApplication's sharedApplication()'s setActivationPolicy:(mainApp's NSApplicationActivationPolicyRegular)
-			mainApp's NSApp's activateIgnoringOtherApps:true
-
-			set window to mainApp's NSWindow's alloc()'s initWithContentRect:{{0, 0, 480, 290}} styleMask:15 backing:2 defer:false
-			window's setTitle:%q
-			window's center()
-			window's makeKeyAndOrderFront:me
-			window's orderFrontRegardless()
-
-			set contentView to window's contentView()
-
-			-- Vault Path Label & Field
-			set lbl1 to mainApp's NSTextField's labelWithString:"Obsidian Vault Directory Path:"
-			lbl1's setFrame:{{20, 240, 300, 20}}
-			contentView's addSubview:lbl1
-
-			set txtVault to mainApp's NSTextField's alloc()'s initWithFrame:{{20, 215, 330, 24}}
-			txtVault's setStringValue:%q
-			contentView's addSubview:txtVault
-
-			set btnBrowse to mainApp's NSButton's alloc()'s initWithFrame:{{360, 214, 100, 25}}
-			btnBrowse's setTitle:"Browse..."
-			btnBrowse's setBezelStyle:(mainApp's NSBezelStyleRounded)
-			contentView's addSubview:btnBrowse
-
-			-- Remote Name
-			set lbl2 to mainApp's NSTextField's labelWithString:"rclone Remote Name:"
-			lbl2's setFrame:{{20, 185, 300, 20}}
-			contentView's addSubview:lbl2
-
-			set txtRemote to mainApp's NSTextField's alloc()'s initWithFrame:{{20, 160, 440, 24}}
-			txtRemote's setStringValue:%q
-			contentView's addSubview:txtRemote
-
-			-- Remote Path
-			set lbl3 to mainApp's NSTextField's labelWithString:"Google Drive Target Folder Path:"
-			lbl3's setFrame:{{20, 130, 300, 20}}
-			contentView's addSubview:lbl3
-
-			set txtPath to mainApp's NSTextField's alloc()'s initWithFrame:{{20, 105, 440, 24}}
-			txtPath's setStringValue:%q
-			contentView's addSubview:txtPath
-
-			-- Sync Interval
-			set lbl4 to mainApp's NSTextField's labelWithString:"Sync Interval (seconds):"
-			lbl4's setFrame:{{20, 75, 180, 20}}
-			contentView's addSubview:lbl4
-
-			set txtInterval to mainApp's NSTextField's alloc()'s initWithFrame:{{200, 72, 100, 24}}
-			txtInterval's setStringValue:%q
-			contentView's addSubview:txtInterval
-
-			-- Save & Cancel Buttons
-			set btnSave to mainApp's NSButton's alloc()'s initWithFrame:{{360, 20, 100, 32}}
-			btnSave's setTitle:"Save"
-			btnSave's setBezelStyle:(mainApp's NSBezelStyleRounded)
-			contentView's addSubview:btnSave
-
-			set btnCancel to mainApp's NSButton's alloc()'s initWithFrame:{{250, 20, 100, 32}}
-			btnCancel's setTitle:"Cancel"
-			btnCancel's setBezelStyle:(mainApp's NSBezelStyleRounded)
-			contentView's addSubview:btnCancel
-
-			-- Event loop for Cocoa window
-			set userChoice to "CANCEL"
-			repeat
-				set theEvent to mainApp's NSApp's nextEventMatchingMask:(mainApp's NSEventMaskAny) untilDate:(mainApp's NSDate's distantFuture()) inMode:(mainApp's NSDefaultRunLoopMode) dequeue:true
-				if theEvent is not missing value then
-					mainApp's NSApp's sendEvent:theEvent
-					if theEvent's type() = (mainApp's NSEventTypeLeftMouseUp) then
-						set targetView to theEvent's window()'s contentView()'s hitTest:(theEvent's locationInWindow())
-						if targetView is btnBrowse then
-							set openPanel to mainApp's NSOpenPanel's openPanel()
-							openPanel's setCanChooseFiles:false
-							openPanel's setCanChooseDirectories:true
-							openPanel's setAllowsMultipleSelection:false
-							if openPanel's runModal() = 1 then
-								set selectedURL to openPanel's |URL|()
-								txtVault's setStringValue:(selectedURL's |path|())
-							end if
-						else if targetView is btnSave then
-							set userChoice to "SAVE"
-							exit repeat
-						else if targetView is btnCancel then
-							set userChoice to "CANCEL"
-							exit repeat
-						end if
-					end if
-				end if
-			end repeat
-
-			window's close()
-			if userChoice is "SAVE" then
-				return (txtVault's stringValue() as string) & "::" & (txtRemote's stringValue() as string) & "::" & (txtPath's stringValue() as string) & "::" & (txtInterval's stringValue() as string)
+	try
+		set res to display dialog "Configure UniteVault Settings:\n\nEnter Obsidian Vault Directory Path, rclone Remote Name, Backup Folder Path, and Sync Interval (seconds) separated by commas:" default answer (currentVault & ", " & currentRemote & ", " & currentPath & ", " & currentInterval) buttons {"Cancel", "Browse...", "Save"} default button "Save" with title %q
+		
+		set btn to button returned of res
+		if btn is "Cancel" then
+			return "CANCELLED"
+		else if btn is "Browse..." then
+			set folderChoice to choose folder with prompt "Select Obsidian Vault Directory:"
+			set chosenFolder to POSIX path of folderChoice
+			set res2 to display dialog "Configure UniteVault Settings:\n\nObsidian Vault Directory Path set to:\n" & chosenFolder & "\n\nEnter rclone Remote Name, Backup Folder Path, and Sync Interval (seconds) separated by commas:" default answer (currentRemote & ", " & currentPath & ", " & currentInterval) buttons {"Cancel", "Save"} default button "Save" with title %q
+			if button returned of res2 is "Save" then
+				return chosenFolder & "::" & text returned of res2
 			else
 				return "CANCELLED"
 			end if
-		end run`, title, current.VaultPath, current.RcloneRemote, current.RclonePath, fmt.Sprintf("%d", current.IntervalSeconds))
+		else
+			return text returned of res
+		end if
+	on error
+		return "CANCELLED"
+	end try
+end tell`, current.VaultPath, current.RcloneRemote, current.RclonePath, fmt.Sprintf("%d", current.IntervalSeconds), title, title)
 
 		cmd := exec.Command("osascript", "-e", script)
 		var out bytes.Buffer
@@ -260,20 +185,54 @@ func PromptSettingsWindow(title string, current SettingsFormData) (SettingsFormD
 			return current, false
 		}
 
-		parts := strings.Split(raw, "::")
-		if len(parts) >= 4 {
-			sec, _ := strconv.Atoi(strings.TrimSpace(parts[3]))
-			if sec <= 0 {
-				sec = 120
+		var vPath, rRemote, rPath string
+		var sec int = current.IntervalSeconds
+
+		if strings.Contains(raw, "::") {
+			parts := strings.Split(raw, "::")
+			vPath = strings.TrimSpace(parts[0])
+			rest := strings.Split(parts[1], ",")
+			if len(rest) >= 1 && strings.TrimSpace(rest[0]) != "" {
+				rRemote = strings.TrimSpace(rest[0])
 			}
-			return SettingsFormData{
-				VaultPath:       strings.TrimSpace(parts[0]),
-				RcloneRemote:    strings.TrimSpace(parts[1]),
-				RclonePath:      strings.TrimSpace(parts[2]),
-				IntervalSeconds: sec,
-			}, true
+			if len(rest) >= 2 && strings.TrimSpace(rest[1]) != "" {
+				rPath = strings.TrimSpace(rest[1])
+			}
+			if len(rest) >= 3 {
+				sec, _ = strconv.Atoi(strings.TrimSpace(rest[2]))
+			}
+		} else {
+			parts := strings.Split(raw, ",")
+			if len(parts) >= 1 {
+				vPath = strings.TrimSpace(parts[0])
+			}
+			if len(parts) >= 2 {
+				rRemote = strings.TrimSpace(parts[1])
+			}
+			if len(parts) >= 3 {
+				rPath = strings.TrimSpace(parts[2])
+			}
+			if len(parts) >= 4 {
+				sec, _ = strconv.Atoi(strings.TrimSpace(parts[3]))
+			}
 		}
-		return current, false
+
+		if rRemote == "" {
+			rRemote = "gdrive"
+		}
+		if rPath == "" {
+			rPath = "VaultBackup"
+		}
+		if sec <= 0 {
+			sec = 120
+		}
+
+		return SettingsFormData{
+			VaultPath:       vPath,
+			RcloneRemote:    rRemote,
+			RclonePath:      rPath,
+			IntervalSeconds: sec,
+		}, true
 
 	case "windows":
 		psCmd := fmt.Sprintf(`
