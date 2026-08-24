@@ -283,8 +283,10 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 		rRemote = "gdrive"
 	}
 
+	driveClient := drive.NewClient("")
+
 	// Check if rRemote is configured in rclone
-	if !client.IsRemoteConfigured(context.Background(), rRemote) {
+	if !driveClient.IsRemoteConfigured(context.Background(), rRemote) {
 		warnMsg := fmt.Sprintf("Notice: rclone remote '%s' is not configured on this computer yet.\n\nTo backup to Google Drive, please run 'rclone config' in your terminal or set up OAuth.\n\nWould you like to open the rclone Google Drive setup guide in your browser?", rRemote)
 		if confirmDialog("rclone Remote Setup Notice", warnMsg) {
 			_ = bootstrap.OpenURL(bootstrap.GetRcloneDriveGuideURL())
@@ -307,8 +309,7 @@ func openSettingsGUI(cfgMgr *config.ConfigManager) {
 
 	// Initialize node
 	hostname, _ := os.Hostname()
-	client := drive.NewClient("")
-	bootstrapper := bootstrap.NewBootstrapper(cfgMgr, client)
+	bootstrapper := bootstrap.NewBootstrapper(cfgMgr, driveClient)
 	remoteTarget := fmt.Sprintf("%s:%s", rRemote, rPath)
 	role, _ := bootstrapper.InitializeNode(context.Background(), vPath, remoteTarget, hostname)
 
