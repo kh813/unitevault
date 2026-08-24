@@ -92,35 +92,35 @@ func onTrayReady() {
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit UniteVault", "Quit application")
 
-	if !ensurePreflightChecks() {
-		mStatus.SetTitle("Status: Preflight Check Failed")
-		return
-	}
-
-	cfgMgr, err := config.NewConfigManager()
-	if err != nil {
-		mStatus.SetTitle("Status: Config Error")
-		return
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	cfg, err := cfgMgr.LoadConfig()
-	if err != nil || cfg.VaultPath == "" {
-		mStatus.SetTitle("Status: Not Initialized")
-		// Prompt user for settings automatically on startup if uninitialized
-		go openSettingsGUI(cfgMgr)
-	} else {
-		role, _ := cfgMgr.LoadRole()
-		if role != "" {
-			mStatus.SetTitle(fmt.Sprintf("Status: Active (%s)", role))
-		} else {
-			mStatus.SetTitle("Status: Active")
-		}
-		startDaemonLoop(ctx, cfgMgr, cfg, mStatus)
-	}
-
 	go func() {
+		if !ensurePreflightChecks() {
+			mStatus.SetTitle("Status: Preflight Check Failed")
+			return
+		}
+
+		cfgMgr, err := config.NewConfigManager()
+		if err != nil {
+			mStatus.SetTitle("Status: Config Error")
+			return
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		cfg, err := cfgMgr.LoadConfig()
+		if err != nil || cfg.VaultPath == "" {
+			mStatus.SetTitle("Status: Not Initialized")
+			// Prompt user for settings automatically on startup if uninitialized
+			openSettingsGUI(cfgMgr)
+		} else {
+			role, _ := cfgMgr.LoadRole()
+			if role != "" {
+				mStatus.SetTitle(fmt.Sprintf("Status: Active (%s)", role))
+			} else {
+				mStatus.SetTitle("Status: Active")
+			}
+			startDaemonLoop(ctx, cfgMgr, cfg, mStatus)
+		}
+
 		for {
 			select {
 			case <-mSyncNow.ClickedCh:

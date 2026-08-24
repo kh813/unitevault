@@ -29,6 +29,7 @@ jobs:
           mkdir -p "dist/UniteVault-mac-arm64.app/Contents/MacOS"
           mkdir -p "dist/UniteVault-mac-arm64.app/Contents/Resources"
           cp dist/unitevault-binary-arm64 "dist/UniteVault-mac-arm64.app/Contents/MacOS/UniteVault"
+          chmod +x "dist/UniteVault-mac-arm64.app/Contents/MacOS/UniteVault"
           cp assets/AppIcon.icns "dist/UniteVault-mac-arm64.app/Contents/Resources/AppIcon.icns"
           cat <<EOF > "dist/UniteVault-mac-arm64.app/Contents/Info.plist"
           <?xml version="1.0" encoding="UTF-8"?>
@@ -46,7 +47,7 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>0.0.17</string>
+              <string>0.0.18</string>
               <key>LSUIElement</key>
               <true/>
           </dict>
