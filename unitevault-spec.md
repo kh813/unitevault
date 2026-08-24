@@ -188,11 +188,15 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
   - `config.json` が未存在または未設定（VaultPath未指定）の場合：起動時に自動的に **Settings（設定）ダイアログ** を開き、必要な設定入力を促す。
   - `config.json` が設定済みの場合：ダイアログ等を表示せず、静かにメニューバー（システムトレイ）へ常駐し、設定された間隔でバックグラウンド同期を開始する。
 - **Settings（設定画面）機能**:
-  - **Vault Directory**: フォルダ選択ダイアログ（`Browse...`）によるVaultパス指定
-  - **rclone Remote / Path**: リモート名（デフォルト `gdrive`）と転送先パス（デフォルト `VaultBackup`）
-  - **Sync Interval**: 同期間隔（秒単位）
-  - **Save & Start Sync**: 設定を保存し、自動的に `init` 処理（初回セットアップ・役割判定）を実行して同期を開始
+  - **単一統合 GUI ウィンドウ**: ステップごとの個別プロンプトではなく、1つのウィンドウ内に「Obsidian Vault Path」「rclone Remote Name」「Google Drive Target Folder Path」「Sync Interval (seconds)」の全項目をインライン表示・編集可能なフォーム形式とする。
+  - **Vault Directory Path**: テキスト入力 ＋ `Browse...` ボタン（ネイティブフォルダ選択ダイアログ）
+  - **rclone Remote Name / Target Path**: リモート名（デフォルト `gdrive`）と転送先パス（デフォルト `VaultBackup`）
+  - **Sync Interval**: 同期間隔（秒単位、デフォルト `120` 秒）
+  - **Save ボタン**: 全設定を一括保存し、自動的に `init` 処理（初回セットアップ・役割判定）を実行して同期ループへ反映する
+  - **Cancel ボタン**: 変更を行わずに設定画面を閉じる
   - **Reset Configuration**: 設定およびローカルの役割情報をクリアし、初期設定状態へ戻す（誤設定時やVault再設定時に使用）
+- **ビジュアルデザイン・アイコン仕様**:
+  - アプリアイコンおよびメニューバー／タスクレイアイコンは、**純白ベース**の背景に **Obsidian テーマカラー（パープル #7C3AED）** のアクセント図形を配置し、小さな常駐アイコンサイズでも高い視認性を確保する。
 - **コンフリクト通知**:
   - GUI常駐時：メニューバーのステータス表示が `Status: Conflict` に変化し、クリックで解消用対話UIまたは選択プロンプトを提供。
   - CLIモード時：Terminal / PowerShell への標準出力およびインタラクティブ対話。
