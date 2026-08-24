@@ -156,6 +156,8 @@ func PromptSettingsWindow(title string, current SettingsFormData) (SettingsFormD
 			set window to mainApp's NSWindow's alloc()'s initWithContentRect:{{0, 0, 480, 290}} styleMask:15 backing:2 defer:false
 			window's setTitle:%q
 			window's center()
+			window's makeKeyAndOrderFront:me
+			window's orderFrontRegardless()
 
 			set contentView to window's contentView()
 
