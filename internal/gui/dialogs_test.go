@@ -1,23 +1,76 @@
 package gui
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 )
 
-// TestPickFolder_DoesNotPanic guards against a regression where clicking
-// "Select Folder..." crashed the whole app: PickFolder called
-// FileDialog.Resize() before FileDialog.Show(), and Resize() -> MinSize()
-// dereferences the dialog's internal window without a nil check, which is
-// only created inside Show(). Reproduced via `go run ./cmd/unitevault gui`
-// -> Settings -> Select Folder with a signal SIGSEGV in
-// dialog.(*FileDialog).MinSize.
-func TestPickFolder_DoesNotPanic(t *testing.T) {
-	newTestWindow()
+// stubPickFolder replaces pickFolderFunc for the duration of the calling
+// test so PickFolder never actually spawns a real OS folder dialog (which
+// would hang a headless test run waiting for a user that isn't there).
+func stubPickFolder(t *testing.T, path string, err error) {
+	t.Helper()
+	orig := pickFolderFunc
+	pickFolderFunc = func(string) (string, error) { return path, err }
+	t.Cleanup(func() { pickFolderFunc = orig })
+}
 
-	PickFolder("Select Obsidian Vault Directory", func(path string, ok bool) {})
+// TestPickFolder_ReturnsChosenPath guards PickFolder's contract with its
+// caller: it must report the platform folder picker's result via onPicked
+// with ok=true, running on the Fyne main thread. PickFolder itself no
+// longer touches Fyne's own dialog.FileDialog at all (see pickFolderFunc) -
+// it shells out to the OS's native folder picker instead, since Fyne's
+// built-in one looked visibly out of place next to real OS dialogs.
+func TestPickFolder_ReturnsChosenPath(t *testing.T) {
+	newTestWindow()
+	stubPickFolder(t, "/Users/me/Vaults/MyVault", nil)
+
+	done := make(chan struct{})
+	var gotPath string
+	var gotOK bool
+	PickFolder("Select Your Obsidian Vault Folder", func(path string, ok bool) {
+		gotPath, gotOK = path, ok
+		close(done)
+	})
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for PickFolder's callback")
+	}
+
+	if !gotOK || gotPath != "/Users/me/Vaults/MyVault" {
+		t.Errorf("expected ok=true path=%q, got ok=%v path=%q", "/Users/me/Vaults/MyVault", gotOK, gotPath)
+	}
+}
+
+// TestPickFolder_ReportsCancellation guards that dismissing the native
+// dialog (which reports an error, e.g. zenity.ErrCanceled) surfaces as
+// ok=false rather than a panic or a phantom path.
+func TestPickFolder_ReportsCancellation(t *testing.T) {
+	newTestWindow()
+	stubPickFolder(t, "", errors.New("dialog canceled"))
+
+	done := make(chan struct{})
+	var gotOK bool
+	PickFolder("Select Your Obsidian Vault Folder", func(path string, ok bool) {
+		gotOK = ok
+		close(done)
+	})
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for PickFolder's callback")
+	}
+
+	if gotOK {
+		t.Error("expected ok=false when the native dialog reports an error/cancellation")
+	}
 }
 
 // TestConfirmDanger_UsesDangerImportanceOnConfirmButton guards the split

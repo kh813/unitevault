@@ -203,7 +203,7 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
     - rclone インストール状態 (`rclone status: Installed / Not Found`)
     - デバイス役割 (`Device Role: Primary / Secondary`)
   - **[ Obsidian Vault セクション ]**:
-    - **Vault Directory Path**: テキスト入力 ＋ `[ Select Folder ]` ボタン（フォルダ選択ダイアログ）。iPhone/Windows間の同期はiCloudに委任するため（1.3節）、このセクションに同期間隔などの設定項目は置かない。
+    - **Vault Folder Location**: テキスト入力 ＋ `[ Select Folder... ]` ボタン。ラベルや案内文には「Directory」「Path」等の専門用語を避け、一般ユーザーにもわかりやすい「Folder」表記に統一する。`[ Select Folder... ]` は実行中のOSが提供する標準のフォルダ選択ダイアログ（macOS: Cocoaのフォルダ選択パネル、Windows: `IFileDialog`）を表示する。SettingsウィンドウはFyne製だが、フォルダ選択だけはFyne独自のダイアログ（見た目がOS標準と異なり違和感を与える）ではなく、OS標準の見た目のダイアログを使う。iPhone/Windows間の同期はiCloudに委任するため（1.3節）、このセクションに同期間隔などの設定項目は置かない。
   - **[ rclone セクション ]**: Google Driveへのバックアップに関する設定は、それが有効になる（rcloneの設定が完了する）までは意味を持たないため、すべてこのセクションにまとめる。
     - **Remote Name**: 設定されているリモート名（デフォルト `ObsidianVault`）
     - **Remote Status**: rcloneリモートの設定状態 (`Configured` / `Not Configured` )
@@ -217,7 +217,7 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
     - **Cancel ボタン**: 変更を行わずに設定画面を閉じる
     - **Reset Configuration ボタン**: 設定およびローカルの役割情報をクリアし、初期設定状態へ戻す（誤設定時やVault再設定時に使用）。**Settings画面内のボタンとしてのみ提供し、メニューバー／タスクトレイのメニュー項目には配置しない**（誤操作防止のため、Settings画面を開いた上で明示的に実行する動線に統一する）。
     - **ボタンの色分け方針**: 常時画面に表示されているボタン（Reset Configuration・Remove Remote Configuration...）は、それ自体は破壊的操作を実行しない（確認ダイアログを開くだけ）ため、警告色（赤）ではなく落ち着いた配色にする。赤色は、実際にその操作を確定させる確認ダイアログ側のボタン（例:「Are you sure?」の「Yes」）にのみ使う。画面内で最も視覚的に目立たせるのは **Save Settings ボタン**（強調色）とする。
-    - **未保存の変更インジケーター**: Vault Directory Path・Remote Name・Google Drive Target Folder Path・Sync Intervalのいずれかが、Settings画面を開いた（または最後に再構築した）時点の値と異なる場合、ボタン行に「● Unsaved changes」という強調表示のテキストを表示する。値を元に戻せば表示は消える。Save Settingsボタン自体は常にクリック可能な状態を維持し、このインジケーターの有無によって無効化はしない（保存前のバリデーションはクリック時に行う）。
+    - **未保存の変更インジケーター**: Vault Folder Location・Remote Name・Google Drive Target Folder Path・Sync Intervalのいずれかが、Settings画面を開いた（または最後に再構築した）時点の値と異なる場合、ボタン行に「● Unsaved changes」という強調表示のテキストを表示する。値を元に戻せば表示は消える。Save Settingsボタン自体は常にクリック可能な状態を維持し、このインジケーターの有無によって無効化はしない（保存前のバリデーションはクリック時に行う）。
 - **ビジュアルデザイン・アイコン仕様**:
   - モチーフは「循環する2本の矢印」（端末間／Google Drive間でのデータ同期を想起させる図形）。単なる幾何学模様ではなく、同期という機能を直接連想できる図柄を採用する。
   - **アプリアイコン**（Dock・Finder・タスクバー用、`assets/AppIcon.icns`）: 視認性を優先し、**Obsidian テーマカラー（パープル #7C3AED）** の角丸背景に白色の同期矢印を配置する。

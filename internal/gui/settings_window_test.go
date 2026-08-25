@@ -69,6 +69,23 @@ func newTestWindow() {
 	mainWindow = test.NewWindow(nil)
 }
 
+// hasFormItemText reports whether any widget.Form in the content tree has a
+// field labeled exactly text (widget.FormItem.Text isn't a CanvasObject, so
+// walkObjects can't see it - this walks the *widget.Form nodes directly).
+func hasFormItemText(root fyne.CanvasObject, text string) bool {
+	found := false
+	walkObjects(root, func(o fyne.CanvasObject) {
+		if f, ok := o.(*widget.Form); ok {
+			for _, item := range f.Items {
+				if item.Text == text {
+					found = true
+				}
+			}
+		}
+	})
+	return found
+}
+
 func TestBuildSettingsContent_FillsDefaults(t *testing.T) {
 	newTestWindow()
 
@@ -93,6 +110,23 @@ func TestBuildSettingsContent_FillsDefaults(t *testing.T) {
 	intervalEntry := findEntry(t, content, "120")
 	if intervalEntry.Text != "120" {
 		t.Errorf("expected default interval '120', got %q", intervalEntry.Text)
+	}
+}
+
+// TestBuildSettingsContent_VaultFieldUsesPlainLanguage guards against
+// reintroducing developer jargon ("Directory", "Path") in the one field
+// non-technical users see first - it should read "Vault Folder Location",
+// not "Vault Directory Path".
+func TestBuildSettingsContent_VaultFieldUsesPlainLanguage(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{}, SettingsHandlers{})
+
+	if !hasFormItemText(content, "Vault Folder Location") {
+		t.Error("expected the Vault field to be labeled 'Vault Folder Location'")
+	}
+	if hasFormItemText(content, "Vault Directory Path") {
+		t.Error("expected the old 'Vault Directory Path' label to be gone")
 	}
 }
 

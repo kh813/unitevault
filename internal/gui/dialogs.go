@@ -5,6 +5,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+	"github.com/ncruces/zenity"
 )
 
 // Info shows a simple informational/alert dialog anchored to the shared window.
@@ -107,29 +108,32 @@ func InstallReminder(title, message string, onClose func(dontShowAgain bool)) {
 	})
 }
 
+// pickFolderFunc opens the platform's own folder picker (Cocoa panel on
+// macOS via AppleScript's "choose folder", the native IFileDialog on
+// Windows) and blocks until the user responds. It's a var, not a direct call
+// to zenity.SelectFile, purely so tests can stub it out instead of actually
+// spawning a real OS dialog. Fyne's own dialog.NewFolderOpen looks
+// noticeably out of place next to the OS's real dialogs, which is why this
+// doesn't use it.
+var pickFolderFunc = func(title string) (string, error) {
+	return zenity.SelectFile(zenity.Title(title), zenity.Directory())
+}
+
 // PickFolder opens a native folder selection dialog. onPicked receives the
 // chosen absolute path and ok=true, or ok=false if the user cancelled. Safe
 // to call from any goroutine; onPicked always runs on the Fyne main thread.
 func PickFolder(title string, onPicked func(path string, ok bool)) {
 	fyne.Do(func() {
 		ensureWindowVisible()
-		fd := dialog.NewFolderOpen(func(uri fyne.ListableURI, err error) {
-			if err != nil || uri == nil {
-				if onPicked != nil {
-					onPicked("", false)
-				}
-				return
-			}
-			if onPicked != nil {
-				onPicked(uri.Path(), true)
-			}
-		}, mainWindow)
-		// Show() must come first: it lazily creates the dialog's internal
-		// window, and Resize() -> MinSize() dereferences that window
-		// without a nil check, so calling Resize() before Show() segfaults.
-		fd.Show()
-		fd.Resize(fyne.NewSize(760, 500))
 	})
+	go func() {
+		path, err := pickFolderFunc(title)
+		fyne.Do(func() {
+			if onPicked != nil {
+				onPicked(path, err == nil)
+			}
+		})
+	}()
 }
 
 // RunWithProgress shows an indeterminate progress dialog with the given

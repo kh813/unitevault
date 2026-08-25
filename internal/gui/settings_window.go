@@ -111,7 +111,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// --- Obsidian Vault section ---
 	vaultEntry := widget.NewEntry()
 	vaultEntry.SetText(data.VaultPath)
-	vaultEntry.SetPlaceHolder("Path to your Obsidian Vault folder")
+	vaultEntry.SetPlaceHolder("Your Obsidian Vault folder")
 
 	// --- rclone section ---
 	// Everything about the Google Drive backup lives here, not in the
@@ -147,7 +147,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	}
 
 	selectFolderBtn := widget.NewButton("Select Folder...", func() {
-		PickFolder("Select Obsidian Vault Directory", func(path string, ok bool) {
+		PickFolder("Select Your Obsidian Vault Folder", func(path string, ok bool) {
 			if !ok {
 				return
 			}
@@ -162,7 +162,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	vaultRow := container.NewBorder(nil, nil, nil, selectFolderBtn, vaultEntry)
 
 	vaultCard := widget.NewCard("Obsidian Vault", "", widget.NewForm(
-		widget.NewFormItem("Vault Directory Path", vaultRow),
+		widget.NewFormItem("Vault Folder Location", vaultRow),
 	))
 
 	intervalEntry := widget.NewEntry()
