@@ -173,3 +173,68 @@ func TestInstallReminder_ChecksCheckboxState(t *testing.T) {
 		t.Error("expected dontShowAgain=true after checking the box before tapping OK")
 	}
 }
+
+// findOnlyDialogButton locates the single button in the overlay dialog -
+// used for dialogs (like Info) that only ever have one button, where
+// matching by label text is unreliable since Fyne localizes built-in
+// button labels like "OK" based on the environment's locale.
+func findOnlyDialogButton(t *testing.T) *widget.Button {
+	t.Helper()
+	overlays := mainWindow.Canvas().Overlays().List()
+	if len(overlays) == 0 {
+		t.Fatal("expected the dialog to be shown as an overlay")
+	}
+	var found *widget.Button
+	for _, o := range overlays {
+		for _, obj := range test.LaidOutObjects(o) {
+			if b, ok := obj.(*widget.Button); ok {
+				found = b
+			}
+		}
+	}
+	if found == nil {
+		t.Fatal("expected to find the dialog's button")
+	}
+	return found
+}
+
+// TestInfo_HidesWindowAgainIfItWasHidden guards the fix for a real reported
+// bug: triggering Info (e.g. "Check for Update..." -> "Up to Date") from the
+// tray menu while Settings was closed forced the shared window open just to
+// host the dialog, then left it sitting open (empty, or showing stale
+// leftover Settings content) after the user dismissed what looked like it
+// should've been a standalone dialog. The window must go back to hidden
+// once the dialog it was shown for closes.
+func TestInfo_HidesWindowAgainIfItWasHidden(t *testing.T) {
+	newTestWindow()
+	if windowVisible {
+		t.Fatal("expected the window to start hidden")
+	}
+
+	Info("Up to Date", "You're running the latest version.")
+
+	if !windowVisible {
+		t.Fatal("expected Info to show the window in order to host its dialog")
+	}
+
+	test.Tap(findOnlyDialogButton(t))
+
+	if windowVisible {
+		t.Error("expected the window to hide again once the dialog it was shown for closes")
+	}
+}
+
+// TestInfo_LeavesWindowOpenIfAlreadyVisible is the counterpart: if Settings
+// was already open before Info was called, dismissing the dialog must not
+// close a window the user opened on purpose.
+func TestInfo_LeavesWindowOpenIfAlreadyVisible(t *testing.T) {
+	newTestWindow()
+	windowVisible = true // simulate Settings already being open
+
+	Info("Up to Date", "You're running the latest version.")
+	test.Tap(findOnlyDialogButton(t))
+
+	if !windowVisible {
+		t.Error("expected the window to remain open since it was already open before Info was called")
+	}
+}

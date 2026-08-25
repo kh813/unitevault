@@ -8,12 +8,21 @@ import (
 	"github.com/ncruces/zenity"
 )
 
-// Info shows a simple informational/alert dialog anchored to the shared window.
-// Safe to call from any goroutine.
+// Info shows a simple informational/alert dialog anchored to the shared
+// window. If the window was hidden (e.g. this is triggered from the tray
+// menu with Settings closed), it's shown just long enough to host the
+// dialog and hidden again once the user dismisses it, so a tray-triggered
+// notification like "Check for Update..." reads as a standalone dialog
+// instead of leaving an empty (or stale leftover Settings) window sitting
+// open behind it. Safe to call from any goroutine.
 func Info(title, message string) {
 	fyne.Do(func() {
-		ensureWindowVisible()
-		dialog.ShowInformation(title, message, mainWindow)
+		wasHidden := ensureWindowVisible()
+		d := dialog.NewInformation(title, message, mainWindow)
+		if wasHidden {
+			d.SetOnClosed(hideWindowNow)
+		}
+		d.Show()
 	})
 }
 
@@ -36,13 +45,16 @@ func ConfirmDanger(title, message string, onResult func(confirmed bool)) {
 
 func showConfirm(title, message string, confirmImportance widget.Importance, onResult func(confirmed bool)) {
 	fyne.Do(func() {
-		ensureWindowVisible()
+		wasHidden := ensureWindowVisible()
 		d := dialog.NewConfirm(title, message, func(ok bool) {
 			if onResult != nil {
 				onResult(ok)
 			}
 		}, mainWindow)
 		d.SetConfirmImportance(confirmImportance)
+		if wasHidden {
+			d.SetOnClosed(hideWindowNow)
+		}
 		d.Show()
 	})
 }
@@ -53,7 +65,7 @@ func showConfirm(title, message string, confirmImportance widget.Importance, onR
 // call from any goroutine; onChoice always runs on the Fyne main thread.
 func Choice(title, message, btn1Text, btn2Text string, onChoice func(result int)) {
 	fyne.Do(func() {
-		ensureWindowVisible()
+		wasHidden := ensureWindowVisible()
 		result := 0
 		var d dialog.Dialog
 
@@ -77,6 +89,9 @@ func Choice(title, message, btn1Text, btn2Text string, onChoice func(result int)
 			if onChoice != nil {
 				onChoice(result)
 			}
+			if wasHidden {
+				hideWindowNow()
+			}
 		})
 		d.Show()
 	})
@@ -89,7 +104,7 @@ func Choice(title, message, btn1Text, btn2Text string, onChoice func(result int)
 // was pressed. Safe to call from any goroutine.
 func InstallReminder(title, message string, onClose func(dontShowAgain bool)) {
 	fyne.Do(func() {
-		ensureWindowVisible()
+		wasHidden := ensureWindowVisible()
 
 		msgLabel := widget.NewLabel(message)
 		msgLabel.Wrapping = fyne.TextWrapWord
@@ -102,6 +117,9 @@ func InstallReminder(title, message string, onClose func(dontShowAgain bool)) {
 		d.SetOnClosed(func() {
 			if onClose != nil {
 				onClose(check.Checked)
+			}
+			if wasHidden {
+				hideWindowNow()
 			}
 		})
 		d.Show()
@@ -123,12 +141,16 @@ var pickFolderFunc = func(title string) (string, error) {
 // chosen absolute path and ok=true, or ok=false if the user cancelled. Safe
 // to call from any goroutine; onPicked always runs on the Fyne main thread.
 func PickFolder(title string, onPicked func(path string, ok bool)) {
+	var wasHidden bool
 	fyne.Do(func() {
-		ensureWindowVisible()
+		wasHidden = ensureWindowVisible()
 	})
 	go func() {
 		path, err := pickFolderFunc(title)
 		fyne.Do(func() {
+			if wasHidden {
+				hideWindowNow()
+			}
 			if onPicked != nil {
 				onPicked(path, err == nil)
 			}
@@ -146,8 +168,9 @@ func PickFolder(title string, onPicked func(path string, ok bool)) {
 // dialog itself is marshalled onto the main thread and waited for.
 func RunWithProgress(title, message string, work func() error) error {
 	var prog *dialog.ProgressInfiniteDialog
+	var wasHidden bool
 	fyne.DoAndWait(func() {
-		ensureWindowVisible()
+		wasHidden = ensureWindowVisible()
 		prog = dialog.NewProgressInfinite(title, message, mainWindow)
 		prog.Show()
 	})
@@ -156,6 +179,9 @@ func RunWithProgress(title, message string, work func() error) error {
 
 	fyne.Do(func() {
 		prog.Hide()
+		if wasHidden {
+			hideWindowNow()
+		}
 	})
 
 	return err

@@ -93,6 +93,7 @@ func ShowSettingsWindow(data SettingsFormData, handlers SettingsHandlers) {
 		// own border/padding chrome around the content.
 		min := content.MinSize()
 		mainWindow.Resize(fyne.NewSize(min.Width+24, min.Height+24))
+		windowVisible = true
 		mainWindow.Show()
 		mainWindow.RequestFocus()
 	})
@@ -299,7 +300,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	saveBtn.Importance = widget.HighImportance
 
 	cancelBtn := widget.NewButton("Cancel", func() {
-		mainWindow.Hide()
+		hideWindowNow()
 	})
 
 	resetBtn := widget.NewButton("Reset Configuration", func() {

@@ -71,6 +71,9 @@ func findEntry(t *testing.T, root fyne.CanvasObject, placeholderOrText string) *
 func newTestWindow() {
 	test.NewApp()
 	mainWindow = test.NewWindow(nil)
+	// Matches real startup: the shared window starts hidden until something
+	// explicitly shows it (see ensureWindowVisible's wasHidden tracking).
+	windowVisible = false
 }
 
 // hasFormItemText reports whether any widget.Form in the content tree has a

@@ -29,6 +29,12 @@ const AppID = "com.unitevault.app"
 var (
 	fyneApp    fyne.App
 	mainWindow fyne.Window
+	// windowVisible mirrors mainWindow's shown/hidden state. fyne.Window has
+	// no Visible() getter, so this is tracked by hand across every path that
+	// shows or hides it (showWindow/hideWindowNow, and the close intercept
+	// below) - ensureWindowVisible relies on it to tell a dialog whether it
+	// was the one that had to open the window just to host itself.
+	windowVisible bool
 )
 
 // InitApp creates the singleton Fyne application and the shared utility window
@@ -62,7 +68,7 @@ func InitApp(appIcon fyne.Resource) fyne.App {
 	// system tray menu, closing the only window will not exit the app anyway,
 	// but Hide() also avoids destroying/recreating window state.
 	mainWindow.SetCloseIntercept(func() {
-		mainWindow.Hide()
+		hideWindowNow()
 	})
 
 	return fyneApp
@@ -106,9 +112,15 @@ func Quit() {
 // HideWindow hides the shared Settings window without quitting the app
 // (the tray menu keeps running). Safe to call from any goroutine.
 func HideWindow() {
-	fyne.Do(func() {
-		mainWindow.Hide()
-	})
+	fyne.Do(hideWindowNow)
+}
+
+// hideWindowNow is the actual hide + bookkeeping, callable directly from
+// code that's already on the Fyne main thread (e.g. a dialog's own
+// SetOnClosed callback) without wrapping it in another fyne.Do.
+func hideWindowNow() {
+	windowVisible = false
+	mainWindow.Hide()
 }
 
 // SetMenuItemLabel updates a tray menu item's label and refreshes the menu so
@@ -120,12 +132,22 @@ func SetMenuItemLabel(menu *fyne.Menu, item *fyne.MenuItem, label string) {
 	})
 }
 
-// ensureWindowVisible shows the shared window if it isn't already. Dialogs
-// (Info/Confirm/Choice/...) are attached as an overlay on mainWindow's
-// canvas, so if the window itself is currently hidden (e.g. the user closed
-// Settings, then triggers "Reset Configuration" from the tray menu) the
-// dialog would be rendered onto a canvas nobody can see. Must be called from
-// the Fyne main thread (i.e. from within a func already wrapped in fyne.Do).
-func ensureWindowVisible() {
-	mainWindow.Show()
+// ensureWindowVisible shows the shared window if it isn't already, and
+// reports whether it *was* hidden. Dialogs (Info/Confirm/Choice/...) are
+// attached as an overlay on mainWindow's canvas, so if the window itself is
+// currently hidden (e.g. the user closed Settings, then triggers "Check for
+// Update..." from the tray menu) the dialog would be rendered onto a canvas
+// nobody can see - callers that only need the window visible to host such a
+// transient dialog use the returned bool to hide it again once that dialog
+// closes (see Info/showConfirm/Choice/InstallReminder/RunWithProgress),
+// instead of leaving an empty (or stale leftover Settings content) window
+// sitting open after the user dismisses what looked like it should've been
+// a standalone dialog. Must be called from the Fyne main thread.
+func ensureWindowVisible() bool {
+	wasHidden := !windowVisible
+	if wasHidden {
+		windowVisible = true
+		mainWindow.Show()
+	}
+	return wasHidden
 }
