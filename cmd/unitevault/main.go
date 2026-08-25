@@ -20,6 +20,7 @@ import (
 	"github.com/kh813/unitevault/internal/drive"
 	"github.com/kh813/unitevault/internal/engine"
 	"github.com/kh813/unitevault/internal/gui"
+	"github.com/kh813/unitevault/internal/selfupdate"
 )
 
 func main() {
@@ -121,6 +122,7 @@ func runTrayMode() {
 	mStatus.Disabled = true
 	mSyncNow := fyne.NewMenuItem("Sync Now", nil)
 	mSettings := fyne.NewMenuItem("Settings...", nil)
+	mCheckUpdate := fyne.NewMenuItem("Check for Update...", nil)
 	mQuit := fyne.NewMenuItem("Quit UniteVault", nil)
 	mQuit.IsQuit = true
 
@@ -133,6 +135,7 @@ func runTrayMode() {
 		fyne.NewMenuItemSeparator(),
 		mSyncNow,
 		mSettings,
+		mCheckUpdate,
 		fyne.NewMenuItemSeparator(),
 		mQuit,
 	)
@@ -141,6 +144,7 @@ func runTrayMode() {
 
 	mSyncNow.Action = func() { go t.syncNow() }
 	mSettings.Action = func() { t.openSettingsGUI() }
+	mCheckUpdate.Action = func() { go t.checkForUpdate() }
 	mQuit.Action = func() {
 		cancel()
 		gui.Quit()
@@ -252,6 +256,87 @@ func (t *trayApp) syncNow() {
 	} else {
 		gui.SetMenuItemLabel(t.menu, t.status, fmt.Sprintf("Status: Active (%s) - %s", role, time.Now().Format("15:04")))
 	}
+}
+
+// checkForUpdate handles the "Check for Update..." tray menu action:
+// queries GitHub Releases, and if a newer version is available, offers to
+// download and apply it (performSelfUpdate). Always safe to run regardless
+// of init state - it doesn't touch Vault/config at all.
+func (t *trayApp) checkForUpdate() {
+	var info *selfupdate.ReleaseInfo
+	err := gui.RunWithProgress(
+		"Checking for Updates",
+		"Contacting GitHub to check for a newer version...",
+		func() error {
+			var checkErr error
+			info, checkErr = selfupdate.CheckLatest(context.Background())
+			return checkErr
+		},
+	)
+	if err != nil {
+		gui.Info("Update Check Failed", fmt.Sprintf("Could not check for updates: %v", err))
+		return
+	}
+
+	if !selfupdate.IsNewer(bootstrap.AppVersion, info.Version) {
+		gui.Info("Up to Date", fmt.Sprintf("You're running the latest version (v%s).", bootstrap.AppVersion))
+		return
+	}
+
+	if info.AssetURL == "" {
+		gui.Confirm(
+			"Update Available",
+			fmt.Sprintf(
+				"Version %s is available (you have v%s), but UniteVault couldn't find a matching automatic download for this platform.\n\nOpen the release page in your browser?",
+				info.TagName, bootstrap.AppVersion,
+			),
+			func(confirmed bool) {
+				if confirmed {
+					_ = bootstrap.OpenURL(info.HTMLURL)
+				}
+			},
+		)
+		return
+	}
+
+	gui.Confirm(
+		"Update Available",
+		fmt.Sprintf(
+			"Version %s is available (you have v%s).\n\nDownload and install it now? UniteVault will quit and restart automatically once the update is applied.",
+			info.TagName, bootstrap.AppVersion,
+		),
+		func(confirmed bool) {
+			if confirmed {
+				go t.performSelfUpdate(info)
+			}
+		},
+	)
+}
+
+// performSelfUpdate downloads and applies the update described by info, then
+// quits so the detached helper process selfupdate.Apply started can finish
+// replacing this app and relaunch it. If anything fails, nothing has been
+// touched yet (Apply only hands off to the helper after a fully successful
+// download+extract), so it's always safe to fall back to a manual download.
+func (t *trayApp) performSelfUpdate(info *selfupdate.ReleaseInfo) {
+	err := gui.RunWithProgress(
+		"Updating UniteVault",
+		fmt.Sprintf("Downloading version %s...", info.TagName),
+		func() error { return selfupdate.Apply(context.Background(), info.AssetURL) },
+	)
+	if err != nil {
+		gui.Info(
+			"Update Failed",
+			fmt.Sprintf(
+				"Could not automatically update: %v\n\nYou can download the new version manually from:\n%s",
+				err, info.HTMLURL,
+			),
+		)
+		return
+	}
+
+	t.cancel()
+	gui.Quit()
 }
 
 // performReset clears local config/role state and reopens Settings. Called
