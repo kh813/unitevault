@@ -182,33 +182,6 @@ func TestBuildSettingsContent_ResetRequiresConfirmation(t *testing.T) {
 	}
 }
 
-// TestBuildSettingsContent_SaveDisabledWithoutVaultPath ensures the Save
-// button starts disabled when there's no Vault path (e.g. right after Reset
-// Configuration reopens an empty form) and becomes enabled as soon as one is
-// entered, without needing any separate "reset succeeded" flag.
-func TestBuildSettingsContent_SaveDisabledWithoutVaultPath(t *testing.T) {
-	newTestWindow()
-
-	content := buildSettingsContent(SettingsFormData{}, SettingsHandlers{})
-
-	saveBtn := findButton(t, content, "Save Settings")
-	if !saveBtn.Disabled() {
-		t.Fatal("expected Save Settings to start disabled with no Vault path set")
-	}
-
-	vaultEntry := findEntry(t, content, "Path to your Obsidian Vault folder")
-
-	vaultEntry.SetText("/tmp/vault")
-	if saveBtn.Disabled() {
-		t.Fatal("expected Save Settings to become enabled once a Vault path is set")
-	}
-
-	vaultEntry.SetText("")
-	if !saveBtn.Disabled() {
-		t.Fatal("expected Save Settings to become disabled again once the Vault path is cleared")
-	}
-}
-
 // TestBuildSettingsContent_ConfigureRemoteUsesEditedValue guards against a
 // regression where editing the Remote Name field and then tapping "Configure
 // Google Drive Remote..." passed the *original* (pre-edit) snapshot the

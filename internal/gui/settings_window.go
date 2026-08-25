@@ -179,21 +179,6 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	})
 	saveBtn.Importance = widget.HighImportance
 
-	// Save has nothing meaningful to do without a Vault - keep it disabled
-	// until one is set, rather than letting the user click it and then
-	// explaining why nothing happened. This also means the button starts
-	// disabled right after Reset Configuration reopens an empty form, with
-	// no separate "reset succeeded" state to track.
-	updateSaveButtonState := func() {
-		if strings.TrimSpace(vaultEntry.Text) == "" {
-			saveBtn.Disable()
-		} else {
-			saveBtn.Enable()
-		}
-	}
-	updateSaveButtonState()
-	vaultEntry.OnChanged = func(string) { updateSaveButtonState() }
-
 	cancelBtn := widget.NewButton("Cancel", func() {
 		mainWindow.Hide()
 	})
