@@ -256,7 +256,14 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	var rcloneButtonRow fyne.CanvasObject
 	if strings.HasPrefix(data.RcloneRemoteInfo, "Configured") && handlers.OnRemoveRemote != nil {
 		removeRemoteBtn := widget.NewButton("Remove Remote Configuration...", func() {
-			handlers.OnRemoveRemote(currentSnapshot())
+			// Always remove the remote actually reported as "Configured"
+			// (baselineRemote, captured when this window was built), not
+			// whatever name currently sits typed-but-unsaved in the Remote
+			// Name field - an unsaved edit there must never change which
+			// remote gets deleted.
+			snapshot := currentSnapshot()
+			snapshot.RcloneRemote = baselineRemote
+			handlers.OnRemoveRemote(snapshot)
 		})
 		rcloneButtonRow = container.NewGridWithColumns(2, configureRemoteBtn, removeRemoteBtn)
 	} else {
@@ -318,13 +325,18 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 
 	buttonRow := container.NewBorder(nil, nil, resetBtn, container.NewHBox(cancelBtn, saveBtn), container.NewCenter(unsavedLabel))
 
-	// No scroll container: ShowSettingsWindow resizes the window to this
-	// content's actual MinSize on every rebuild, so the window always fits
-	// exactly - never leaving leftover blank space below a shorter form,
-	// and never needing to scroll for a taller one.
+	// ShowSettingsWindow resizes the window to this content's actual MinSize
+	// (computed with the "Advanced Options" accordion closed) on every
+	// rebuild, so the window fits exactly for the common case - never
+	// leaving leftover blank space below a shorter form. But opening the
+	// accordion grows the content *without* triggering a rebuild/resize
+	// (Accordion has no toggle callback to hook), so the top section is
+	// wrapped in VScroll as a safety net: it keeps the window's fixed size
+	// while still making the expanded fields and the fixed bottom button row
+	// reachable instead of being clipped outside the window bounds.
 	return container.NewBorder(
 		nil, container.NewVBox(widget.NewSeparator(), buttonRow), nil, nil,
-		container.NewVBox(statusCard, vaultCard, rcloneCard),
+		container.NewVScroll(container.NewVBox(statusCard, vaultCard, rcloneCard)),
 	)
 }
 

@@ -19,6 +19,10 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Determine version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: Build Apple Silicon Mac binary
         run: |
           mkdir -p dist
@@ -47,7 +51,7 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>0.0.37</string>
+              <string>${{ steps.version.outputs.version }}</string>
               <key>LSUIElement</key>
               <true/>
           </dict>

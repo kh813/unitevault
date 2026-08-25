@@ -298,6 +298,29 @@ func TestBuildSettingsContent_AdvancedRcloneOptionsCollapsedByDefault(t *testing
 	findEntry(t, content, "ObsidianVault")
 }
 
+// TestBuildSettingsContent_ScrollableAgainstAccordionExpansion guards
+// against a regression where the window is only ever resized to the
+// content's MinSize computed with the "Advanced Options" Accordion closed
+// (see ShowSettingsWindow) - opening it later doesn't trigger a resize
+// (Accordion exposes no toggle callback to hook), so without a scroll
+// container the expanded fields and the Save/Cancel/Reset button row could
+// be pushed outside the window's fixed, non-scrollable bounds.
+func TestBuildSettingsContent_ScrollableAgainstAccordionExpansion(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault"}, SettingsHandlers{})
+
+	var scroll *container.Scroll
+	walkObjects(content, func(o fyne.CanvasObject) {
+		if s, ok := o.(*container.Scroll); ok {
+			scroll = s
+		}
+	})
+	if scroll == nil {
+		t.Fatal("expected the Settings content to include a scroll container so an expanded Advanced Options accordion can never be clipped outside the window")
+	}
+}
+
 func TestBuildSettingsContent_ResetRequiresConfirmation(t *testing.T) {
 	newTestWindow()
 
@@ -341,6 +364,39 @@ func TestBuildSettingsContent_ConfigureRemoteUsesEditedValue(t *testing.T) {
 
 	if gotRemote != "MyCustomRemote" {
 		t.Errorf("expected OnConfigureRemote to receive the edited remote name 'MyCustomRemote', got %q", gotRemote)
+	}
+}
+
+// TestBuildSettingsContent_RemoveRemoteIgnoresUnsavedEdit guards against a
+// bug where the "Remove Remote Configuration..." button removed whatever
+// name was currently typed (but not yet saved) in the Remote Name field,
+// instead of the remote actually reported as "Configured" in Status. An
+// unsaved edit to that field must never change which remote gets deleted -
+// otherwise the wrong remote could be removed, or a no-op could be
+// misreported as success while the real configured remote and its Google
+// Drive credentials are left untouched.
+func TestBuildSettingsContent_RemoveRemoteIgnoresUnsavedEdit(t *testing.T) {
+	newTestWindow()
+
+	var gotRemote string
+	content := buildSettingsContent(SettingsFormData{
+		VaultPath:        "/tmp/vault",
+		RcloneRemote:     "ObsidianVault",
+		RcloneRemoteInfo: "Configured (ObsidianVault)",
+		RcloneStatus:     "Installed",
+	}, SettingsHandlers{
+		OnRemoveRemote: func(current SettingsFormData) { gotRemote = current.RcloneRemote },
+	})
+
+	// Edit the Remote Name field without saving.
+	remoteEntry := findEntry(t, content, "ObsidianVault")
+	remoteEntry.SetText("SomeOtherUnsavedName")
+
+	removeBtn := findButton(t, content, "Remove Remote Configuration...")
+	test.Tap(removeBtn)
+
+	if gotRemote != "ObsidianVault" {
+		t.Errorf("expected OnRemoveRemote to receive the actually-configured remote 'ObsidianVault', got %q", gotRemote)
 	}
 }
 

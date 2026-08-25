@@ -137,7 +137,7 @@ var pickFolderFunc = func(title string) (string, error) {
 // to call from any goroutine; onPicked always runs on the Fyne main thread.
 func PickFolder(title string, onPicked func(path string, ok bool)) {
 	var wasHidden bool
-	fyne.Do(func() {
+	fyne.DoAndWait(func() {
 		wasHidden = ensureWindowVisible()
 	})
 	go func() {

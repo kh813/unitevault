@@ -46,6 +46,22 @@ const detachedProcess = 0x00000008
 // specifically errors out ("Input redirection is not supported") when
 // stdin isn't a real console - `ping` doesn't care and blocks for the same
 // ~1s regardless.
+//
+// The backup at OLDEXE is deliberately deleted only once, *before* the
+// retry loop starts, and again only after the swap has actually succeeded -
+// never inside the loop itself. An earlier version re-deleted OLDEXE at the
+// top of every retry iteration, which destroyed the just-created backup one
+// iteration after the EXE->OLDEXE rename succeeded but the still-locked
+// NEWEXE->EXE rename kept failing (e.g. an antivirus scan holding the
+// freshly-downloaded exe open longer than the retry window): by the time
+// all 10 attempts were exhausted, EXE no longer existed (renamed away in
+// attempt 1) and OLDEXE had already been wiped (deleted in attempt 2's
+// cleanup), so the "start if the swap didn't happen" fallback found nothing
+// left to start at all - the update silently uninstalled the app with no
+// way to recover. If every attempt still fails now, OLDEXE (untouched
+// throughout the loop) is moved back to EXE and relaunched instead, so a
+// failed update degrades to "still running the previous version" rather
+// than "nothing is installed any more".
 const updateHelperScript = `@echo off
 setlocal
 set "EXE=%~1"
@@ -57,16 +73,22 @@ ping -n 2 127.0.0.1 >nul
 taskkill /F /PID %PID% >nul 2>&1
 ping -n 2 127.0.0.1 >nul
 
+if exist "%OLDEXE%" del /f /q "%OLDEXE%" >nul 2>&1
+
 for /L %%i in (1,1,10) do (
-    if exist "%OLDEXE%" del /f /q "%OLDEXE%" >nul 2>&1
     if exist "%EXE%" move /y "%EXE%" "%OLDEXE%" >nul 2>&1
     if exist "%NEWEXE%" move /y "%NEWEXE%" "%EXE%" >nul 2>&1
     if not exist "%NEWEXE%" goto swapped
     ping -n 2 127.0.0.1 >nul
 )
 
+if exist "%OLDEXE%" move /y "%OLDEXE%" "%EXE%" >nul 2>&1
+if exist "%EXE%" start "" "%EXE%"
+del /f /q "%~f0" >nul 2>&1
+exit /b 1
+
 :swapped
-if not exist "%NEWEXE%" start "" "%EXE%"
+start "" "%EXE%"
 if exist "%OLDEXE%" del /f /q "%OLDEXE%" >nul 2>&1
 del /f /q "%~f0" >nul 2>&1
 `

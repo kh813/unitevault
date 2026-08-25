@@ -12,7 +12,7 @@ import (
 	"github.com/kh813/unitevault/internal/drive"
 )
 
-const AppVersion = "0.0.39"
+const AppVersion = "0.0.40"
 const PrimaryMarkerRelPath = "_sync/PRIMARY_MARKER.json"
 
 // PrimaryMarker represents the PRIMARY_MARKER.json structure specified in spec section 3.6.1.1
@@ -57,21 +57,34 @@ func (b *Bootstrapper) InitializeNode(ctx context.Context, vaultPath, remoteTarg
 		return "primary", b.initAsPrimary(ctx, vaultPath, remoteTarget, deviceID, label)
 	}
 
-	// Remote marker exists. Check if this device itself is already the primary recorded in the marker.
+	// Remote marker exists. Check if this device itself is already the
+	// primary recorded in the marker. A failure at any step here (download,
+	// read, or parse) must NOT silently fall through to Secondary
+	// initialization: a transient network error must never look identical to
+	// "another device is Primary" and demote a real Primary.
 	tempVerifyFile := filepath.Join(os.TempDir(), fmt.Sprintf("check_marker_%d.json", time.Now().UnixNano()))
 	defer os.Remove(tempVerifyFile)
 
-	if err := b.drive.DownloadFile(ctx, remoteMarkerFile, tempVerifyFile); err == nil {
-		if vData, err := os.ReadFile(tempVerifyFile); err == nil {
-			var downloadedMarker PrimaryMarker
-			if err := json.Unmarshal(vData, &downloadedMarker); err == nil && downloadedMarker.PrimaryDeviceID == deviceID {
-				// This device is already the Primary! Restore/ensure primary role.
-				if err := b.cfgMgr.SaveRole("primary"); err != nil {
-					return "", err
-				}
-				return "primary", nil
-			}
+	if err := b.drive.DownloadFile(ctx, remoteMarkerFile, tempVerifyFile); err != nil {
+		return "", fmt.Errorf("failed to download primary marker for verification: %w", err)
+	}
+
+	vData, err := os.ReadFile(tempVerifyFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read downloaded primary marker: %w", err)
+	}
+
+	var downloadedMarker PrimaryMarker
+	if err := json.Unmarshal(vData, &downloadedMarker); err != nil {
+		return "", fmt.Errorf("failed to parse downloaded primary marker: %w", err)
+	}
+
+	if downloadedMarker.PrimaryDeviceID == deviceID {
+		// This device is already the Primary! Restore/ensure primary role.
+		if err := b.cfgMgr.SaveRole("primary"); err != nil {
+			return "", err
 		}
+		return "primary", nil
 	}
 
 	// Initialize as Secondary

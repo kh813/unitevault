@@ -111,6 +111,48 @@ func TestBundlePathFromExecutable(t *testing.T) {
 	}
 }
 
+// TestExtractAppBundle_RejectsPathTraversal guards against a zip-slip: a
+// malicious or corrupted update archive with an entry name containing ".."
+// must not be able to write outside destDir via filepath.Join(destDir,
+// f.Name). Even though the real download source (GitHub Releases for this
+// repo) is trusted, extractAppBundle must not trust archive entry names
+// blindly - a compromised release pipeline, MITM, or a spoofed asset URL
+// could otherwise write arbitrary files (e.g. a LaunchAgent) anywhere on
+// disk the current user can write to.
+func TestExtractAppBundle_RejectsPathTraversal(t *testing.T) {
+	buf := &bytes.Buffer{}
+	w := zip.NewWriter(buf)
+
+	writeFile := func(name, content string) {
+		fw, err := w.Create(name)
+		if err != nil {
+			t.Fatalf("failed to add %s to test zip: %v", name, err)
+		}
+		if _, err := fw.Write([]byte(content)); err != nil {
+			t.Fatalf("failed to write %s to test zip: %v", name, err)
+		}
+	}
+
+	// A normal-looking .app entry so appName detection succeeds, plus a
+	// traversal entry that tries to escape destDir.
+	writeFile("Evil.app/Contents/Info.plist", "<plist/>")
+	writeFile("Evil.app/../../../../tmp/unitevault-zip-slip-payload", "malicious content")
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close test zip: %v", err)
+	}
+
+	destDir := t.TempDir()
+	if _, err := extractAppBundle(buf.Bytes(), destDir); err == nil {
+		t.Fatal("expected extractAppBundle to reject an archive entry that escapes destDir via '..'")
+	}
+
+	if _, err := os.Stat("/tmp/unitevault-zip-slip-payload"); err == nil {
+		os.Remove("/tmp/unitevault-zip-slip-payload")
+		t.Fatal("extractAppBundle wrote a file outside destDir - zip-slip succeeded")
+	}
+}
+
 func TestExtractAppBundle_NoAppInArchive(t *testing.T) {
 	buf := &bytes.Buffer{}
 	w := zip.NewWriter(buf)

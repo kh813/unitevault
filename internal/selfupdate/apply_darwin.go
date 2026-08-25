@@ -117,8 +117,12 @@ func extractAppBundle(zipData []byte, destDir string) (string, error) {
 		return "", fmt.Errorf("the downloaded update archive did not contain a .app bundle")
 	}
 
+	destDirWithSep := destDir + string(os.PathSeparator)
 	for _, f := range r.File {
 		target := filepath.Join(destDir, f.Name)
+		if target != destDir && !strings.HasPrefix(target, destDirWithSep) {
+			return "", fmt.Errorf("the downloaded update archive contains an unsafe path: %s", f.Name)
+		}
 		if f.FileInfo().IsDir() {
 			if err := os.MkdirAll(target, 0755); err != nil {
 				return "", err

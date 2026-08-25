@@ -15,6 +15,10 @@ import (
 type mockDrive struct {
 	remoteFiles map[string][]byte
 	copyCalled  bool
+	// downloadErr, if set, makes DownloadFile fail every call instead of
+	// serving remoteFiles - used to simulate a transient network error
+	// during the InitializeNode's primary-identity verification download.
+	downloadErr error
 }
 
 func newMockDrive() *mockDrive {
@@ -36,6 +40,9 @@ func (m *mockDrive) FileExists(ctx context.Context, remoteTargetFile string) (bo
 }
 
 func (m *mockDrive) DownloadFile(ctx context.Context, remoteSourceFile, localDstFile string) error {
+	if m.downloadErr != nil {
+		return m.downloadErr
+	}
 	data, ok := m.remoteFiles[remoteSourceFile]
 	if !ok {
 		return fmt.Errorf("file not found: %s", remoteSourceFile)
@@ -219,6 +226,53 @@ func TestBootstrap_PrimaryReinitializationPreservesPrimaryRole(t *testing.T) {
 	cachedRole, _ := cfgMgr.LoadRole()
 	if cachedRole != "primary" {
 		t.Fatalf("expected cached role 'primary', got %s", cachedRole)
+	}
+}
+
+// TestBootstrap_PrimaryVerificationDownloadFailure_DoesNotDemoteToSecondary
+// guards against a bug where a transient network error while re-verifying
+// whether this device is the recorded Primary (InitializeNode downloading
+// PRIMARY_MARKER.json back to check its PrimaryDeviceID) was silently
+// treated the same as "another device is Primary", falling through to
+// initAsSecondary and demoting a real Primary device with no error surfaced
+// at all. A failed verification download must return an error instead.
+func TestBootstrap_PrimaryVerificationDownloadFailure_DoesNotDemoteToSecondary(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	deviceID, _ := cfgMgr.GetDeviceID()
+	mock := newMockDrive()
+
+	// Remote marker exists (so InitializeNode takes the verification path)
+	// and belongs to THIS device, but the verification download itself
+	// fails transiently.
+	remoteMarkerFile := "gdrive:Backup/_sync/PRIMARY_MARKER.json"
+	existingMarker := bootstrap.PrimaryMarker{
+		SchemaVersion:   1,
+		PrimaryDeviceID: deviceID,
+		PrimaryLabel:    "my-mac",
+	}
+	markerBytes, _ := json.Marshal(existingMarker)
+	mock.remoteFiles[remoteMarkerFile] = markerBytes
+	mock.downloadErr = fmt.Errorf("simulated transient network error")
+
+	bootstrapper := bootstrap.NewBootstrapper(cfgMgr, mock)
+	ctx := context.Background()
+
+	role, err := bootstrapper.InitializeNode(ctx, vaultPath, "gdrive:Backup", "my-mac")
+	if err == nil {
+		t.Fatalf("expected an error when the verification download fails, got role=%q, err=nil", role)
+	}
+	if role == "secondary" {
+		t.Fatalf("must not silently demote to secondary on a verification download failure, got role=%q", role)
+	}
+
+	// The role must not have been overwritten to "secondary" in local config
+	// either, since initAsSecondary() must never have run.
+	if cachedRole, err := cfgMgr.LoadRole(); err == nil && cachedRole == "secondary" {
+		t.Fatalf("expected cached role to remain unset/unchanged, got 'secondary'")
 	}
 }
 
