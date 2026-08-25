@@ -33,6 +33,10 @@ func walkObjects(obj fyne.CanvasObject, fn func(fyne.CanvasObject)) {
 		}
 	case *container.Scroll:
 		walkObjects(o.Content, fn)
+	case *widget.Accordion:
+		for _, item := range o.Items {
+			walkObjects(item.Detail, fn)
+		}
 	}
 }
 
@@ -257,6 +261,38 @@ func findLabelText(root fyne.CanvasObject, text string) bool {
 		}
 	})
 	return found
+}
+
+// TestBuildSettingsContent_AdvancedRcloneOptionsCollapsedByDefault guards
+// that Remote Name / Google Drive Target Folder Path / Sync Interval - all
+// of which have working defaults nobody needs to touch in the common case
+// - live inside an Accordion that starts closed, rather than being shown
+// inline every time the Settings window opens.
+func TestBuildSettingsContent_AdvancedRcloneOptionsCollapsedByDefault(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault"}, SettingsHandlers{})
+
+	var accordion *widget.Accordion
+	walkObjects(content, func(o fyne.CanvasObject) {
+		if a, ok := o.(*widget.Accordion); ok {
+			accordion = a
+		}
+	})
+	if accordion == nil {
+		t.Fatal("expected an Accordion wrapping the advanced rclone options")
+	}
+	if len(accordion.Items) != 1 {
+		t.Fatalf("expected exactly one Accordion item, got %d", len(accordion.Items))
+	}
+	if accordion.Items[0].Open {
+		t.Error("expected the advanced options Accordion item to start closed")
+	}
+
+	// The fields must still exist (just collapsed) - findEntry walks into
+	// the Accordion's Detail regardless of Open state, so this also guards
+	// that they haven't been accidentally left out of the tree entirely.
+	findEntry(t, content, "ObsidianVault")
 }
 
 func TestBuildSettingsContent_ResetRequiresConfirmation(t *testing.T) {

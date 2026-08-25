@@ -207,11 +207,12 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
   - **[ Obsidian Vault セクション ]**:
     - **Vault Folder Location**: テキスト入力 ＋ `[ Select Folder... ]` ボタン。ラベルや案内文には「Directory」「Path」等の専門用語を避け、一般ユーザーにもわかりやすい「Folder」表記に統一する。`[ Select Folder... ]` は実行中のOSが提供する標準のフォルダ選択ダイアログ（macOS: Cocoaのフォルダ選択パネル、Windows: `IFileDialog`）を表示する。SettingsウィンドウはFyne製だが、フォルダ選択だけはFyne独自のダイアログ（見た目がOS標準と異なり違和感を与える）ではなく、OS標準の見た目のダイアログを使う。iPhone/Windows間の同期はiCloudに委任するため（1.3節）、このセクションに同期間隔などの設定項目は置かない。
   - **[ rclone セクション ]**: Google Driveへのバックアップに関する設定は、それが有効になる（rcloneの設定が完了する）までは意味を持たないため、すべてこのセクションにまとめる。
-    - **Remote Name**: 設定されているリモート名（デフォルト `ObsidianVault`）
     - **Remote Status**: rcloneリモートの設定状態 (`Configured` / `Not Configured` )
     - **Executable**: 検出・利用中の `rclone` バイナリの実行パス
-    - **Google Drive Target Folder Path**: 転送先フォルダパス。**デフォルトは固定文字列ではなく、選択したVaultフォルダ名を自動提案する**（3.5.0.1節）。Vaultフォルダを選び直すたびに追従するが、ユーザーが手動で変更した値は上書きしない。
-    - **Sync Interval**: プライマリノードがVaultをスキャンし、変更をマージしてGoogle Driveへバックアップする周期（秒単位、デフォルト `120` 秒。3.4.1節）。iCloud経由の端末間同期はOS側が自動で行うため、この間隔設定はGoogle Driveへのバックアップ頻度にのみ影響する。
+    - **[ Advanced Options ]（折りたたみ表示、デフォルトで閉じた状態）**: 以下の3項目は、いずれもデフォルト値のまま動作する「通常は触る必要のない」設定であるため、`widget.Accordion`で折りたたみ、初期表示では隠す。展開すれば通常通り編集できる。
+      - **Remote Name**: 設定されているリモート名（デフォルト `ObsidianVault`）
+      - **Google Drive Target Folder Path**: 転送先フォルダパス。**デフォルトは固定文字列ではなく、選択したVaultフォルダ名を自動提案する**（3.5.0.1節）。Vaultフォルダを選び直すたびに追従するが、ユーザーが手動で変更した値は上書きしない。
+      - **Sync Interval**: プライマリノードがVaultをスキャンし、変更をマージしてGoogle Driveへバックアップする周期（秒単位、デフォルト `120` 秒。3.4.1節）。iCloud経由の端末間同期はOS側が自動で行うため、この間隔設定はGoogle Driveへのバックアップ頻度にのみ影響する。
     - **Configure Google Drive Remote... ボタン**: Save Settingsを押す前でも、その場でrcloneのGoogle Drive認証（新規セットアップ／既存・CLI設定）を実行できる。
     - **Remove Remote Configuration... ボタン**: リモートが設定済みの場合のみ表示。確認ダイアログの後、`rclone config delete` でそのリモートのGoogle Drive認証情報を削除する（Google Drive上のバックアップ済みファイル自体は削除されない）。別のGoogleアカウントで設定し直したい場合などに使用する。以前はこの操作に対応するGUI動線が存在せず、Terminal/PowerShellでの手動操作が必要だった。
   - **操作ボタン**:

@@ -208,13 +208,22 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	targetPathEntry.OnChanged = updateDirtyState
 	intervalEntry.OnChanged = updateDirtyState
 
-	rcloneForm := widget.NewForm(
-		widget.NewFormItem("Remote Name", remoteEntry),
+	rcloneBasicForm := widget.NewForm(
 		widget.NewFormItem("Remote Status", widget.NewLabel(orDefault(data.RcloneRemoteInfo, "Unknown"))),
 		widget.NewFormItem("Executable", widget.NewLabel(orDefault(data.RcloneExecPath, "Not Found"))),
+	)
+
+	// Remote Name / Target Folder Path / Sync Interval all have sensible
+	// defaults that just work (ObsidianVault / the Vault's own folder name /
+	// 120s) - collapsed by default as "Advanced Options" so the common case
+	// isn't cluttered with fields nobody needs to touch, while still being
+	// one click away for anyone who does want to customize them.
+	rcloneAdvancedForm := widget.NewForm(
+		widget.NewFormItem("Remote Name", remoteEntry),
 		widget.NewFormItem("Google Drive Target Folder Path", targetPathEntry),
 		widget.NewFormItem("Sync Interval (seconds)", intervalEntry),
 	)
+	rcloneAdvanced := widget.NewAccordion(widget.NewAccordionItem("Advanced Options", rcloneAdvancedForm))
 
 	// currentSnapshot captures the form's fields exactly as currently typed.
 	// Every handler that may trigger a window rebuild (install/configure
@@ -250,7 +259,9 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		})
 		rcloneButtons = append(rcloneButtons, removeRemoteBtn)
 	}
-	rcloneCard := widget.NewCard("rclone", "", container.NewVBox(append([]fyne.CanvasObject{rcloneForm}, rcloneButtons...)...))
+	rcloneCardContent := append([]fyne.CanvasObject{rcloneBasicForm}, rcloneButtons...)
+	rcloneCardContent = append(rcloneCardContent, rcloneAdvanced)
+	rcloneCard := widget.NewCard("rclone", "", container.NewVBox(rcloneCardContent...))
 
 	// --- Status section ---
 	var installGit, installRclone, installICloud func()
