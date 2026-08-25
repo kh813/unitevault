@@ -51,13 +51,12 @@ func InitApp(appIcon fyne.Resource) fyne.App {
 	}
 
 	mainWindow = fyneApp.NewWindow("UniteVault Settings")
-	// Sized to comfortably fit the Settings content without scrolling even
-	// in the "everything visible" case (both Install buttons, Configure AND
-	// Remove Remote buttons) - measured content MinSize is ~526x612 for the
-	// scrollable cards plus ~41 for the bottom button row; this leaves
-	// headroom for theme/DPI/font differences instead of sizing to the
-	// exact minimum.
-	mainWindow.Resize(fyne.NewSize(640, 760))
+	// A modest placeholder size, only ever visible if a dialog (Info/
+	// Confirm/...) needs to show before ShowSettingsWindow has built any
+	// real content yet. ShowSettingsWindow resizes this window to fit its
+	// actual content exactly every time it's shown, so this initial size
+	// doesn't need to anticipate the Settings form's size at all.
+	mainWindow.Resize(fyne.NewSize(480, 320))
 	// Hide (don't quit) when the user closes the window with the titlebar
 	// control; the app keeps running from the tray. Since we always set a
 	// system tray menu, closing the only window will not exit the app anyway,

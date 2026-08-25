@@ -67,8 +67,18 @@ type SettingsHandlers struct {
 // displayed status without losing the window's open/closed state.
 func ShowSettingsWindow(data SettingsFormData, handlers SettingsHandlers) {
 	fyne.Do(func() {
-		mainWindow.SetContent(buildSettingsContent(data, handlers))
+		content := buildSettingsContent(data, handlers)
+		mainWindow.SetContent(content)
 		mainWindow.SetTitle("UniteVault Settings")
+		// Resize to fit this exact content every time: how many
+		// Install/Configure/Remove buttons are showing changes the form's
+		// natural height release to release (and even within one session,
+		// e.g. once Git gets installed), so a fixed window size either
+		// leaves blank space below a shorter form or forces scrolling for a
+		// taller one. A small fixed margin comfortably covers the window's
+		// own border/padding chrome around the content.
+		min := content.MinSize()
+		mainWindow.Resize(fyne.NewSize(min.Width+24, min.Height+24))
 		mainWindow.Show()
 		mainWindow.RequestFocus()
 	})
@@ -242,9 +252,13 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 
 	buttonRow := container.NewBorder(nil, nil, resetBtn, container.NewHBox(cancelBtn, saveBtn))
 
+	// No scroll container: ShowSettingsWindow resizes the window to this
+	// content's actual MinSize on every rebuild, so the window always fits
+	// exactly - never leaving leftover blank space below a shorter form,
+	// and never needing to scroll for a taller one.
 	return container.NewBorder(
 		nil, container.NewVBox(widget.NewSeparator(), buttonRow), nil, nil,
-		container.NewVScroll(container.NewVBox(statusCard, vaultCard, rcloneCard)),
+		container.NewVBox(statusCard, vaultCard, rcloneCard),
 	)
 }
 
