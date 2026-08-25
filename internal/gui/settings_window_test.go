@@ -231,6 +231,34 @@ func TestBuildSettingsContent_ICloudRowVisibility(t *testing.T) {
 	}
 }
 
+// TestBuildSettingsContent_DriveSyncStatusVisibility guards that the
+// "Google Drive sync" status row only appears when DriveSyncStatus is
+// populated, and always renders as a plain (non-actionable) row - there's
+// nothing to click, it's just a summary of the last sync attempt.
+func TestBuildSettingsContent_DriveSyncStatusVisibility(t *testing.T) {
+	newTestWindow()
+
+	empty := buildSettingsContent(SettingsFormData{}, SettingsHandlers{})
+	if findLabelText(empty, "Google Drive sync:") {
+		t.Error("expected no Google Drive sync row when DriveSyncStatus is empty")
+	}
+
+	content := buildSettingsContent(SettingsFormData{DriveSyncStatus: "Last synced: 2026-08-25 15:04"}, SettingsHandlers{})
+	if !findLabelText(content, "Last synced: 2026-08-25 15:04") {
+		t.Error("expected the Google Drive sync row to show the provided status text")
+	}
+}
+
+func findLabelText(root fyne.CanvasObject, text string) bool {
+	found := false
+	walkObjects(root, func(o fyne.CanvasObject) {
+		if l, ok := o.(*widget.Label); ok && l.Text == text {
+			found = true
+		}
+	})
+	return found
+}
+
 func TestBuildSettingsContent_ResetRequiresConfirmation(t *testing.T) {
 	newTestWindow()
 

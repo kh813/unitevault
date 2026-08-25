@@ -367,6 +367,26 @@ func engineLogPath() string {
 func (t *trayApp) buildFormData() gui.SettingsFormData {
 	cfg, _ := t.cfgMgr.LoadConfig()
 	role, _ := t.cfgMgr.LoadRole()
+
+	// engine.RunCycle only ever runs the rclone sync step (and records its
+	// outcome) on a Primary device - a Secondary never attempts it, so
+	// showing its (possibly stale, or simply absent) sync status would be
+	// misleading rather than just showing why there isn't one.
+	driveSyncStatus := "Never synced yet"
+	if role == "secondary" {
+		driveSyncStatus = "N/A (this device is Secondary - Google Drive backup runs on the Primary device)"
+	} else if st, err := t.cfgMgr.LoadDriveSyncStatus(); err == nil && st != nil {
+		displayTime := st.Time
+		if ts, parseErr := time.Parse(time.RFC3339, st.Time); parseErr == nil {
+			displayTime = ts.Local().Format("2006-01-02 15:04")
+		}
+		if st.Success {
+			driveSyncStatus = fmt.Sprintf("Last synced: %s", displayTime)
+		} else {
+			driveSyncStatus = fmt.Sprintf("Last sync failed (%s): %s", displayTime, st.Error)
+		}
+	}
+
 	if role == "" {
 		role = "Not Initialized"
 	}
@@ -397,6 +417,7 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 		GitStatus:        gitStatus,
 		RcloneStatus:     rcloneStatus,
 		ICloudStatus:     icloudStatus,
+		DriveSyncStatus:  driveSyncStatus,
 		DeviceRole:       role,
 		RcloneRemote:     "ObsidianVault",
 		RclonePath:       "VaultBackup",

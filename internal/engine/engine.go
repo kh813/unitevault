@@ -161,9 +161,19 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 
 	if cfg.RcloneRemote != "" && cfg.RclonePath != "" {
 		remoteTarget := fmt.Sprintf("%s:%s", cfg.RcloneRemote, cfg.RclonePath)
-		if err := e.drive.Sync(ctx, e.vaultPath, remoteTarget); err != nil {
-			// Log error and carry over
-			return fmt.Errorf("rclone sync failed: %w", err)
+		syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget)
+
+		// Recorded regardless of outcome so the Settings window can surface
+		// "last synced" / "last sync failed" without needing a live
+		// connection to this (possibly not currently running) daemon loop.
+		status := config.DriveSyncStatus{Time: time.Now().Format(time.RFC3339), Success: syncErr == nil}
+		if syncErr != nil {
+			status.Error = syncErr.Error()
+		}
+		_ = e.cfgMgr.SaveDriveSyncStatus(status)
+
+		if syncErr != nil {
+			return fmt.Errorf("rclone sync failed: %w", syncErr)
 		}
 	}
 

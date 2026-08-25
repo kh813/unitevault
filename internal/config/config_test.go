@@ -127,6 +127,54 @@ func TestConfigManager_InstallReminderDismissed(t *testing.T) {
 	}
 }
 
+func TestConfigManager_DriveSyncStatus(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := config.NewConfigManagerWithDir(tempDir)
+
+	status, err := cm.LoadDriveSyncStatus()
+	if err != nil {
+		t.Fatalf("expected no error loading non-existent drive sync status, got %v", err)
+	}
+	if status != nil {
+		t.Errorf("expected nil status before any sync has been recorded, got %+v", status)
+	}
+
+	success := config.DriveSyncStatus{Time: "2026-08-25T15:04:00+09:00", Success: true}
+	if err := cm.SaveDriveSyncStatus(success); err != nil {
+		t.Fatalf("failed to save drive sync status: %v", err)
+	}
+	loaded, err := cm.LoadDriveSyncStatus()
+	if err != nil {
+		t.Fatalf("failed to load saved drive sync status: %v", err)
+	}
+	if loaded == nil || !loaded.Success || loaded.Time != success.Time {
+		t.Errorf("expected loaded status to round-trip %+v, got %+v", success, loaded)
+	}
+
+	failure := config.DriveSyncStatus{Time: "2026-08-25T16:00:00+09:00", Success: false, Error: "network error"}
+	if err := cm.SaveDriveSyncStatus(failure); err != nil {
+		t.Fatalf("failed to save drive sync status: %v", err)
+	}
+	loaded, err = cm.LoadDriveSyncStatus()
+	if err != nil {
+		t.Fatalf("failed to load saved drive sync status: %v", err)
+	}
+	if loaded == nil || loaded.Success || loaded.Error != "network error" {
+		t.Errorf("expected loaded status to round-trip %+v, got %+v", failure, loaded)
+	}
+
+	if err := cm.ResetConfig(); err != nil {
+		t.Fatalf("ResetConfig failed: %v", err)
+	}
+	status, err = cm.LoadDriveSyncStatus()
+	if err != nil {
+		t.Fatalf("expected no error loading drive sync status after reset, got %v", err)
+	}
+	if status != nil {
+		t.Error("expected ResetConfig to clear the drive sync status")
+	}
+}
+
 func TestGetConfigDir(t *testing.T) {
 	dir, err := config.GetConfigDir()
 	if err != nil {

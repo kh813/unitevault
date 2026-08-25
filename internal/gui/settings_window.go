@@ -26,6 +26,11 @@ type SettingsFormData struct {
 	// platforms where iCloud isn't a separate install (macOS/iOS) to hide
 	// this row entirely instead of showing it as "not found" everywhere.
 	ICloudStatus string
+	// DriveSyncStatus is a human-readable summary of the most recent Google
+	// Drive backup attempt (e.g. "Last synced: 2026-08-25 15:04", "Last
+	// sync failed: <error>", or a note that this device's role doesn't
+	// perform Google Drive backup). Always shown when non-empty.
+	DriveSyncStatus string
 
 	// Configurable Form
 	VaultPath       string
@@ -267,6 +272,9 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// concept (a separate iCloud install) that doesn't apply there.
 	if data.ICloudStatus != "" {
 		statusRows = append(statusRows, statusLine("iCloud status:", data.ICloudStatus, "Install iCloud...", installICloud))
+	}
+	if data.DriveSyncStatus != "" {
+		statusRows = append(statusRows, statusLine("Google Drive sync:", data.DriveSyncStatus, "", nil))
 	}
 	statusRows = append(statusRows, statusLine("Device role:", orDefault(data.DeviceRole, "Not Initialized"), "", nil))
 	statusCard := widget.NewCard("Status", "", container.NewVBox(statusRows...))

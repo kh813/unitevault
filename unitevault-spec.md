@@ -201,6 +201,8 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
   - **[ Status セクション ]**:
     - Git インストール状態 (`Git status: Installed / Not Found`)
     - rclone インストール状態 (`rclone status: Installed / Not Found`)
+    - iCloud for Windows インストール状態（Windowsのみ表示。`Install iCloud...` ボタンで自動インストール、3.6.4節）
+    - Google Driveの同期状況（`Last synced: <日時>` / `Last sync failed (<日時>): <エラー>` / 未実行なら `Never synced yet`。Secondary機では実行主体でないことを示す固定文言を表示。ボタンは無し、直近の`rclone sync`結果を表示するのみ）
     - デバイス役割 (`Device Role: Primary / Secondary`)
   - **[ Obsidian Vault セクション ]**:
     - **Vault Folder Location**: テキスト入力 ＋ `[ Select Folder... ]` ボタン。ラベルや案内文には「Directory」「Path」等の専門用語を避け、一般ユーザーにもわかりやすい「Folder」表記に統一する。`[ Select Folder... ]` は実行中のOSが提供する標準のフォルダ選択ダイアログ（macOS: Cocoaのフォルダ選択パネル、Windows: `IFileDialog`）を表示する。SettingsウィンドウはFyne製だが、フォルダ選択だけはFyne独自のダイアログ（見た目がOS標準と異なり違和感を与える）ではなく、OS標準の見た目のダイアログを使う。iPhone/Windows間の同期はiCloudに委任するため（1.3節）、このセクションに同期間隔などの設定項目は置かない。

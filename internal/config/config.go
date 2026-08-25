@@ -87,6 +87,51 @@ func (cm *ConfigManager) InstallReminderDismissedPath() string {
 	return filepath.Join(cm.configDir, "install_reminder_dismissed")
 }
 
+// DriveSyncStatus records the outcome of the most recent Google Drive
+// backup attempt (the rclone sync step of a Primary device's sync cycle),
+// so the Settings window can show it without needing a live connection to
+// the running daemon loop (settings_window.go is rebuilt independently by
+// reading disk state, not by querying the tray app's in-memory state).
+type DriveSyncStatus struct {
+	Time    string `json:"time"` // RFC3339
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// DriveSyncStatusPath returns the path to drive_sync_status.json.
+func (cm *ConfigManager) DriveSyncStatusPath() string {
+	return filepath.Join(cm.configDir, "drive_sync_status.json")
+}
+
+// SaveDriveSyncStatus persists the outcome of a Google Drive sync attempt.
+func (cm *ConfigManager) SaveDriveSyncStatus(status DriveSyncStatus) error {
+	if err := cm.EnsureDir(); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal drive sync status: %w", err)
+	}
+	return os.WriteFile(cm.DriveSyncStatusPath(), data, 0644)
+}
+
+// LoadDriveSyncStatus reads the last-recorded Google Drive sync outcome, or
+// returns (nil, nil) if a sync has never been attempted on this device.
+func (cm *ConfigManager) LoadDriveSyncStatus() (*DriveSyncStatus, error) {
+	data, err := os.ReadFile(cm.DriveSyncStatusPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read drive sync status: %w", err)
+	}
+	var status DriveSyncStatus
+	if err := json.Unmarshal(data, &status); err != nil {
+		return nil, fmt.Errorf("failed to parse drive sync status: %w", err)
+	}
+	return &status, nil
+}
+
 // IsInstallReminderDismissed reports whether the user previously checked
 // "Don't show this again" on the missing-dependency startup reminder.
 func (cm *ConfigManager) IsInstallReminderDismissed() bool {
@@ -188,5 +233,6 @@ func (cm *ConfigManager) ResetConfig() error {
 	_ = os.Remove(cm.ConfigPath())
 	_ = os.Remove(cm.RolePath())
 	_ = os.Remove(cm.InstallReminderDismissedPath())
+	_ = os.Remove(cm.DriveSyncStatusPath())
 	return nil
 }
