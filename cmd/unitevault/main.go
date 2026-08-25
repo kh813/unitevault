@@ -66,8 +66,8 @@ func printUsage() {
 //go:embed assets/tray/icon@2x.png
 var trayIconColorPNG []byte
 
-//go:embed assets/tray/icon-mono@2x.png
-var trayIconMonoPNG []byte
+//go:embed assets/tray/icon-mono.svg
+var trayIconMonoSVG []byte
 
 // trayApp bundles the long-lived state shared by the tray menu and the
 // Settings window (spec 3.5.2/8.3), so callbacks don't need long parameter
@@ -90,15 +90,18 @@ func runTrayMode() {
 	gui.InitApp(appIcon)
 
 	// macOS menu bars render either black-on-light or white-on-dark, so the
-	// tray icon there uses a monochrome glyph wrapped as a Fyne
+	// tray icon there uses a monochrome SVG glyph wrapped as a Fyne
 	// ThemedResource - Fyne's desktop driver detects that type and hands it
 	// to the OS as a native "template" image, which macOS then recolors
-	// automatically to match the current menu bar appearance. Windows/Linux
+	// automatically to match the current menu bar appearance (an SVG, not a
+	// PNG, is required here: ThemedResource always tries to parse its source
+	// as SVG XML to recolor it, and only an actual SVG lets that succeed
+	// instead of silently falling back with a logged warning). Windows/Linux
 	// trays have no such mechanism, so they get the colored app icon
 	// instead, matching how most tray apps look there.
 	var trayIcon fyne.Resource = appIcon
 	if runtime.GOOS == "darwin" {
-		trayIcon = theme.NewThemedResource(fyne.NewStaticResource("unitevault-tray-mono.png", trayIconMonoPNG))
+		trayIcon = theme.NewThemedResource(fyne.NewStaticResource("unitevault-tray-mono.svg", trayIconMonoSVG))
 	}
 
 	// Route rclone's first-time-download progress (see drive.NewClient)

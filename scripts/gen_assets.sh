@@ -43,11 +43,12 @@ echo "== Rendering tray icons =="
 swift scripts/gen_icon.swift app 32 "$TRAY/icon.png"
 swift scripts/gen_icon.swift app 64 "$TRAY/icon@2x.png"
 
-# Monochrome glyph: wrapped as a Fyne ThemedResource and used only for the
-# macOS menu bar, where it's rendered as a native template icon that macOS
-# automatically recolors for the light/dark menu bar.
-swift scripts/gen_icon.swift mono 32 "$TRAY/icon-mono.png"
-swift scripts/gen_icon.swift mono 64 "$TRAY/icon-mono@2x.png"
+echo "== Generating monochrome macOS menu bar icon (SVG) =="
+# An SVG (not PNG) specifically so Fyne's ThemedResource can parse and
+# recolor it cleanly - see scripts/gen_tray_svg.py for why. Wrapped as a
+# ThemedResource, Fyne hands this to macOS as a native template image, which
+# the OS then recolors automatically for the light/dark menu bar.
+python3 scripts/gen_tray_svg.py
 
 echo "== Building tray icon.ico (multi-resolution, colored) =="
 swift scripts/gen_icon.swift app 16 /tmp/unitevault-ico-16.png
@@ -59,6 +60,6 @@ python3 scripts/pack_ico.py "$TRAY/icon.ico" \
 rm -f /tmp/unitevault-ico-16.png /tmp/unitevault-ico-32.png /tmp/unitevault-ico-48.png /tmp/unitevault-ico-256.png
 
 echo "== Syncing tray assets into cmd/unitevault (go:embed source) =="
-cp "$TRAY/icon.png" "$TRAY/icon@2x.png" "$TRAY/icon-mono.png" "$TRAY/icon-mono@2x.png" "$TRAY/icon.ico" "$EMBED_TRAY/"
+cp "$TRAY/icon.png" "$TRAY/icon@2x.png" "$TRAY/icon-mono.svg" "$TRAY/icon.ico" "$EMBED_TRAY/"
 
 echo "Done."

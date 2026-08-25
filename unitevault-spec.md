@@ -467,7 +467,7 @@ unitevault/                         ← ソースコードリポジトリ（GitH
 - **アセット構成**（`scripts/gen_assets.sh` で再生成可能。ソースは `scripts/gen_icon.swift` によるCoreGraphicsでのベクター描画）:
   - macOS App アイコン一式: `assets/icon.iconset/*.png` → `assets/AppIcon.icns`（パープル背景＋白矢印）
   - トレイ用アイコン（カラー版・Windows/Linux用 兼 アプリ/ウィンドウアイコン）: `assets/tray/icon.png` (32x32), `assets/tray/icon@2x.png` (64x64)
-  - トレイ用アイコン（モノクロ版・macOSメニューバー専用）: `assets/tray/icon-mono.png` (32x32), `assets/tray/icon-mono@2x.png` (64x64)
+  - トレイ用アイコン（モノクロ版・macOSメニューバー専用）: `assets/tray/icon-mono.svg`。PNGではなくSVGを使うのは、FyneのThemedResourceが内部でSVGとして色置換を試みるため（PNGを渡すと置換に失敗し警告ログを出したうえでフォールバックする）。`width`/`height`属性を省略すると一部のSVGレンダラでスケーリングが崩れるため、`viewBox`と同じ値を明示的に指定すること。
   - Windows用アイコンリソース: `assets/tray/icon.ico`（16/32/48/256pxを含むマルチ解像度、カラー版から生成）
 
 ### 8.2 事前環境チェック（Preflight Checks）と依存管理
