@@ -2,6 +2,9 @@
 
 Obsidian Vault（Markdownファイル群）を Mac / iPhone / Windows 間で安全に利用しつつ、最終的なバックアップ先として Google Drive を用いる同期・バックアップツールです。
 
+> **前提: VaultフォルダはiCloud Drive上に置いてください。**
+> Obsidian無料版には公式の複数端末間同期機能がありません。UniteVaultはあくまで「iCloudで既に同期されたVaultファイルの競合解消」と「Google Driveへのバックアップ」を行うツールであり、**端末間でのVaultファイルそのものの複製・転送（Mac⇔Windows⇔iPhone/iPadの同期）はiCloud Driveに委ねています**（特徴の項参照）。そのため、Windows / Mac / iPhone・iPadの複数端末で同じVaultを更新し続けたい場合は、事前にVaultフォルダ自体をiCloud Drive配下に作成・移動しておく必要があります（Windowsでは「iCloud for Windows」の追加インストールが必要。手順4参照）。**Windows 1台だけでObsidianを使い、Google Driveにバックアップするだけ**であれば、この前提は不要です（ローカルフォルダのままで構いません）。
+
 ## 特徴
 
 - **iCloud同期との協調**: ファイル実体の端末間同期は既存のiCloud Driveを利用（このアプリは端末を跨いだファイルコピーは行いません）
