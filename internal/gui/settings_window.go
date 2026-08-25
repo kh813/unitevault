@@ -7,8 +7,10 @@ import (
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -166,6 +168,34 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	intervalEntry := widget.NewEntry()
 	intervalEntry.SetText(fmt.Sprintf("%d", data.IntervalSeconds))
 
+	// unsavedLabel flags edits the user hasn't saved yet by comparing every
+	// field's live text against its value at the moment this content was
+	// built (i.e. what's actually on disk). It never disables Save itself -
+	// Save must always stay clickable so it can also perform first-time
+	// setup/validation (see saveSettings' "Vault Required" check) even when
+	// nothing has been "changed" yet.
+	baselineVault := strings.TrimSpace(vaultEntry.Text)
+	baselineRemote := strings.TrimSpace(remoteEntry.Text)
+	baselineTargetPath := strings.TrimSpace(targetPathEntry.Text)
+	baselineInterval := strings.TrimSpace(intervalEntry.Text)
+
+	unsavedLabel := canvas.NewText("● Unsaved changes", theme.Color(theme.ColorNameWarning))
+	unsavedLabel.TextStyle = fyne.TextStyle{Bold: true}
+	unsavedLabel.Hidden = true
+
+	updateDirtyState := func(string) {
+		dirty := strings.TrimSpace(vaultEntry.Text) != baselineVault ||
+			strings.TrimSpace(remoteEntry.Text) != baselineRemote ||
+			strings.TrimSpace(targetPathEntry.Text) != baselineTargetPath ||
+			strings.TrimSpace(intervalEntry.Text) != baselineInterval
+		unsavedLabel.Hidden = !dirty
+		unsavedLabel.Refresh()
+	}
+	vaultEntry.OnChanged = updateDirtyState
+	remoteEntry.OnChanged = updateDirtyState
+	targetPathEntry.OnChanged = updateDirtyState
+	intervalEntry.OnChanged = updateDirtyState
+
 	rcloneForm := widget.NewForm(
 		widget.NewFormItem("Remote Name", remoteEntry),
 		widget.NewFormItem("Remote Status", widget.NewLabel(orDefault(data.RcloneRemoteInfo, "Unknown"))),
@@ -206,7 +236,6 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		removeRemoteBtn := widget.NewButton("Remove Remote Configuration...", func() {
 			handlers.OnRemoveRemote(currentSnapshot())
 		})
-		removeRemoteBtn.Importance = widget.DangerImportance
 		rcloneButtons = append(rcloneButtons, removeRemoteBtn)
 	}
 	rcloneCard := widget.NewCard("rclone", "", container.NewVBox(append([]fyne.CanvasObject{rcloneForm}, rcloneButtons...)...))
@@ -238,7 +267,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	})
 
 	resetBtn := widget.NewButton("Reset Configuration", func() {
-		Confirm(
+		ConfirmDanger(
 			"Reset Configuration",
 			"Are you sure you want to reset UniteVault configuration?\nThis clears local settings and role info, returning this device to an uninitialized state.",
 			func(confirmed bool) {
@@ -248,9 +277,8 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			},
 		)
 	})
-	resetBtn.Importance = widget.DangerImportance
 
-	buttonRow := container.NewBorder(nil, nil, resetBtn, container.NewHBox(cancelBtn, saveBtn))
+	buttonRow := container.NewBorder(nil, nil, resetBtn, container.NewHBox(cancelBtn, saveBtn), container.NewCenter(unsavedLabel))
 
 	// No scroll container: ShowSettingsWindow resizes the window to this
 	// content's actual MinSize on every rebuild, so the window always fits

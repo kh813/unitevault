@@ -589,7 +589,7 @@ func (t *trayApp) removeRemote(current gui.SettingsFormData) {
 		return
 	}
 
-	gui.Confirm(
+	gui.ConfirmDanger(
 		"Remove rclone Remote",
 		fmt.Sprintf(
 			"Remove the rclone remote '%s'?\n\nThis deletes its saved Google Drive credentials from rclone's configuration (the files already backed up on Google Drive are not affected). You can set it up again afterwards.",
@@ -631,7 +631,7 @@ func (t *trayApp) saveSettings(data gui.SettingsFormData) {
 	// following Vault changes (buildSettingsContent), so this only fires
 	// when the user has kept (or retyped) the same target path on purpose.
 	if prevCfg, err := t.cfgMgr.LoadConfig(); err == nil && vaultChangedWithSameTarget(prevCfg, data) {
-		gui.Confirm(
+		gui.ConfirmDanger(
 			"Vault Changed - Same Backup Target",
 			fmt.Sprintf(
 				"You're changing the Vault from:\n%s\nto:\n%s\n\nbut the Google Drive Target Folder Path is still '%s'.\n\n"+

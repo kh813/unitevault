@@ -20,13 +20,29 @@ func Info(title, message string) {
 // so the result is delivered via onResult once the user responds. Safe to
 // call from any goroutine; onResult always runs on the Fyne main thread.
 func Confirm(title, message string, onResult func(confirmed bool)) {
+	showConfirm(title, message, widget.HighImportance, onResult)
+}
+
+// ConfirmDanger is Confirm for a genuinely destructive action (deleting
+// configuration, overwriting a previous backup, ...): the confirming button
+// is styled as a warning (red) instead of the normal blue. Buttons that
+// merely *open* this dialog should stay visually calm (default importance)
+// - the warning color belongs on the one button that actually commits to
+// the destructive action, not on something sitting on-screen at all times.
+func ConfirmDanger(title, message string, onResult func(confirmed bool)) {
+	showConfirm(title, message, widget.DangerImportance, onResult)
+}
+
+func showConfirm(title, message string, confirmImportance widget.Importance, onResult func(confirmed bool)) {
 	fyne.Do(func() {
 		ensureWindowVisible()
-		dialog.ShowConfirm(title, message, func(ok bool) {
+		d := dialog.NewConfirm(title, message, func(ok bool) {
 			if onResult != nil {
 				onResult(ok)
 			}
 		}, mainWindow)
+		d.SetConfirmImportance(confirmImportance)
+		d.Show()
 	})
 }
 

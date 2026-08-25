@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
@@ -333,4 +334,81 @@ func hasButton(root fyne.CanvasObject, text string) bool {
 		}
 	})
 	return found
+}
+
+func findText(t *testing.T, root fyne.CanvasObject, text string) *canvas.Text {
+	t.Helper()
+	var found *canvas.Text
+	walkObjects(root, func(o fyne.CanvasObject) {
+		if c, ok := o.(*canvas.Text); ok && c.Text == text {
+			found = c
+		}
+	})
+	if found == nil {
+		t.Fatalf("canvas text %q not found in settings window content", text)
+	}
+	return found
+}
+
+// TestBuildSettingsContent_DestructiveButtonsAreNotDanger guards the
+// distinction between a button that merely *opens* a confirmation dialog
+// (which should stay visually calm at all times) and the dialog's actual
+// confirm button (which carries the danger color) - see ConfirmDanger.
+// "Reset Configuration" and "Remove Remote Configuration..." sit on-screen
+// permanently, so bright red there would overstate the risk of just looking
+// at the Settings window; "Save Settings" is what should draw the eye.
+func TestBuildSettingsContent_DestructiveButtonsAreNotDanger(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{
+		VaultPath:        "/tmp/vault",
+		RcloneRemoteInfo: "Configured (ObsidianVault)",
+	}, SettingsHandlers{
+		OnReset:        func() {},
+		OnRemoveRemote: func(SettingsFormData) {},
+	})
+
+	resetBtn := findButton(t, content, "Reset Configuration")
+	if resetBtn.Importance == widget.DangerImportance {
+		t.Error("expected Reset Configuration to not use DangerImportance while just sitting on screen")
+	}
+
+	removeRemoteBtn := findButton(t, content, "Remove Remote Configuration...")
+	if removeRemoteBtn.Importance == widget.DangerImportance {
+		t.Error("expected Remove Remote Configuration... to not use DangerImportance while just sitting on screen")
+	}
+
+	saveBtn := findButton(t, content, "Save Settings")
+	if saveBtn.Importance != widget.HighImportance {
+		t.Error("expected Save Settings to remain the most prominent (HighImportance) button")
+	}
+}
+
+// TestBuildSettingsContent_UnsavedChangesIndicator guards the "unsaved
+// changes" hint: hidden on a freshly-built form, shown as soon as any field
+// diverges from the value the window was built with, and hidden again if
+// the user edits it back to that original value.
+func TestBuildSettingsContent_UnsavedChangesIndicator(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{
+		VaultPath:    "/tmp/vault",
+		RcloneRemote: "ObsidianVault",
+	}, SettingsHandlers{})
+
+	indicator := findText(t, content, "● Unsaved changes")
+	if !indicator.Hidden {
+		t.Error("expected the unsaved-changes indicator to start hidden on a freshly-built form")
+	}
+
+	remoteEntry := findEntry(t, content, "ObsidianVault")
+	remoteEntry.SetText("MyCustomRemote")
+	if indicator.Hidden {
+		t.Error("expected the unsaved-changes indicator to show once a field diverges from its original value")
+	}
+
+	remoteEntry.SetText("ObsidianVault")
+	if !indicator.Hidden {
+		t.Error("expected the unsaved-changes indicator to hide again once the field matches its original value")
+	}
 }
