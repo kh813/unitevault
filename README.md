@@ -98,7 +98,7 @@ Primary端末（基本的にMac、または最初にセットアップした端�
 
 ### 8. 2台目以降の端末を追加する
 
-同じObsidian VaultをiCloud経由で使っている別のMac／Windows機にもUniteVaultをインストールし、手順3〜6を同様に行ってください。Google Drive上に既に `PRIMARY_MARKER.json` が存在するため、自動的に **Secondary** として初期化され、既存のVault・ログ一式が `rclone copy` でその端末にも取得されます。
+同じObsidian VaultをiCloud経由で使っている別のMac／Windows機にもUniteVaultをインストールし、手順3〜6を同様に行ってください。Google Drive上に既に `PRIMARY_MARKER.json` が存在するため、自動的に **Secondary** として初期化されます（Vault本体は既にiCloud経由でその端末にも取得済みのものをそのまま使うため、Google Driveから改めてダウンロードすることはありません）。
 
 iPhone/iPadは追加インストール不要（iCloud同期のみ）です。
 

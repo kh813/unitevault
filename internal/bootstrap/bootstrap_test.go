@@ -14,6 +14,7 @@ import (
 
 type mockDrive struct {
 	remoteFiles map[string][]byte
+	copyCalled  bool
 }
 
 func newMockDrive() *mockDrive {
@@ -25,6 +26,7 @@ func (m *mockDrive) Sync(ctx context.Context, srcPath, remoteTarget string) erro
 }
 
 func (m *mockDrive) Copy(ctx context.Context, remoteSrc, dstPath string) error {
+	m.copyCalled = true
 	return nil
 }
 
@@ -126,5 +128,57 @@ func TestBootstrap_SecondaryInitialization(t *testing.T) {
 	cachedRole, _ := cfgMgr.LoadRole()
 	if cachedRole != "secondary" {
 		t.Fatalf("expected cached role secondary, got %s", cachedRole)
+	}
+}
+
+// TestBootstrap_SecondaryInitialization_DoesNotCopyFromDrive guards against
+// a real reported bug: a Secondary device's Vault folder already has the
+// current content via iCloud Drive by the time this runs (see spec 1.3 -
+// iCloud, not rclone, distributes Vault content between devices), and its
+// own sync cycle never reads other devices' logs either (only Primary's
+// merge phase does). An earlier version still did an unconditional
+// `rclone copy` from Google Drive here "just in case", which meant writing
+// Google Drive's backup on top of a folder iCloud had already populated -
+// on Windows this surfaced as file conflicts during Secondary setup. A
+// pre-existing local file must survive Secondary initialization untouched.
+func TestBootstrap_SecondaryInitialization_DoesNotCopyFromDrive(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	// Simulate iCloud having already populated the Vault folder on this
+	// device before UniteVault ever runs.
+	if err := os.MkdirAll(vaultPath, 0755); err != nil {
+		t.Fatalf("failed to create vault dir: %v", err)
+	}
+	preExistingContent := []byte("already synced via iCloud")
+	preExistingFile := filepath.Join(vaultPath, "Note.md")
+	if err := os.WriteFile(preExistingFile, preExistingContent, 0644); err != nil {
+		t.Fatalf("failed to seed pre-existing vault file: %v", err)
+	}
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	mock := newMockDrive()
+
+	remoteMarkerFile := "gdrive:Backup/_sync/PRIMARY_MARKER.json"
+	existingMarker := bootstrap.PrimaryMarker{SchemaVersion: 1, PrimaryDeviceID: "other-primary-uuid", PrimaryLabel: "other-mac"}
+	markerBytes, _ := json.Marshal(existingMarker)
+	mock.remoteFiles[remoteMarkerFile] = markerBytes
+
+	bootstrapper := bootstrap.NewBootstrapper(cfgMgr, mock)
+	if _, err := bootstrapper.InitializeNode(context.Background(), vaultPath, "gdrive:Backup", "win-secondary"); err != nil {
+		t.Fatalf("expected no error initializing secondary node, got %v", err)
+	}
+
+	if mock.copyCalled {
+		t.Error("expected Secondary initialization to never call drive.Copy - content distribution is iCloud's job")
+	}
+
+	got, err := os.ReadFile(preExistingFile)
+	if err != nil {
+		t.Fatalf("expected pre-existing vault file to survive, got error reading it: %v", err)
+	}
+	if string(got) != string(preExistingContent) {
+		t.Errorf("expected pre-existing vault file content to be untouched, got %q", got)
 	}
 }

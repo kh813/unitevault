@@ -58,7 +58,7 @@ func (b *Bootstrapper) InitializeNode(ctx context.Context, vaultPath, remoteTarg
 	}
 
 	// Initialize as Secondary
-	return "secondary", b.initAsSecondary(ctx, vaultPath, remoteTarget, deviceID)
+	return "secondary", b.initAsSecondary(vaultPath, deviceID)
 }
 
 func (b *Bootstrapper) initAsPrimary(ctx context.Context, vaultPath, remoteTarget, deviceID, label string) error {
@@ -112,7 +112,7 @@ func (b *Bootstrapper) initAsPrimary(ctx context.Context, vaultPath, remoteTarge
 	if downloadedMarker.PrimaryDeviceID != deviceID {
 		// Race condition detected! Another node became primary first. Convert to secondary.
 		_ = b.cfgMgr.SaveRole("secondary")
-		return b.initAsSecondary(ctx, vaultPath, remoteTarget, deviceID)
+		return b.initAsSecondary(vaultPath, deviceID)
 	}
 
 	if err := b.cfgMgr.SaveRole("primary"); err != nil {
@@ -122,12 +122,18 @@ func (b *Bootstrapper) initAsPrimary(ctx context.Context, vaultPath, remoteTarge
 	return nil
 }
 
-func (b *Bootstrapper) initAsSecondary(ctx context.Context, vaultPath, remoteTarget, deviceID string) error {
-	// Clone/Copy remote Vault & log files to local
-	if err := b.drive.Copy(ctx, remoteTarget, vaultPath); err != nil {
-		return fmt.Errorf("failed to clone vault from remote: %w", err)
-	}
-
+// initAsSecondary does *not* pull the Vault or other devices' logs from
+// Google Drive: per spec 1.3, device-to-device content distribution is
+// iCloud Drive's job, not rclone's - a Secondary's Vault folder already has
+// the current content via iCloud by the time this runs, and RunCycle's
+// Secondary path never reads other devices' logs anyway (only Primary does,
+// during its merge phase). An earlier version did an unconditional
+// `rclone copy` here "to be safe", but that meant copying Google Drive's
+// backup on top of a folder iCloud had already populated - a redundant
+// transfer that could actively conflict with it (e.g. mid-download iCloud
+// placeholder files colliding with the incoming copy) instead of ever being
+// needed for anything this device's own sync cycle actually uses.
+func (b *Bootstrapper) initAsSecondary(vaultPath, deviceID string) error {
 	// Create empty log file for this device if not exists
 	localLogPath := filepath.Join(vaultPath, "_sync", fmt.Sprintf("log-%s.jsonl", deviceID))
 	if err := os.MkdirAll(filepath.Dir(localLogPath), 0755); err != nil {
