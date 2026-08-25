@@ -465,14 +465,14 @@ func (t *trayApp) openSettingsGUI() {
 	data := t.buildFormData()
 	t.showSettingsGUI(data)
 
-	if runtime.GOOS == "windows" && !t.icloudNoticeShown && data.VaultPath == "" {
+	if runtime.GOOS == "windows" && !t.icloudNoticeShown && data.VaultPath == "" && data.ICloudStatus == "Not Found" {
 		t.icloudNoticeShown = true
 		gui.Confirm(
 			"iPhone / iCloud Drive Setup Notice",
-			"If you plan to sync this Vault with an iPhone (iOS), 'iCloud for Windows' must be installed and your Vault folder should be stored inside your iCloud Drive folder.\n\nWould you like to open the 'iCloud for Windows' download page?",
+			"If you plan to sync this Vault with an iPhone (iOS), 'iCloud for Windows' must be installed and your Vault folder should be stored inside your iCloud Drive folder.\n\nInstall iCloud for Windows now? (You can also do this later from Settings > Status > Install iCloud...)",
 			func(confirmed bool) {
 				if confirmed {
-					_ = bootstrap.OpenURL(bootstrap.GetICloudDownloadURL())
+					t.installICloud(data)
 				}
 			},
 		)

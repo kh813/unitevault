@@ -180,15 +180,22 @@ func launchICloud() {
 	}
 }
 
-// AutoInstallICloud attempts to silently install Apple's classic iCloud for
-// Windows client via winget (Windows only - iCloud ships with macOS/iOS, so
-// this has nothing to do there). Deliberately targets the classic/legacy
-// winget package ("Apple.iCloud") rather than the Microsoft Store version:
-// the classic installer supports a real unattended --silent install, while
-// a Store install depends on the machine being signed into a Microsoft
-// Store account and is far less reliable to script. The classic client is
-// fully sufficient for enabling the iCloud Drive folder this app needs -
-// Apple's newer Store-exclusive features aren't required here.
+// icloudMSStoreID is Apple's iCloud product ID on the Microsoft Store
+// (visible at https://apps.microsoft.com/detail/9pktq5699m62).
+const icloudMSStoreID = "9PKTQ5699M62"
+
+// AutoInstallICloud attempts to install Apple's iCloud for Windows client
+// via winget (Windows only - iCloud ships with macOS/iOS, so this has
+// nothing to do there).
+//
+// Tries the Microsoft Store version first: Store (AppX/MSIX) packages
+// install per-user with no administrator elevation, unlike the classic
+// installer below - a real UAC prompt is a meaningfully worse experience
+// for something this app triggers on the user's behalf. If that fails (no
+// Store access, an older winget that still requires a signed-in Store
+// account, corporate policy blocking Store installs, ...), falls back to
+// the classic/legacy winget package ("Apple.iCloud"), which does require
+// elevation but is more predictably scriptable via --silent.
 func AutoInstallICloud() error {
 	if runtime.GOOS != "windows" {
 		return fmt.Errorf("iCloud auto-installation is only applicable on Windows")
@@ -203,8 +210,14 @@ func AutoInstallICloud() error {
 		return fmt.Errorf("winget was not found - please install iCloud for Windows manually from %s", GetICloudDownloadURL())
 	}
 
-	cmd := exec.Command(wingetPath, "install", "--id", "Apple.iCloud", "-e", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements", "--silent")
-	if err := cmd.Run(); err != nil {
+	storeCmd := exec.Command(wingetPath, "install", "--id", icloudMSStoreID, "-e", "--source", "msstore", "--accept-source-agreements", "--accept-package-agreements", "--silent")
+	if storeCmd.Run() == nil && CheckICloudInstalled() {
+		launchICloud()
+		return nil
+	}
+
+	classicCmd := exec.Command(wingetPath, "install", "--id", "Apple.iCloud", "-e", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements", "--silent")
+	if err := classicCmd.Run(); err != nil {
 		return fmt.Errorf("winget install failed: %w", err)
 	}
 	if !CheckICloudInstalled() {

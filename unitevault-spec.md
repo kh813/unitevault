@@ -328,7 +328,7 @@ UniteVault は事前チェック機能（Preflight Checks）を備えており�
 | Git for Windows | `git merge-file` コマンドの利用 | 未検出時、`winget install --id Git.Git` を試行し、不可の場合は公式 `Git-Installer.exe` を一時フォルダへ自動取得・起動 |
 | rclone | Google Driveへのミラー転送 | 未検出時、ユーザー設定領域 (`%APPDATA%\unitevault\bin\rclone.exe`) へ公式最新バイナリを自動取得・解凍配置 |
 | 同期エンジン (`UniteVault.exe`) | システムトレイ常駐GUI | ZIP形式ポータブル版（`UniteVault-windows-amd64.zip`）で配布 |
-| iCloud for Windows | Mac/iPhone/iPadとのVaultフォルダ共有（iCloud Drive） | 未検出時、`winget install --id Apple.iCloud`（クラシック版。Microsoft Store版は無人インストールに不向きなため意図的に対象外）を試行。インストール後はApple ID サインイン・iCloud Drive有効化への誘導としてStart Menuショートカット経由でアプリを自動起動するが、それ以降（サインイン・2FA）は手動操作が必須 |
+| iCloud for Windows | Mac/iPhone/iPadとのVaultフォルダ共有（iCloud Drive） | 未検出時、まず`winget install --id 9PKTQ5699M62 --source msstore`（Microsoft Store版）を試行する。Store版はユーザー権限のみでインストールでき、管理者権限（UACダイアログ）を必要としないため優先する。失敗した場合（Store未サインイン・企業ポリシー等）のみ、`winget install --id Apple.iCloud`（クラシック版。管理者権限が必要）にフォールバックする。インストール後はApple ID サインイン・iCloud Drive有効化への誘導としてStart Menuショートカット経由でアプリを自動起動するが、それ以降（サインイン・2FA）は手動操作が必須 |
 
 #### 3.6.5 実装言語としてGoを採用する理由
 - 単一の静的バイナリにクロスコンパイルできるため、Mac/Windowsとも「実行ファイルを置くだけ」で動き、Python等のようにランタイムやパッケージ管理（pip等）の整備が不要。
@@ -517,8 +517,8 @@ unitevault/                         ← ソースコードリポジトリ（GitH
    - システム `PATH` およびユーザーローカル領域（`~/.unitevault/bin/rclone` または `%APPDATA%\unitevault\bin\rclone.exe`）を検索する。
    - 未検出の場合、アプリバンドル内ではなく**書き込み権限が確実に存在するユーザー設定領域**（`~/.unitevault/bin/`）へ、OS/アーキテクチャに応じた最新の official `rclone` バイナリを自動ダウンロード・解凍配置するダイアログを提示する。
    - 自動ダウンロード失敗時またはユーザー拒否時は、公式ダウンロードページ（`https://rclone.org/downloads/`）の案内ブラウザリンクを提供する。
-3. **iCloud for Windows のセットアップ案内（Windows環境）**:
-   - Windows側でiPhone（iOS）との同期を行う場合、Vaultフォルダが iCloud Drive 配下にある必要があるため、初期設定時に「iCloud for Windows」のインストール確認および案内リンク（Appleサポート／Microsoft Store）を表示する。
+3. **iCloud for Windows の自動インストール（Windows環境）**:
+   - Windows側でiPhone（iOS）との同期を行う場合、Vaultフォルダが iCloud Drive 配下にある必要があるため、初期設定時（Vault未設定かつiCloud未検出の場合）に確認ダイアログを表示し、承諾されれば`AutoInstallICloud`（3.6.4節）でその場でインストールを実行する（以前はダウンロードページへのリンクを提示するだけだったが、Settings > Statusの `Install iCloud...` ボタンと同じ実インストール動作に統一した）。
 
 ### 8.3 設定画面（GUI Settings Window / Setup Wizard）仕様
 メニューバーの「Settings...」選択時および未初期化時の起動フロー：
