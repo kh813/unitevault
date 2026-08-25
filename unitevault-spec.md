@@ -194,16 +194,18 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
     - rclone インストール状態 (`rclone status: Installed / Not Found`)
     - デバイス役割 (`Device Role: Primary / Secondary`)
   - **[ Config 設定フォームセクション ]**:
-    - **Vault Directory Path**: テキスト入力 ＋ `[ Select Folder ]` ボタン（フォルダ選択ダイアログ）
-    - **Google Drive Target Folder Path**: 転送先フォルダパス（デフォルト `VaultBackup`）
-    - **Sync Interval**: 同期間隔（秒単位、デフォルト `120` 秒）
-  - **[ rclone Status セクション ]**:
-    - **Remote Name**: 設定されているリモート名（デフォルト `ObsidianVault`）と設定状態 (`Configured / Not Configured`)
+    - **Vault Directory Path**: テキスト入力 ＋ `[ Select Folder ]` ボタン（フォルダ選択ダイアログ）。iPhone/Windows間の同期はiCloudに委任するため（1.3節）、このセクションに同期間隔などの設定項目は置かない。
+  - **[ rclone セクション ]**: Google Driveへのバックアップに関する設定は、それが有効になる（rcloneの設定が完了する）までは意味を持たないため、すべてこのセクションにまとめる。
+    - **Remote Name**: 設定されているリモート名（デフォルト `ObsidianVault`）
+    - **Remote Status**: rcloneリモートの設定状態 (`Configured` / `Not Configured` )
     - **Executable**: 検出・利用中の `rclone` バイナリの実行パス
+    - **Google Drive Target Folder Path**: 転送先フォルダパス（デフォルト `VaultBackup`）
+    - **Sync Interval**: プライマリノードがVaultをスキャンし、変更をマージしてGoogle Driveへバックアップする周期（秒単位、デフォルト `120` 秒。3.4.1節）。iCloud経由の端末間同期はOS側が自動で行うため、この間隔設定はGoogle Driveへのバックアップ頻度にのみ影響する。
+    - **Configure Google Drive Remote... ボタン**: Save Settingsを押す前でも、その場でrcloneのGoogle Drive認証（新規セットアップ／既存・CLI設定）を実行できる。
   - **操作ボタン**:
     - **Save Settings ボタン**: 全設定を一括保存し、自動的に `init` 処理（初回セットアップ・役割判定）を実行して同期ループへ反映する
     - **Cancel ボタン**: 変更を行わずに設定画面を閉じる
-  - **Reset Configuration**: 設定およびローカルの役割情報をクリアし、初期設定状態へ戻す（誤設定時やVault再設定時に使用）
+    - **Reset Configuration ボタン**: 設定およびローカルの役割情報をクリアし、初期設定状態へ戻す（誤設定時やVault再設定時に使用）。**Settings画面内のボタンとしてのみ提供し、メニューバー／タスクトレイのメニュー項目には配置しない**（誤操作防止のため、Settings画面を開いた上で明示的に実行する動線に統一する）。
 - **ビジュアルデザイン・アイコン仕様**:
   - モチーフは「循環する2本の矢印」（端末間／Google Drive間でのデータ同期を想起させる図形）。単なる幾何学模様ではなく、同期という機能を直接連想できる図柄を採用する。
   - **アプリアイコン**（Dock・Finder・タスクバー用、`assets/AppIcon.icns`）: 視認性を優先し、**Obsidian テーマカラー（パープル #7C3AED）** の角丸背景に白色の同期矢印を配置する。
@@ -492,14 +494,10 @@ unitevault/                         ← ソースコードリポジトリ（GitH
 メニューバーの「Settings...」選択時および未初期化時の起動フロー：
 
 - **設定一覧表示および rclone リモート接続状態の確認**:
-  - すでに設定済みの状態で「Settings...」を開いた場合、以下の現在の設定一覧を要約ダイアログ表示し、変更を行うか確認する：
-    1. Vault ディレクトリパス
-    2. rclone バイナリの参照パス
-    3. rclone リモート名 (`rclone_remote`)
-    4. **rclone リモートの接続設定状態** (`rclone listremotes` を実行し、指定リモートが rclone 側に登録済みか動的チェック)
-    5. Google Drive バックアップ先パス (`rclone_path`)
-    6. 同期インターバル秒数 (`interval_seconds`)
-    7. ノード役割 (Primary / Secondary)
+  - すでに設定済みの状態で「Settings...」を開いた場合も、単一ウィンドウ（3.5.2節）にその場で現在値を反映して表示する（ステップ形式の要約ダイアログは介さない）。表示される項目は次の通り：
+    1. Vault ディレクトリパス（Config セクション）
+    2. rclone リモート名 (`rclone_remote`) と**接続設定状態**（`rclone listremotes` を実行し、指定リモートが rclone 側に登録済みか動的チェック）、rclone バイナリの参照パス、Google Drive バックアップ先パス (`rclone_path`)、同期インターバル秒数 (`interval_seconds`) （いずれも rclone セクション。3.5.2節）
+    3. ノード役割 (Primary / Secondary)（Status セクション）
   2. **rclone リモート名設定と検証**: テキスト入力ダイアログ（デフォルト: `ObsidianVault`）。入力されたリモート名が `rclone listremotes` に存在しない場合、ダイアログで「新規Rclone設定（デフォルト、GUIのみで完結）」と「既存/カスタムRclone設定（Terminal/PowerShell）」をユーザーに選択させる。「新規Rclone設定」選択時は `rclone config create <remote> drive` を非対話実行して自動的にブラウザでのGoogle認証ページを開き、コマンド操作不要で設定を完了する。「既存/カスタムRclone設定」選択時は Terminal (macOS) や PowerShell (Windows) で `rclone config` を対話起動する。
-  3. **Google Drive バックアップ先パス設定**: テキスト入力ダイアログ（デフォルト: `VaultBackup`）。
+  3. **Google Drive バックアップ先パス設定**: rclone セクション内のテキスト入力（デフォルト: `VaultBackup`）。
   4. **設定保存とノード初期化**: `config.json` への保存およびノード役割判定（`PRIMARY_MARKER.json`の検証）を自動実行し、完了ダイアログを表示する。

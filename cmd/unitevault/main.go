@@ -121,16 +121,18 @@ func runTrayMode() {
 	mStatus.Disabled = true
 	mSyncNow := fyne.NewMenuItem("Sync Now", nil)
 	mSettings := fyne.NewMenuItem("Settings...", nil)
-	mResetConfig := fyne.NewMenuItem("Reset Configuration", nil)
 	mQuit := fyne.NewMenuItem("Quit UniteVault", nil)
 	mQuit.IsQuit = true
 
+	// Reset Configuration is intentionally only available inside the
+	// Settings window (its own button there is gated by a confirm dialog),
+	// not here - it's a rare, destructive action that doesn't belong one
+	// click away in the everyday tray menu.
 	menu := fyne.NewMenu("UniteVault",
 		mStatus,
 		fyne.NewMenuItemSeparator(),
 		mSyncNow,
 		mSettings,
-		mResetConfig,
 		fyne.NewMenuItemSeparator(),
 		mQuit,
 	)
@@ -139,7 +141,6 @@ func runTrayMode() {
 
 	mSyncNow.Action = func() { go t.syncNow() }
 	mSettings.Action = func() { t.openSettingsGUI() }
-	mResetConfig.Action = func() { t.confirmAndResetConfiguration() }
 	mQuit.Action = func() {
 		cancel()
 		gui.Quit()
@@ -253,23 +254,10 @@ func (t *trayApp) syncNow() {
 	}
 }
 
-// confirmAndResetConfiguration handles the "Reset Configuration" tray menu
-// action, which (unlike the Settings window's own Reset button, whose click
-// is already gated by a confirm dialog in buildSettingsContent) has not been
-// confirmed yet.
-func (t *trayApp) confirmAndResetConfiguration() {
-	gui.Confirm(
-		"Reset Configuration",
-		"Are you sure you want to reset UniteVault configuration? This will uninitialize this device.",
-		func(confirmed bool) {
-			if confirmed {
-				t.performReset()
-			}
-		},
-	)
-}
-
-// performReset clears local config/role state and reopens Settings.
+// performReset clears local config/role state and reopens Settings. Called
+// as the Settings window's OnReset handler, whose Reset Configuration button
+// is already gated by its own confirm dialog (buildSettingsContent) - Reset
+// is deliberately not exposed anywhere in the tray menu itself.
 func (t *trayApp) performReset() {
 	_ = t.cfgMgr.ResetConfig()
 	t.icloudNoticeShown = false

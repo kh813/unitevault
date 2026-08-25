@@ -7,6 +7,19 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+// TestPickFolder_DoesNotPanic guards against a regression where clicking
+// "Select Folder..." crashed the whole app: PickFolder called
+// FileDialog.Resize() before FileDialog.Show(), and Resize() -> MinSize()
+// dereferences the dialog's internal window without a nil check, which is
+// only created inside Show(). Reproduced via `go run ./cmd/unitevault gui`
+// -> Settings -> Select Folder with a signal SIGSEGV in
+// dialog.(*FileDialog).MinSize.
+func TestPickFolder_DoesNotPanic(t *testing.T) {
+	newTestWindow()
+
+	PickFolder("Select Obsidian Vault Directory", func(path string, ok bool) {})
+}
+
 func TestInstallReminder_ChecksCheckboxState(t *testing.T) {
 	newTestWindow()
 

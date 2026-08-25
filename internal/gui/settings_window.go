@@ -106,26 +106,29 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	})
 	vaultRow := container.NewBorder(nil, nil, nil, selectFolderBtn, vaultEntry)
 
+	configCard := widget.NewCard("Config", "", widget.NewForm(
+		widget.NewFormItem("Vault Directory Path", vaultRow),
+	))
+
+	// --- rclone section ---
+	// Everything about the Google Drive backup lives here, not in Config:
+	// none of it does anything until the rclone remote is actually
+	// configured, including the target folder and how often backups run.
+	remoteEntry := widget.NewEntry()
+	remoteEntry.SetText(data.RcloneRemote)
+
 	targetPathEntry := widget.NewEntry()
 	targetPathEntry.SetText(data.RclonePath)
 
 	intervalEntry := widget.NewEntry()
 	intervalEntry.SetText(fmt.Sprintf("%d", data.IntervalSeconds))
 
-	configCard := widget.NewCard("Config", "", widget.NewForm(
-		widget.NewFormItem("Vault Directory Path", vaultRow),
-		widget.NewFormItem("Google Drive Target Folder Path", targetPathEntry),
-		widget.NewFormItem("Sync Interval (seconds)", intervalEntry),
-	))
-
-	// --- rclone section ---
-	remoteEntry := widget.NewEntry()
-	remoteEntry.SetText(data.RcloneRemote)
-
 	rcloneForm := widget.NewForm(
 		widget.NewFormItem("Remote Name", remoteEntry),
 		widget.NewFormItem("Remote Status", widget.NewLabel(orDefault(data.RcloneRemoteInfo, "Unknown"))),
 		widget.NewFormItem("Executable", widget.NewLabel(orDefault(data.RcloneExecPath, "Not Found"))),
+		widget.NewFormItem("Google Drive Target Folder Path", targetPathEntry),
+		widget.NewFormItem("Sync Interval (seconds)", intervalEntry),
 	)
 
 	// currentSnapshot captures the form's fields exactly as currently typed.

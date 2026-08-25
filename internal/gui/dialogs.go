@@ -108,8 +108,11 @@ func PickFolder(title string, onPicked func(path string, ok bool)) {
 				onPicked(uri.Path(), true)
 			}
 		}, mainWindow)
-		fd.Resize(fyne.NewSize(760, 500))
+		// Show() must come first: it lazily creates the dialog's internal
+		// window, and Resize() -> MinSize() dereferences that window
+		// without a nil check, so calling Resize() before Show() segfaults.
 		fd.Show()
+		fd.Resize(fyne.NewSize(760, 500))
 	})
 }
 
