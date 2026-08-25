@@ -37,9 +37,14 @@ func drawArrow(_ cg: CGContext, center: CGPoint, radius: CGFloat, lineWidth: CGF
     let tangent = CGPoint(x: -sin(endRad), y: cos(endRad))
     let normal = CGPoint(x: -tangent.y, y: tangent.x)
 
-    let arrowLen = lineWidth * 1.5 * arrowBoost
-    let arrowWidth = lineWidth * 1.35 * arrowBoost
-    let back = CGPoint(x: endPoint.x - tangent.x * lineWidth * 0.2, y: endPoint.y - tangent.y * lineWidth * 0.2)
+    let arrowLen = lineWidth * 2.0 * arrowBoost
+    let arrowWidth = lineWidth * 1.7 * arrowBoost
+    // back sits far enough behind endPoint (> lineWidth * 0.5, the round
+    // cap's radius) that the triangle's flat base fully occludes the round
+    // cap's bulge instead of let it peek out past the base - without this,
+    // the cap and triangle blend into one soft blob instead of reading as a
+    // distinct bar-then-head arrow, especially at small tray-icon sizes.
+    let back = CGPoint(x: endPoint.x - tangent.x * lineWidth * 0.55, y: endPoint.y - tangent.y * lineWidth * 0.55)
     let tip = CGPoint(x: back.x + tangent.x * arrowLen, y: back.y + tangent.y * arrowLen)
     let left = CGPoint(x: back.x + normal.x * arrowWidth / 2, y: back.y + normal.y * arrowWidth / 2)
     let right = CGPoint(x: back.x - normal.x * arrowWidth / 2, y: back.y - normal.y * arrowWidth / 2)

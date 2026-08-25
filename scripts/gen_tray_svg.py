@@ -23,8 +23,8 @@ SIZE = 100.0
 RADIUS = SIZE * 0.34
 LINE_WIDTH = SIZE * 0.20
 ARROW_BOOST = 1.35
-ARROW_LEN = LINE_WIDTH * 1.5 * ARROW_BOOST
-ARROW_WIDTH = LINE_WIDTH * 1.35 * ARROW_BOOST
+ARROW_LEN = LINE_WIDTH * 2.0 * ARROW_BOOST
+ARROW_WIDTH = LINE_WIDTH * 1.7 * ARROW_BOOST
 
 
 def polar(deg):
@@ -43,7 +43,10 @@ def arrow_svg(start_deg, end_deg):
     end_rad = math.radians(end_deg)
     tangent = (-math.sin(end_rad), math.cos(end_rad))
     normal = (-tangent[1], tangent[0])
-    back = (x2 - tangent[0] * LINE_WIDTH * 0.2, y2 - tangent[1] * LINE_WIDTH * 0.2)
+    # back sits behind the round line cap's bulge (radius LINE_WIDTH * 0.5)
+    # so the triangle's flat base fully covers it instead of letting it peek
+    # out - keeps the bar-to-head transition crisp at small sizes.
+    back = (x2 - tangent[0] * LINE_WIDTH * 0.55, y2 - tangent[1] * LINE_WIDTH * 0.55)
     tip = (back[0] + tangent[0] * ARROW_LEN, back[1] + tangent[1] * ARROW_LEN)
     left = (back[0] + normal[0] * ARROW_WIDTH / 2, back[1] + normal[1] * ARROW_WIDTH / 2)
     right = (back[0] - normal[0] * ARROW_WIDTH / 2, back[1] - normal[1] * ARROW_WIDTH / 2)

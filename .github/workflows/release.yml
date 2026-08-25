@@ -26,12 +26,12 @@ jobs:
 
       - name: Create macOS .app Bundle
         run: |
-          mkdir -p "dist/UniteVault-mac-arm64.app/Contents/MacOS"
-          mkdir -p "dist/UniteVault-mac-arm64.app/Contents/Resources"
-          cp dist/unitevault-binary-arm64 "dist/UniteVault-mac-arm64.app/Contents/MacOS/UniteVault"
-          chmod +x "dist/UniteVault-mac-arm64.app/Contents/MacOS/UniteVault"
-          cp assets/AppIcon.icns "dist/UniteVault-mac-arm64.app/Contents/Resources/AppIcon.icns"
-          cat <<EOF > "dist/UniteVault-mac-arm64.app/Contents/Info.plist"
+          mkdir -p "dist/UniteVault.app/Contents/MacOS"
+          mkdir -p "dist/UniteVault.app/Contents/Resources"
+          cp dist/unitevault-binary-arm64 "dist/UniteVault.app/Contents/MacOS/UniteVault"
+          chmod +x "dist/UniteVault.app/Contents/MacOS/UniteVault"
+          cp assets/AppIcon.icns "dist/UniteVault.app/Contents/Resources/AppIcon.icns"
+          cat <<EOF > "dist/UniteVault.app/Contents/Info.plist"
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -56,11 +56,11 @@ jobs:
 
       - name: Ad-hoc Sign macOS .app Bundle
         run: |
-          codesign --force --deep --sign - "dist/UniteVault-mac-arm64.app" || true
+          codesign --force --deep --sign - "dist/UniteVault.app" || true
 
       - name: Zip macOS .app Bundle
         run: |
-          (cd dist && zip -r UniteVault-mac-arm64.app.zip UniteVault-mac-arm64.app)
+          (cd dist && zip -r UniteVault-mac-arm64.app.zip UniteVault.app)
 
       # The Settings/tray GUI is built on Fyne, which requires CGO (it binds
       # to native OpenGL/Win32 APIs). Cross-compiling a CGO-enabled Windows
