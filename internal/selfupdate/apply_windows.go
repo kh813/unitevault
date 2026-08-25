@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"syscall"
 )
 
@@ -23,25 +24,67 @@ const detachedProcess = 0x00000008
 // itself. All paths are bound via PowerShell's own -File parameter binding
 // (see Apply), never interpolated into the script text, so they can't be
 // misinterpreted regardless of spaces or special characters.
+//
+// Two things make this more than a plain rename-and-go:
+//   - The old process is only *asked* to quit right before Apply starts this
+//     helper (see Apply's doc comment) - it isn't guaranteed to have fully
+//     exited by the time this script runs. A flat sleep here previously
+//     caused real update failures (a slow shutdown outlasting the sleep
+//     leaves the exe still locked, and the swap below fails permanently
+//     with no retry). Waiting on the actual PID, with a forced kill as a
+//     fallback, is the reliable version of "kill the old process first"
+//     rather than hoping it's already gone.
+//   - Windows Defender's real-time scan of the newly downloaded exe (or any
+//     other transient handle) can hold a brief lock on either file even
+//     after the old process is confirmed gone, so the rename itself is
+//     retried for a few seconds instead of failing on the first attempt.
 const updateHelperScript = `param(
     [string]$ExePath,
     [string]$NewExePath,
-    [string]$OldExePath
+    [string]$OldExePath,
+    [int]$ProcessId
 )
-Start-Sleep -Seconds 1
-Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $OldExePath
-Rename-Item -LiteralPath $ExePath -NewName (Split-Path -Leaf $OldExePath)
-Rename-Item -LiteralPath $NewExePath -NewName (Split-Path -Leaf $ExePath)
-Start-Process -FilePath $ExePath
+
+try {
+    Wait-Process -Id $ProcessId -Timeout 10 -ErrorAction Stop
+} catch {
+    # Either it already exited (the common case - Apply's caller quits
+    # immediately) or it's still running after the timeout; force it closed
+    # either way so a wedged shutdown can't leave the update stuck forever.
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+}
+
+$swapped = $false
+for ($i = 0; $i -lt 10; $i++) {
+    try {
+        if (Test-Path -LiteralPath $ExePath) {
+            Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $OldExePath
+            Rename-Item -LiteralPath $ExePath -NewName (Split-Path -Leaf $OldExePath) -ErrorAction Stop
+        }
+        if (Test-Path -LiteralPath $NewExePath) {
+            Rename-Item -LiteralPath $NewExePath -NewName (Split-Path -Leaf $ExePath) -ErrorAction Stop
+        }
+        $swapped = $true
+        break
+    } catch {
+        Start-Sleep -Milliseconds 500
+    }
+}
+
+if ($swapped) {
+    Start-Process -FilePath $ExePath
+}
 Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $OldExePath
 Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $PSCommandPath
 `
 
 // Apply downloads assetURL (a zipped UniteVault.exe), then hands off to a
-// detached PowerShell helper that waits for this process to exit, swaps the
-// executable, and relaunches it. The caller must quit shortly after Apply
-// returns nil - Windows won't allow the new exe to replace this one while
-// it's still running.
+// detached PowerShell helper that waits for this process to exit (see
+// updateHelperScript - it forcibly kills this process by PID if it hasn't
+// exited on its own after a few seconds), swaps the executable, and
+// relaunches it. The caller should still quit shortly after Apply returns
+// nil rather than relying on the forced kill, which exists as a safety net
+// for a wedged shutdown, not the primary shutdown path.
 func Apply(ctx context.Context, assetURL string) error {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -76,6 +119,7 @@ func Apply(ctx context.Context, assetURL string) error {
 		"-ExePath", exePath,
 		"-NewExePath", newExePath,
 		"-OldExePath", oldExePath,
+		"-ProcessId", strconv.Itoa(os.Getpid()),
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: detachedProcess}
 	if err := cmd.Start(); err != nil {
