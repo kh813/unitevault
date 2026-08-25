@@ -65,6 +65,32 @@ func Choice(title, message, btn1Text, btn2Text string, onChoice func(result int)
 	})
 }
 
+// InstallReminder shows a dismissible reminder dialog with a "Don't show
+// this again" checkbox, e.g. for nagging the user about missing Git/rclone
+// on every startup until they either install them or opt out. onClose
+// receives whether that checkbox was checked when the dialog's only button
+// was pressed. Safe to call from any goroutine.
+func InstallReminder(title, message string, onClose func(dontShowAgain bool)) {
+	fyne.Do(func() {
+		ensureWindowVisible()
+
+		msgLabel := widget.NewLabel(message)
+		msgLabel.Wrapping = fyne.TextWrapWord
+		check := widget.NewCheck("Don't show this again", nil)
+
+		content := container.NewVBox(msgLabel, check)
+
+		d := dialog.NewCustom(title, "OK", content, mainWindow)
+		d.Resize(fyne.NewSize(420, 220))
+		d.SetOnClosed(func() {
+			if onClose != nil {
+				onClose(check.Checked)
+			}
+		})
+		d.Show()
+	})
+}
+
 // PickFolder opens a native folder selection dialog. onPicked receives the
 // chosen absolute path and ok=true, or ok=false if the user cancelled. Safe
 // to call from any goroutine; onPicked always runs on the Fyne main thread.

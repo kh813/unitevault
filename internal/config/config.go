@@ -81,6 +81,28 @@ func (cm *ConfigManager) RolePath() string {
 	return filepath.Join(cm.configDir, "role")
 }
 
+// InstallReminderDismissedPath returns the path to the marker file recording
+// that the user opted out of the "Git/rclone missing" startup reminder.
+func (cm *ConfigManager) InstallReminderDismissedPath() string {
+	return filepath.Join(cm.configDir, "install_reminder_dismissed")
+}
+
+// IsInstallReminderDismissed reports whether the user previously checked
+// "Don't show this again" on the missing-dependency startup reminder.
+func (cm *ConfigManager) IsInstallReminderDismissed() bool {
+	_, err := os.Stat(cm.InstallReminderDismissedPath())
+	return err == nil
+}
+
+// SetInstallReminderDismissed persists that the missing-dependency startup
+// reminder should no longer be shown.
+func (cm *ConfigManager) SetInstallReminderDismissed() error {
+	if err := cm.EnsureDir(); err != nil {
+		return err
+	}
+	return os.WriteFile(cm.InstallReminderDismissedPath(), []byte("1"), 0644)
+}
+
 // LoadConfig reads config.json if present, or returns default values
 func (cm *ConfigManager) LoadConfig() (*Config, error) {
 	path := cm.ConfigPath()
@@ -165,5 +187,6 @@ func (cm *ConfigManager) SaveRole(role string) error {
 func (cm *ConfigManager) ResetConfig() error {
 	_ = os.Remove(cm.ConfigPath())
 	_ = os.Remove(cm.RolePath())
+	_ = os.Remove(cm.InstallReminderDismissedPath())
 	return nil
 }

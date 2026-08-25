@@ -198,7 +198,7 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
     - **Google Drive Target Folder Path**: 転送先フォルダパス（デフォルト `VaultBackup`）
     - **Sync Interval**: 同期間隔（秒単位、デフォルト `120` 秒）
   - **[ rclone Status セクション ]**:
-    - **Remote Name**: 設定されているリモート名（デフォルト `gdrive`）と設定状態 (`Configured / Not Configured`)
+    - **Remote Name**: 設定されているリモート名（デフォルト `ObsidianVault`）と設定状態 (`Configured / Not Configured`)
     - **Executable**: 検出・利用中の `rclone` バイナリの実行パス
   - **操作ボタン**:
     - **Save Settings ボタン**: 全設定を一括保存し、自動的に `init` 処理（初回セットアップ・役割判定）を実行して同期ループへ反映する
@@ -468,6 +468,8 @@ unitevault/                         ← ソースコードリポジトリ（GitH
 ### 8.2 事前環境チェック（Preflight Checks）と依存管理
 アプリケーション起動時および初期設定・設定変更時に、動作に必要な外部コマンドの事前判定を行う。
 
+未初期化（Vault未設定）の状態で、Git または rclone が未検出のままアプリを起動した場合、Settings ウィンドウが自動的に開くことに加えて、**起動のたびに「Setup Required」リマインダーダイアログ**を表示し、不足しているツールをまとめて案内する。ユーザーが「Don't show this again」にチェックを入れて閉じた場合のみ、以降の起動でこのリマインダーを抑制する（抑制設定はローカル設定領域のマーカーファイルに保持し、Reset Configuration 実行時にクリアされる）。Git・rclone の両方が検出された時点で、抑制設定の有無に関わらずリマインダー自体が不要になり自動的に表示されなくなる。
+
 1. **Git の自動検知と自動インストール機能**:
    - システム `PATH` および標準インストールパス（`C:\Program Files\Git\cmd\git.exe` や `/usr/local/bin/git`, `/opt/homebrew/bin/git` 等）で `git` の存在を動的チェックする。
    - 未検出の場合、ダイアログで「Gitを自動インストールしますか？」と提示する。
@@ -493,6 +495,6 @@ unitevault/                         ← ソースコードリポジトリ（GitH
     5. Google Drive バックアップ先パス (`rclone_path`)
     6. 同期インターバル秒数 (`interval_seconds`)
     7. ノード役割 (Primary / Secondary)
-  2. **rclone リモート名設定と検証**: テキスト入力ダイアログ（デフォルト: `gdrive`）。入力されたリモート名が `rclone listremotes` に存在しない場合、ダイアログで「新規Rclone設定（デフォルト、GUIのみで完結）」と「既存/カスタムRclone設定（Terminal/PowerShell）」をユーザーに選択させる。「新規Rclone設定」選択時は `rclone config create <remote> drive` を非対話実行して自動的にブラウザでのGoogle認証ページを開き、コマンド操作不要で設定を完了する。「既存/カスタムRclone設定」選択時は Terminal (macOS) や PowerShell (Windows) で `rclone config` を対話起動する。
+  2. **rclone リモート名設定と検証**: テキスト入力ダイアログ（デフォルト: `ObsidianVault`）。入力されたリモート名が `rclone listremotes` に存在しない場合、ダイアログで「新規Rclone設定（デフォルト、GUIのみで完結）」と「既存/カスタムRclone設定（Terminal/PowerShell）」をユーザーに選択させる。「新規Rclone設定」選択時は `rclone config create <remote> drive` を非対話実行して自動的にブラウザでのGoogle認証ページを開き、コマンド操作不要で設定を完了する。「既存/カスタムRclone設定」選択時は Terminal (macOS) や PowerShell (Windows) で `rclone config` を対話起動する。
   3. **Google Drive バックアップ先パス設定**: テキスト入力ダイアログ（デフォルト: `VaultBackup`）。
   4. **設定保存とノード初期化**: `config.json` への保存およびノード役割判定（`PRIMARY_MARKER.json`の検証）を自動実行し、完了ダイアログを表示する。

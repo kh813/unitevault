@@ -76,9 +76,9 @@ func TestBuildSettingsContent_FillsDefaults(t *testing.T) {
 		t.Fatal("expected non-nil content")
 	}
 
-	remoteEntry := findEntry(t, content, "gdrive")
-	if remoteEntry.Text != "gdrive" {
-		t.Errorf("expected default remote 'gdrive', got %q", remoteEntry.Text)
+	remoteEntry := findEntry(t, content, "ObsidianVault")
+	if remoteEntry.Text != "ObsidianVault" {
+		t.Errorf("expected default remote 'ObsidianVault', got %q", remoteEntry.Text)
 	}
 
 	targetEntry := findEntry(t, content, "VaultBackup")
@@ -137,8 +137,8 @@ func TestBuildSettingsContent_InstallButtonsHiddenWhenInstalled(t *testing.T) {
 		GitStatus:    "Installed",
 		RcloneStatus: "Not Found",
 	}, SettingsHandlers{
-		OnInstallGit:    func() { installGitCalled = true },
-		OnInstallRclone: func() {},
+		OnInstallGit:    func(SettingsFormData) { installGitCalled = true },
+		OnInstallRclone: func(SettingsFormData) {},
 	})
 
 	var gitButtonFound, rcloneButtonFound bool
@@ -179,5 +179,60 @@ func TestBuildSettingsContent_ResetRequiresConfirmation(t *testing.T) {
 	// must not invoke OnReset synchronously.
 	if resetCalled {
 		t.Error("expected OnReset to require confirmation before firing")
+	}
+}
+
+// TestBuildSettingsContent_SaveDisabledWithoutVaultPath ensures the Save
+// button starts disabled when there's no Vault path (e.g. right after Reset
+// Configuration reopens an empty form) and becomes enabled as soon as one is
+// entered, without needing any separate "reset succeeded" flag.
+func TestBuildSettingsContent_SaveDisabledWithoutVaultPath(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{}, SettingsHandlers{})
+
+	saveBtn := findButton(t, content, "Save Settings")
+	if !saveBtn.Disabled() {
+		t.Fatal("expected Save Settings to start disabled with no Vault path set")
+	}
+
+	vaultEntry := findEntry(t, content, "Path to your Obsidian Vault folder")
+
+	vaultEntry.SetText("/tmp/vault")
+	if saveBtn.Disabled() {
+		t.Fatal("expected Save Settings to become enabled once a Vault path is set")
+	}
+
+	vaultEntry.SetText("")
+	if !saveBtn.Disabled() {
+		t.Fatal("expected Save Settings to become disabled again once the Vault path is cleared")
+	}
+}
+
+// TestBuildSettingsContent_ConfigureRemoteUsesEditedValue guards against a
+// regression where editing the Remote Name field and then tapping "Configure
+// Google Drive Remote..." passed the *original* (pre-edit) snapshot the
+// window was built with, instead of what the user had just typed - making it
+// look like the field couldn't be changed.
+func TestBuildSettingsContent_ConfigureRemoteUsesEditedValue(t *testing.T) {
+	newTestWindow()
+
+	var gotRemote string
+	content := buildSettingsContent(SettingsFormData{
+		VaultPath:    "/tmp/vault",
+		RcloneRemote: "ObsidianVault",
+		RcloneStatus: "Installed",
+	}, SettingsHandlers{
+		OnConfigureRemote: func(current SettingsFormData) { gotRemote = current.RcloneRemote },
+	})
+
+	remoteEntry := findEntry(t, content, "ObsidianVault")
+	remoteEntry.SetText("MyCustomRemote")
+
+	configureBtn := findButton(t, content, "Configure Google Drive Remote...")
+	test.Tap(configureBtn)
+
+	if gotRemote != "MyCustomRemote" {
+		t.Errorf("expected OnConfigureRemote to receive the edited remote name 'MyCustomRemote', got %q", gotRemote)
 	}
 }

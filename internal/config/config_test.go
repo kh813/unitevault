@@ -104,6 +104,29 @@ func TestConfigManager_Role(t *testing.T) {
 	}
 }
 
+func TestConfigManager_InstallReminderDismissed(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := config.NewConfigManagerWithDir(tempDir)
+
+	if cm.IsInstallReminderDismissed() {
+		t.Fatal("expected reminder to not be dismissed initially")
+	}
+
+	if err := cm.SetInstallReminderDismissed(); err != nil {
+		t.Fatalf("failed to set install reminder dismissed: %v", err)
+	}
+	if !cm.IsInstallReminderDismissed() {
+		t.Fatal("expected reminder to be dismissed after SetInstallReminderDismissed")
+	}
+
+	if err := cm.ResetConfig(); err != nil {
+		t.Fatalf("ResetConfig failed: %v", err)
+	}
+	if cm.IsInstallReminderDismissed() {
+		t.Fatal("expected ResetConfig to clear the install reminder dismissal")
+	}
+}
+
 func TestGetConfigDir(t *testing.T) {
 	dir, err := config.GetConfigDir()
 	if err != nil {

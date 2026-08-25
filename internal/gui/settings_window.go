@@ -39,15 +39,16 @@ type SettingsFormData struct {
 // and call back into gui.* (Info/Confirm/ShowSettingsWindow/...) to update
 // the UI once done.
 type SettingsHandlers struct {
-	// OnInstallGit is called when the user taps "Install Git..." in the
-	// Status section. Omit (nil) to hide the button entirely.
-	OnInstallGit func()
-	// OnInstallRclone is called when the user taps "Install rclone..." in
-	// the Status section. Omit (nil) to hide the button entirely.
-	OnInstallRclone func()
-	// OnConfigureRemote is called with the currently entered remote name
-	// when the user taps "Configure Google Drive Remote...".
-	OnConfigureRemote func(remoteName string)
+	// OnInstallGit is called with the form's *current* values (as currently
+	// typed, not the snapshot the window was built with) when the user taps
+	// "Install Git..." in the Status section. Omit (nil) to hide the button.
+	OnInstallGit func(current SettingsFormData)
+	// OnInstallRclone is the "Install rclone..." equivalent of OnInstallGit.
+	// Omit (nil) to hide the button entirely.
+	OnInstallRclone func(current SettingsFormData)
+	// OnConfigureRemote is called with the form's current values when the
+	// user taps "Configure Google Drive Remote...".
+	OnConfigureRemote func(current SettingsFormData)
 	// OnSave is called with the current form values when the user taps
 	// "Save Settings".
 	OnSave func(data SettingsFormData)
@@ -85,25 +86,11 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		data.IntervalSeconds = 120
 	}
 	if data.RcloneRemote == "" {
-		data.RcloneRemote = "gdrive"
+		data.RcloneRemote = "ObsidianVault"
 	}
 	if data.RclonePath == "" {
 		data.RclonePath = "VaultBackup"
 	}
-
-	// --- Status section ---
-	var installGit, installRclone func()
-	if data.GitStatus != "Installed" {
-		installGit = handlers.OnInstallGit
-	}
-	if data.RcloneStatus != "Installed" {
-		installRclone = handlers.OnInstallRclone
-	}
-	statusCard := widget.NewCard("Status", "", container.NewVBox(
-		statusLine("Git status:", orDefault(data.GitStatus, "Unknown"), "Install Git...", installGit),
-		statusLine("rclone status:", orDefault(data.RcloneStatus, "Unknown"), "Install rclone...", installRclone),
-		statusLine("Device role:", orDefault(data.DeviceRole, "Not Initialized"), "", nil),
-	))
 
 	// --- Config section ---
 	vaultEntry := widget.NewEntry()
@@ -140,23 +127,17 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		widget.NewFormItem("Remote Status", widget.NewLabel(orDefault(data.RcloneRemoteInfo, "Unknown"))),
 		widget.NewFormItem("Executable", widget.NewLabel(orDefault(data.RcloneExecPath, "Not Found"))),
 	)
-	configureRemoteBtn := widget.NewButton("Configure Google Drive Remote...", func() {
-		if handlers.OnConfigureRemote != nil {
-			handlers.OnConfigureRemote(strings.TrimSpace(remoteEntry.Text))
-		}
-	})
-	rcloneCard := widget.NewCard("rclone", "", container.NewVBox(rcloneForm, configureRemoteBtn))
 
-	// --- Bottom action buttons ---
-	saveBtn := widget.NewButton("Save Settings", func() {
-		if handlers.OnSave == nil {
-			return
-		}
+	// currentSnapshot captures the form's fields exactly as currently typed.
+	// Every handler that may trigger a window rebuild (install/configure
+	// buttons, not just Save) must pass this through so a background action
+	// never clobbers input the user hasn't saved yet.
+	currentSnapshot := func() SettingsFormData {
 		sec, err := strconv.Atoi(strings.TrimSpace(intervalEntry.Text))
 		if err != nil || sec <= 0 {
 			sec = 120
 		}
-		handlers.OnSave(SettingsFormData{
+		return SettingsFormData{
 			GitStatus:        data.GitStatus,
 			RcloneStatus:     data.RcloneStatus,
 			DeviceRole:       data.DeviceRole,
@@ -166,9 +147,52 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			IntervalSeconds:  sec,
 			RcloneExecPath:   data.RcloneExecPath,
 			RcloneRemoteInfo: data.RcloneRemoteInfo,
-		})
+		}
+	}
+
+	configureRemoteBtn := widget.NewButton("Configure Google Drive Remote...", func() {
+		if handlers.OnConfigureRemote != nil {
+			handlers.OnConfigureRemote(currentSnapshot())
+		}
+	})
+	rcloneCard := widget.NewCard("rclone", "", container.NewVBox(rcloneForm, configureRemoteBtn))
+
+	// --- Status section ---
+	var installGit, installRclone func()
+	if data.GitStatus != "Installed" && handlers.OnInstallGit != nil {
+		installGit = func() { handlers.OnInstallGit(currentSnapshot()) }
+	}
+	if data.RcloneStatus != "Installed" && handlers.OnInstallRclone != nil {
+		installRclone = func() { handlers.OnInstallRclone(currentSnapshot()) }
+	}
+	statusCard := widget.NewCard("Status", "", container.NewVBox(
+		statusLine("Git status:", orDefault(data.GitStatus, "Unknown"), "Install Git...", installGit),
+		statusLine("rclone status:", orDefault(data.RcloneStatus, "Unknown"), "Install rclone...", installRclone),
+		statusLine("Device role:", orDefault(data.DeviceRole, "Not Initialized"), "", nil),
+	))
+
+	// --- Bottom action buttons ---
+	saveBtn := widget.NewButton("Save Settings", func() {
+		if handlers.OnSave != nil {
+			handlers.OnSave(currentSnapshot())
+		}
 	})
 	saveBtn.Importance = widget.HighImportance
+
+	// Save has nothing meaningful to do without a Vault - keep it disabled
+	// until one is set, rather than letting the user click it and then
+	// explaining why nothing happened. This also means the button starts
+	// disabled right after Reset Configuration reopens an empty form, with
+	// no separate "reset succeeded" state to track.
+	updateSaveButtonState := func() {
+		if strings.TrimSpace(vaultEntry.Text) == "" {
+			saveBtn.Disable()
+		} else {
+			saveBtn.Enable()
+		}
+	}
+	updateSaveButtonState()
+	vaultEntry.OnChanged = func(string) { updateSaveButtonState() }
 
 	cancelBtn := widget.NewButton("Cancel", func() {
 		mainWindow.Hide()

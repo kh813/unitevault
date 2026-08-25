@@ -142,6 +142,7 @@ func (t *trayApp) startup() {
 	if err != nil || cfg.VaultPath == "" {
 		gui.SetMenuItemLabel(t.menu, t.status, "Status: Not Initialized")
 		t.openSettingsGUI()
+		t.maybeShowInstallReminder()
 		return
 	}
 
@@ -152,6 +153,39 @@ func (t *trayApp) startup() {
 		gui.SetMenuItemLabel(t.menu, t.status, "Status: Active")
 	}
 	t.runDaemonLoop(cfg)
+}
+
+// maybeShowInstallReminder nags the user, once per app launch, about missing
+// Git/rclone while the device hasn't finished initializing - the Status
+// section alone is easy to miss since it only shows up once Settings is
+// already open. Stays quiet once the user checks "Don't show this again", or
+// once both tools are actually installed.
+func (t *trayApp) maybeShowInstallReminder() {
+	if t.cfgMgr.IsInstallReminderDismissed() {
+		return
+	}
+
+	var missing []string
+	if !bootstrap.CheckGitInstalled() {
+		missing = append(missing, "Git")
+	}
+	if _, ok := drive.FindRcloneBinary(); !ok {
+		missing = append(missing, "rclone")
+	}
+	if len(missing) == 0 {
+		return
+	}
+
+	message := fmt.Sprintf(
+		"UniteVault needs %s installed before it can sync your Vault.\n\nYou can install %s from the Status section of the Settings window.",
+		strings.Join(missing, " and "),
+		strings.Join(missing, " and "),
+	)
+	gui.InstallReminder("Setup Required", message, func(dontShowAgain bool) {
+		if dontShowAgain {
+			_ = t.cfgMgr.SetInstallReminderDismissed()
+		}
+	})
 }
 
 // runDaemonLoop runs the periodic sync cycle until t.ctx is cancelled (Quit).
@@ -261,7 +295,7 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 		GitStatus:        gitStatus,
 		RcloneStatus:     rcloneStatus,
 		DeviceRole:       role,
-		RcloneRemote:     "gdrive",
+		RcloneRemote:     "ObsidianVault",
 		RclonePath:       "VaultBackup",
 		IntervalSeconds:  120,
 		RcloneExecPath:   rcloneExecPath,
@@ -297,19 +331,15 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 }
 
 // openSettingsGUI (re)builds and shows the single-window Settings GUI (spec
-// 3.5.2/8.3). It always shows the window immediately regardless of Git/rclone
-// install state - the Status section surfaces "Not Found" with inline
-// install actions instead of blocking the window from appearing.
+// 3.5.2/8.3) from scratch (config.json + live Git/rclone probes). It always
+// shows the window immediately regardless of Git/rclone install state - the
+// Status section surfaces "Not Found" with inline install actions instead of
+// blocking the window from appearing. Use this for the initial open; once
+// the window is already open, use reopenSettingsGUI to refresh it without
+// discarding whatever the user has typed but not saved yet.
 func (t *trayApp) openSettingsGUI() {
 	data := t.buildFormData()
-
-	gui.ShowSettingsWindow(data, gui.SettingsHandlers{
-		OnInstallGit:      t.installGit,
-		OnInstallRclone:   t.installRclone,
-		OnConfigureRemote: t.configureRemote,
-		OnSave:            t.saveSettings,
-		OnReset:           t.performReset,
-	})
+	t.showSettingsGUI(data)
 
 	if runtime.GOOS == "windows" && !t.icloudNoticeShown && data.VaultPath == "" {
 		t.icloudNoticeShown = true
@@ -325,8 +355,44 @@ func (t *trayApp) openSettingsGUI() {
 	}
 }
 
+// reopenSettingsGUI refreshes the Settings window after a Status/rclone
+// section action (install Git/rclone, configure remote) completes. It
+// re-probes Git/rclone/role status like buildFormData, but keeps whatever
+// the user currently has typed in the form (current) instead of overwriting
+// it with what's saved on disk - Config/rclone section actions can complete
+// before the user ever presses "Save Settings", and buildFormData alone
+// would otherwise reset those fields back to disk/default values.
+func (t *trayApp) reopenSettingsGUI(current gui.SettingsFormData) {
+	data := t.buildFormData()
+	data.VaultPath = current.VaultPath
+	data.RcloneRemote = current.RcloneRemote
+	data.RclonePath = current.RclonePath
+	data.IntervalSeconds = current.IntervalSeconds
+
+	if _, ok := drive.FindRcloneBinary(); ok {
+		client := drive.NewClient(engineLogPath())
+		if client.IsRemoteConfigured(context.Background(), data.RcloneRemote) {
+			data.RcloneRemoteInfo = fmt.Sprintf("Configured (%s)", data.RcloneRemote)
+		} else {
+			data.RcloneRemoteInfo = fmt.Sprintf("Not configured - remote '%s' not found in rclone", data.RcloneRemote)
+		}
+	}
+
+	t.showSettingsGUI(data)
+}
+
+func (t *trayApp) showSettingsGUI(data gui.SettingsFormData) {
+	gui.ShowSettingsWindow(data, gui.SettingsHandlers{
+		OnInstallGit:      t.installGit,
+		OnInstallRclone:   t.installRclone,
+		OnConfigureRemote: t.configureRemote,
+		OnSave:            t.saveSettings,
+		OnReset:           t.performReset,
+	})
+}
+
 // installGit handles the Status section's "Install Git..." button.
-func (t *trayApp) installGit() {
+func (t *trayApp) installGit(current gui.SettingsFormData) {
 	go func() {
 		_ = gui.RunWithProgress(
 			"Installing Git",
@@ -342,17 +408,17 @@ func (t *trayApp) installGit() {
 				"The Git installer was launched. Please complete the on-screen installation, then reopen this Status section to confirm.",
 			)
 		}
-		t.openSettingsGUI()
+		t.reopenSettingsGUI(current)
 	}()
 }
 
 // installRclone handles the Status section's "Install rclone..." button.
-func (t *trayApp) installRclone() {
+func (t *trayApp) installRclone(current gui.SettingsFormData) {
 	go func() {
 		targetPath, err := drive.GetDefaultRcloneTargetPath()
 		if err != nil {
 			gui.Info("rclone Install Failed", fmt.Sprintf("Could not determine an install location: %v", err))
-			t.openSettingsGUI()
+			t.reopenSettingsGUI(current)
 			return
 		}
 
@@ -370,18 +436,19 @@ func (t *trayApp) installRclone() {
 				fmt.Sprintf("Automatic download failed: %v\n\nYou can download it manually from:\n%s", installErr, bootstrap.GetRcloneDownloadURL()),
 			)
 		}
-		t.openSettingsGUI()
+		t.reopenSettingsGUI(current)
 	}()
 }
 
 // configureRemote handles the rclone section's "Configure Google Drive
 // Remote..." button, letting the user set up OAuth (or a manual/CLI config)
 // without needing to Save first.
-func (t *trayApp) configureRemote(remoteName string) {
-	remoteName = strings.TrimSpace(remoteName)
+func (t *trayApp) configureRemote(current gui.SettingsFormData) {
+	remoteName := strings.TrimSpace(current.RcloneRemote)
 	if remoteName == "" {
-		remoteName = "gdrive"
+		remoteName = "ObsidianVault"
 	}
+	current.RcloneRemote = remoteName
 
 	if _, ok := drive.FindRcloneBinary(); !ok {
 		gui.Info("rclone Required", "Please install rclone first (see the Status section) before configuring a Google Drive remote.")
@@ -409,7 +476,7 @@ func (t *trayApp) configureRemote(remoteName string) {
 					} else {
 						gui.Info("Google Drive Connected", fmt.Sprintf("Successfully connected Google Drive remote '%s'!", remoteName))
 					}
-					t.openSettingsGUI()
+					t.reopenSettingsGUI(current)
 				}()
 			case 2:
 				_ = bootstrap.LaunchTerminalRcloneConfig(client.GetBinaryPath())
@@ -506,7 +573,7 @@ func (t *trayApp) saveSettings(data gui.SettingsFormData) {
 func handleInit(args []string) {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	vaultPath := fs.String("vault", "", "Path to Obsidian Vault directory")
-	remoteName := fs.String("remote", "gdrive", "rclone remote name")
+	remoteName := fs.String("remote", "ObsidianVault", "rclone remote name")
 	remotePath := fs.String("remote-path", "VaultBackup", "rclone remote backup target folder path")
 	label := fs.String("label", "", "Device label name (default: hostname)")
 	_ = fs.Parse(args)
