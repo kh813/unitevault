@@ -542,3 +542,38 @@ func TestBuildSettingsContent_UnsavedChangesIndicator(t *testing.T) {
 		t.Error("expected the unsaved-changes indicator to hide again once the field matches its original value")
 	}
 }
+
+// TestBuildSettingsContent_RcloneButtonsLayout guards the layout of rclone buttons:
+// - When remote is NOT configured (1 button): uses HBox
+// - When remote IS configured (2 buttons): uses GridWithColumns(2)
+func TestBuildSettingsContent_RcloneButtonsLayout(t *testing.T) {
+	newTestWindow()
+
+	t.Run("Single button layout when remote is not configured", func(t *testing.T) {
+		content := buildSettingsContent(SettingsFormData{
+			VaultPath:        "/tmp/vault",
+			RcloneRemoteInfo: "Not configured",
+		}, SettingsHandlers{})
+
+		configureBtn := findButton(t, content, "Configure Google Drive Remote...")
+		if configureBtn == nil {
+			t.Fatal("expected Configure button")
+		}
+	})
+
+	t.Run("Two button grid layout when remote is configured", func(t *testing.T) {
+		content := buildSettingsContent(SettingsFormData{
+			VaultPath:        "/tmp/vault",
+			RcloneRemoteInfo: "Configured (ObsidianVault)",
+		}, SettingsHandlers{
+			OnRemoveRemote: func(SettingsFormData) {},
+		})
+
+		configureBtn := findButton(t, content, "Configure Google Drive Remote...")
+		removeBtn := findButton(t, content, "Remove Remote Configuration...")
+		if configureBtn == nil || removeBtn == nil {
+			t.Fatal("expected both Configure and Remove buttons to be present")
+		}
+	})
+}
+

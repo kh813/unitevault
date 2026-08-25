@@ -41,3 +41,14 @@ func TestClient_RemoveRemote(t *testing.T) {
 		t.Errorf("expected no error removing a non-existent remote, got: %v", err)
 	}
 }
+
+func TestGetDefaultRcloneTargetPath(t *testing.T) {
+	path, err := drive.GetDefaultRcloneTargetPath()
+	if err != nil {
+		t.Fatalf("expected no error getting target path, got %v", err)
+	}
+	if path == "" {
+		t.Error("expected non-empty rclone target path")
+	}
+}
+

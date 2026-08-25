@@ -149,3 +149,54 @@ func TestVaultChangedWithSameTarget(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildFormData_DriveSyncStatusAndRoleVariations(t *testing.T) {
+	t.Run("Secondary role shows N/A secondary explanation", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		_ = tr.cfgMgr.SaveRole("secondary")
+
+		data := tr.buildFormData()
+		if data.DeviceRole != "secondary" {
+			t.Errorf("expected DeviceRole 'secondary', got %q", data.DeviceRole)
+		}
+		if data.DriveSyncStatus != "N/A (this device is Secondary - Google Drive backup runs on the Primary device)" {
+			t.Errorf("unexpected DriveSyncStatus for secondary: %q", data.DriveSyncStatus)
+		}
+	})
+
+	t.Run("Primary role with success sync status", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		_ = tr.cfgMgr.SaveRole("primary")
+		_ = tr.cfgMgr.SaveDriveSyncStatus(config.DriveSyncStatus{
+			Success: true,
+			Time:    "2026-08-25T15:04:00Z",
+		})
+
+		data := tr.buildFormData()
+		if data.DeviceRole != "primary" {
+			t.Errorf("expected DeviceRole 'primary', got %q", data.DeviceRole)
+		}
+		if data.DriveSyncStatus == "" || data.DriveSyncStatus == "Never synced yet" {
+			t.Errorf("expected populated success DriveSyncStatus, got %q", data.DriveSyncStatus)
+		}
+	})
+
+	t.Run("Primary role with failed sync status", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		_ = tr.cfgMgr.SaveRole("primary")
+		_ = tr.cfgMgr.SaveDriveSyncStatus(config.DriveSyncStatus{
+			Success: false,
+			Time:    "2026-08-25T15:04:00Z",
+			Error:   "network timeout",
+		})
+
+		data := tr.buildFormData()
+		if data.DeviceRole != "primary" {
+			t.Errorf("expected DeviceRole 'primary', got %q", data.DeviceRole)
+		}
+		if data.DriveSyncStatus == "" || data.DriveSyncStatus == "Never synced yet" {
+			t.Errorf("expected populated failure DriveSyncStatus, got %q", data.DriveSyncStatus)
+		}
+	})
+}
+
