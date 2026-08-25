@@ -1,6 +1,6 @@
 # Build artifacts
-unitevault
-unitevault.exe
+/unitevault
+/unitevault.exe
 bin/
 dist/
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/theme"
 	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/drive"
@@ -63,7 +64,10 @@ func printUsage() {
 }
 
 //go:embed assets/tray/icon@2x.png
-var trayIconPNG []byte
+var trayIconColorPNG []byte
+
+//go:embed assets/tray/icon-mono@2x.png
+var trayIconMonoPNG []byte
 
 // trayApp bundles the long-lived state shared by the tray menu and the
 // Settings window (spec 3.5.2/8.3), so callbacks don't need long parameter
@@ -82,8 +86,20 @@ type trayApp struct {
 }
 
 func runTrayMode() {
-	appIcon := fyne.NewStaticResource("unitevault-icon.png", trayIconPNG)
+	appIcon := fyne.NewStaticResource("unitevault-icon.png", trayIconColorPNG)
 	gui.InitApp(appIcon)
+
+	// macOS menu bars render either black-on-light or white-on-dark, so the
+	// tray icon there uses a monochrome glyph wrapped as a Fyne
+	// ThemedResource - Fyne's desktop driver detects that type and hands it
+	// to the OS as a native "template" image, which macOS then recolors
+	// automatically to match the current menu bar appearance. Windows/Linux
+	// trays have no such mechanism, so they get the colored app icon
+	// instead, matching how most tray apps look there.
+	var trayIcon fyne.Resource = appIcon
+	if runtime.GOOS == "darwin" {
+		trayIcon = theme.NewThemedResource(fyne.NewStaticResource("unitevault-tray-mono.png", trayIconMonoPNG))
+	}
 
 	// Route rclone's first-time-download progress (see drive.NewClient)
 	// through a Fyne progress dialog instead of the default console logger.
@@ -126,7 +142,7 @@ func runTrayMode() {
 		gui.Quit()
 	}
 
-	gui.SetTray(appIcon, menu)
+	gui.SetTray(trayIcon, menu)
 
 	go t.startup()
 
