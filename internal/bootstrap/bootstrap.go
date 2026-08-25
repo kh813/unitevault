@@ -12,7 +12,7 @@ import (
 	"github.com/kh813/unitevault/internal/drive"
 )
 
-const AppVersion = "0.0.38"
+const AppVersion = "0.0.39"
 const PrimaryMarkerRelPath = "_sync/PRIMARY_MARKER.json"
 
 // PrimaryMarker represents the PRIMARY_MARKER.json structure specified in spec section 3.6.1.1
@@ -55,6 +55,23 @@ func (b *Bootstrapper) InitializeNode(ctx context.Context, vaultPath, remoteTarg
 	if !exists {
 		// Initialize as Primary
 		return "primary", b.initAsPrimary(ctx, vaultPath, remoteTarget, deviceID, label)
+	}
+
+	// Remote marker exists. Check if this device itself is already the primary recorded in the marker.
+	tempVerifyFile := filepath.Join(os.TempDir(), fmt.Sprintf("check_marker_%d.json", time.Now().UnixNano()))
+	defer os.Remove(tempVerifyFile)
+
+	if err := b.drive.DownloadFile(ctx, remoteMarkerFile, tempVerifyFile); err == nil {
+		if vData, err := os.ReadFile(tempVerifyFile); err == nil {
+			var downloadedMarker PrimaryMarker
+			if err := json.Unmarshal(vData, &downloadedMarker); err == nil && downloadedMarker.PrimaryDeviceID == deviceID {
+				// This device is already the Primary! Restore/ensure primary role.
+				if err := b.cfgMgr.SaveRole("primary"); err != nil {
+					return "", err
+				}
+				return "primary", nil
+			}
+		}
 	}
 
 	// Initialize as Secondary

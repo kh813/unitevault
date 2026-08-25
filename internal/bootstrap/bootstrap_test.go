@@ -182,3 +182,43 @@ func TestBootstrap_SecondaryInitialization_DoesNotCopyFromDrive(t *testing.T) {
 		t.Errorf("expected pre-existing vault file content to be untouched, got %q", got)
 	}
 }
+
+// TestBootstrap_PrimaryReinitializationPreservesPrimaryRole guards against a bug where
+// resetting local config and re-saving on a Primary device erroneously demoted the device
+// to Secondary because PRIMARY_MARKER.json already existed on Google Drive.
+func TestBootstrap_PrimaryReinitializationPreservesPrimaryRole(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	deviceID, _ := cfgMgr.GetDeviceID()
+	mock := newMockDrive()
+
+	// Remote marker exists and belongs to THIS device
+	remoteMarkerFile := "gdrive:Backup/_sync/PRIMARY_MARKER.json"
+	existingMarker := bootstrap.PrimaryMarker{
+		SchemaVersion:   1,
+		PrimaryDeviceID: deviceID,
+		PrimaryLabel:    "my-mac",
+	}
+	markerBytes, _ := json.Marshal(existingMarker)
+	mock.remoteFiles[remoteMarkerFile] = markerBytes
+
+	bootstrapper := bootstrap.NewBootstrapper(cfgMgr, mock)
+	ctx := context.Background()
+
+	role, err := bootstrapper.InitializeNode(ctx, vaultPath, "gdrive:Backup", "my-mac")
+	if err != nil {
+		t.Fatalf("expected no error re-initializing primary node, got %v", err)
+	}
+	if role != "primary" {
+		t.Fatalf("expected role 'primary', got %s", role)
+	}
+
+	cachedRole, _ := cfgMgr.LoadRole()
+	if cachedRole != "primary" {
+		t.Fatalf("expected cached role 'primary', got %s", cachedRole)
+	}
+}
+
