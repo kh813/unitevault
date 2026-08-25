@@ -202,6 +202,35 @@ func TestBuildSettingsContent_InstallButtonsHiddenWhenInstalled(t *testing.T) {
 	}
 }
 
+// TestBuildSettingsContent_ICloudRowVisibility guards ICloudStatus's
+// tri-state behavior: "" hides the row entirely (non-Windows, where a
+// separate iCloud install doesn't apply), "Not Found" shows the row with an
+// install button, and "Installed" shows the row without one.
+func TestBuildSettingsContent_ICloudRowVisibility(t *testing.T) {
+	newTestWindow()
+
+	notApplicable := buildSettingsContent(SettingsFormData{}, SettingsHandlers{
+		OnInstallICloud: func(SettingsFormData) {},
+	})
+	if hasButton(notApplicable, "Install iCloud...") {
+		t.Error("expected no iCloud row/button when ICloudStatus is empty (non-Windows)")
+	}
+
+	notFound := buildSettingsContent(SettingsFormData{ICloudStatus: "Not Found"}, SettingsHandlers{
+		OnInstallICloud: func(SettingsFormData) {},
+	})
+	if !hasButton(notFound, "Install iCloud...") {
+		t.Error("expected an 'Install iCloud...' button when ICloudStatus is 'Not Found'")
+	}
+
+	installed := buildSettingsContent(SettingsFormData{ICloudStatus: "Installed"}, SettingsHandlers{
+		OnInstallICloud: func(SettingsFormData) {},
+	})
+	if hasButton(installed, "Install iCloud...") {
+		t.Error("expected no 'Install iCloud...' button when ICloudStatus is 'Installed'")
+	}
+}
+
 func TestBuildSettingsContent_ResetRequiresConfirmation(t *testing.T) {
 	newTestWindow()
 

@@ -383,9 +383,20 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 		rcloneExecPath = p
 	}
 
+	// Only meaningful on Windows - iCloud ships with macOS/iOS, so there's
+	// nothing separate to install/detect there (see SettingsFormData.ICloudStatus).
+	icloudStatus := ""
+	if runtime.GOOS == "windows" {
+		icloudStatus = "Not Found"
+		if bootstrap.CheckICloudInstalled() {
+			icloudStatus = "Installed"
+		}
+	}
+
 	data := gui.SettingsFormData{
 		GitStatus:        gitStatus,
 		RcloneStatus:     rcloneStatus,
+		ICloudStatus:     icloudStatus,
 		DeviceRole:       role,
 		RcloneRemote:     "ObsidianVault",
 		RclonePath:       "VaultBackup",
@@ -477,6 +488,7 @@ func (t *trayApp) showSettingsGUI(data gui.SettingsFormData) {
 	gui.ShowSettingsWindow(data, gui.SettingsHandlers{
 		OnInstallGit:      t.installGit,
 		OnInstallRclone:   t.installRclone,
+		OnInstallICloud:   t.installICloud,
 		OnConfigureRemote: t.configureRemote,
 		OnRemoveRemote:    t.removeRemote,
 		OnSave:            t.saveSettings,
@@ -527,6 +539,35 @@ func (t *trayApp) installRclone(current gui.SettingsFormData) {
 			gui.Info(
 				"rclone Install Failed",
 				fmt.Sprintf("Automatic download failed: %v\n\nYou can download it manually from:\n%s", installErr, bootstrap.GetRcloneDownloadURL()),
+			)
+		}
+		t.reopenSettingsGUI(current)
+	}()
+}
+
+// installICloud handles the Status section's "Install iCloud..." button
+// (Windows only - see SettingsFormData.ICloudStatus). Unlike Git/rclone,
+// even a successful install leaves setup incomplete: signing in with an
+// Apple ID and turning on iCloud Drive both need interactive input (often
+// 2FA) that can't be automated, so AutoInstallICloud best-effort launches
+// the app afterward to land the user on that step directly.
+func (t *trayApp) installICloud(current gui.SettingsFormData) {
+	go func() {
+		installErr := gui.RunWithProgress(
+			"Installing iCloud",
+			"Attempting to automatically install iCloud for Windows (winget)...\nThis may take a moment.",
+			func() error { return bootstrap.AutoInstallICloud() },
+		)
+
+		if installErr == nil {
+			gui.Info(
+				"iCloud Installed",
+				"iCloud for Windows was successfully installed and launched.\n\nPlease sign in with your Apple ID and turn on iCloud Drive, then return here to select your Vault folder.",
+			)
+		} else {
+			gui.Info(
+				"iCloud Install Failed",
+				fmt.Sprintf("Automatic installation failed: %v\n\nYou can download it manually from:\n%s", installErr, bootstrap.GetICloudDownloadURL()),
 			)
 		}
 		t.reopenSettingsGUI(current)

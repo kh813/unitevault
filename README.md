@@ -61,7 +61,7 @@ iPhone/iPad側は追加インストール不要です。iCloud同期のみで完
 
 「Obsidian Vault」セクションの **[ Select Folder... ]** ボタンから、iCloud Drive上のObsidian Vaultフォルダを選択します（OS標準のフォルダ選択ダイアログが開きます）。
 
-> Windowsで、Vaultをこの端末とiPhone間でも同期したい場合は、事前に「iCloud for Windows」をインストールし、Vaultフォルダを iCloud Drive 配下に置いてください（未インストールの場合、この時点で案内ダイアログが表示されます）。
+> Windowsで、Vaultをこの端末とMac/iPhone/iPad間でも共有したい場合は、事前に「iCloud for Windows」をインストールし、Vaultフォルダを iCloud Drive 配下に置いてください。「Status」セクションの **[ Install iCloud... ]** ボタンから自動インストールできます（インストール後にiCloudアプリが自動起動するので、Apple IDでサインインし、iCloud Driveを有効にしてください。サインイン自体は自動化できません）。
 
 ### 5. Google Driveへの接続
 

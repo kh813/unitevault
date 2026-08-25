@@ -326,7 +326,7 @@ UniteVault は事前チェック機能（Preflight Checks）を備えており�
 | Git for Windows | `git merge-file` コマンドの利用 | 未検出時、`winget install --id Git.Git` を試行し、不可の場合は公式 `Git-Installer.exe` を一時フォルダへ自動取得・起動 |
 | rclone | Google Driveへのミラー転送 | 未検出時、ユーザー設定領域 (`%APPDATA%\unitevault\bin\rclone.exe`) へ公式最新バイナリを自動取得・解凍配置 |
 | 同期エンジン (`UniteVault.exe`) | システムトレイ常駐GUI | ZIP形式ポータブル版（`UniteVault-windows-amd64.zip`）で配布 |
-| iCloud for Windows | iPhoneとのiCloud Drive同期 | 初期設定時にインストール確認および Appleサポート／Microsoft Store 案内リンクを提示 |
+| iCloud for Windows | Mac/iPhone/iPadとのVaultフォルダ共有（iCloud Drive） | 未検出時、`winget install --id Apple.iCloud`（クラシック版。Microsoft Store版は無人インストールに不向きなため意図的に対象外）を試行。インストール後はApple ID サインイン・iCloud Drive有効化への誘導としてStart Menuショートカット経由でアプリを自動起動するが、それ以降（サインイン・2FA）は手動操作が必須 |
 
 #### 3.6.5 実装言語としてGoを採用する理由
 - 単一の静的バイナリにクロスコンパイルできるため、Mac/Windowsとも「実行ファイルを置くだけ」で動き、Python等のようにランタイムやパッケージ管理（pip等）の整備が不要。

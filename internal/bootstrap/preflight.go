@@ -123,6 +123,98 @@ func GetICloudDownloadURL() string {
 	return "https://support.apple.com/ja-jp/108994"
 }
 
+// findICloudShortcut looks for the Start Menu shortcut Apple's classic
+// iCloud for Windows installer creates. Used both to detect whether iCloud
+// is installed and to launch it: it's more version-resilient than tracking
+// an exact executable path, which has moved across iCloud releases, since
+// Windows always points the shortcut at whatever the current version's real
+// executable is.
+func findICloudShortcut() (string, bool) {
+	var candidates []string
+	if programData := os.Getenv("ProgramData"); programData != "" {
+		candidates = append(candidates, filepath.Join(programData, `Microsoft\Windows\Start Menu\Programs\iCloud.lnk`))
+	}
+	if appData := os.Getenv("APPDATA"); appData != "" {
+		candidates = append(candidates, filepath.Join(appData, `Microsoft\Windows\Start Menu\Programs\iCloud.lnk`))
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+// CheckICloudInstalled reports whether Apple's classic iCloud for Windows
+// client appears to be installed. Best-effort: there's no officially
+// documented, version-stable way to probe this, since the install layout
+// has shifted across iCloud releases - mirrors CheckGitInstalled's approach
+// of falling back to a list of common install locations.
+func CheckICloudInstalled() bool {
+	if _, ok := findICloudShortcut(); ok {
+		return true
+	}
+
+	commonExePaths := []string{
+		`C:\Program Files\Common Files\Apple\Internet Services\iCloudServices.exe`,
+		`C:\Program Files (x86)\Common Files\Apple\Internet Services\iCloudServices.exe`,
+	}
+	for _, p := range commonExePaths {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// launchICloud best-effort opens the iCloud app via its Start Menu shortcut
+// so the user lands on Apple's sign-in screen right away instead of having
+// to go find it themselves. Signing in (and turning on iCloud Drive) needs
+// interactive input - an Apple ID password and often 2FA - that can't be
+// automated, so this is as far as automation can take the setup. Failure is
+// silently ignored: it's a convenience on top of a successful install, not
+// something that should surface as an install failure.
+func launchICloud() {
+	if p, ok := findICloudShortcut(); ok {
+		_ = exec.Command("cmd", "/c", "start", "", p).Start()
+	}
+}
+
+// AutoInstallICloud attempts to silently install Apple's classic iCloud for
+// Windows client via winget (Windows only - iCloud ships with macOS/iOS, so
+// this has nothing to do there). Deliberately targets the classic/legacy
+// winget package ("Apple.iCloud") rather than the Microsoft Store version:
+// the classic installer supports a real unattended --silent install, while
+// a Store install depends on the machine being signed into a Microsoft
+// Store account and is far less reliable to script. The classic client is
+// fully sufficient for enabling the iCloud Drive folder this app needs -
+// Apple's newer Store-exclusive features aren't required here.
+func AutoInstallICloud() error {
+	if runtime.GOOS != "windows" {
+		return fmt.Errorf("iCloud auto-installation is only applicable on Windows")
+	}
+	if CheckICloudInstalled() {
+		launchICloud()
+		return nil
+	}
+
+	wingetPath, err := exec.LookPath("winget")
+	if err != nil {
+		return fmt.Errorf("winget was not found - please install iCloud for Windows manually from %s", GetICloudDownloadURL())
+	}
+
+	cmd := exec.Command(wingetPath, "install", "--id", "Apple.iCloud", "-e", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements", "--silent")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("winget install failed: %w", err)
+	}
+	if !CheckICloudInstalled() {
+		return fmt.Errorf("iCloud installation did not complete - please install manually from %s", GetICloudDownloadURL())
+	}
+
+	launchICloud()
+	return nil
+}
+
 // GetRcloneDownloadURL returns the official download URL for rclone.
 func GetRcloneDownloadURL() string {
 	return "https://rclone.org/downloads/"

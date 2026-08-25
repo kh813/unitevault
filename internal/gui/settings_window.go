@@ -22,6 +22,10 @@ type SettingsFormData struct {
 	GitStatus    string
 	RcloneStatus string
 	DeviceRole   string
+	// ICloudStatus is Windows-only ("Installed" / "Not Found"); leave "" on
+	// platforms where iCloud isn't a separate install (macOS/iOS) to hide
+	// this row entirely instead of showing it as "not found" everywhere.
+	ICloudStatus string
 
 	// Configurable Form
 	VaultPath       string
@@ -49,6 +53,9 @@ type SettingsHandlers struct {
 	// OnInstallRclone is the "Install rclone..." equivalent of OnInstallGit.
 	// Omit (nil) to hide the button entirely.
 	OnInstallRclone func(current SettingsFormData)
+	// OnInstallICloud is the "Install iCloud..." equivalent of OnInstallGit,
+	// shown only when ICloudStatus is non-empty (Windows).
+	OnInstallICloud func(current SettingsFormData)
 	// OnConfigureRemote is called with the form's current values when the
 	// user taps "Configure Google Drive Remote...".
 	OnConfigureRemote func(current SettingsFormData)
@@ -241,18 +248,28 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	rcloneCard := widget.NewCard("rclone", "", container.NewVBox(append([]fyne.CanvasObject{rcloneForm}, rcloneButtons...)...))
 
 	// --- Status section ---
-	var installGit, installRclone func()
+	var installGit, installRclone, installICloud func()
 	if data.GitStatus != "Installed" && handlers.OnInstallGit != nil {
 		installGit = func() { handlers.OnInstallGit(currentSnapshot()) }
 	}
 	if data.RcloneStatus != "Installed" && handlers.OnInstallRclone != nil {
 		installRclone = func() { handlers.OnInstallRclone(currentSnapshot()) }
 	}
-	statusCard := widget.NewCard("Status", "", container.NewVBox(
+	if data.ICloudStatus != "" && data.ICloudStatus != "Installed" && handlers.OnInstallICloud != nil {
+		installICloud = func() { handlers.OnInstallICloud(currentSnapshot()) }
+	}
+	statusRows := []fyne.CanvasObject{
 		statusLine("Git status:", orDefault(data.GitStatus, "Unknown"), "Install Git...", installGit),
 		statusLine("rclone status:", orDefault(data.RcloneStatus, "Unknown"), "Install rclone...", installRclone),
-		statusLine("Device role:", orDefault(data.DeviceRole, "Not Initialized"), "", nil),
-	))
+	}
+	// ICloudStatus is only ever populated on Windows (see SettingsFormData) -
+	// hiding the row entirely elsewhere instead of showing "Not Found" for a
+	// concept (a separate iCloud install) that doesn't apply there.
+	if data.ICloudStatus != "" {
+		statusRows = append(statusRows, statusLine("iCloud status:", data.ICloudStatus, "Install iCloud...", installICloud))
+	}
+	statusRows = append(statusRows, statusLine("Device role:", orDefault(data.DeviceRole, "Not Initialized"), "", nil))
+	statusCard := widget.NewCard("Status", "", container.NewVBox(statusRows...))
 
 	// --- Bottom action buttons ---
 	saveBtn := widget.NewButton("Save Settings", func() {
