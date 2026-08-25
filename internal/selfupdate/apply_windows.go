@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -19,72 +20,63 @@ import (
 // survives after this process exits, without pulling in golang.org/x/sys.
 const detachedProcess = 0x00000008
 
-// updateHelperScript renames the current exe out of the way, moves the
-// newly downloaded exe into its place, relaunches it, and cleans up after
-// itself. All paths are bound via PowerShell's own -File parameter binding
-// (see Apply), never interpolated into the script text, so they can't be
-// misinterpreted regardless of spaces or special characters.
+// updateHelperScript is a plain cmd.exe batch script, deliberately *not*
+// PowerShell: an earlier version used a PowerShell script here (even with
+// -ExecutionPolicy Bypass), and real-world updates kept failing with the
+// exact same symptom (UniteVault.exe.new left on disk, exe never swapped)
+// regardless of how the swap logic itself was hardened - strongly pointing
+// at the script never actually running at all on some machines (Group
+// Policy / AppLocker / a system-wide execution policy that Bypass doesn't
+// override). Batch files have no equivalent restriction, so this sidesteps
+// the problem entirely rather than trying to out-flag it.
 //
-// Two things make this more than a plain rename-and-go:
-//   - The old process is only *asked* to quit right before Apply starts this
-//     helper (see Apply's doc comment) - it isn't guaranteed to have fully
-//     exited by the time this script runs. A flat sleep here previously
-//     caused real update failures (a slow shutdown outlasting the sleep
-//     leaves the exe still locked, and the swap below fails permanently
-//     with no retry). Waiting on the actual PID, with a forced kill as a
-//     fallback, is the reliable version of "kill the old process first"
-//     rather than hoping it's already gone.
-//   - Windows Defender's real-time scan of the newly downloaded exe (or any
-//     other transient handle) can hold a brief lock on either file even
-//     after the old process is confirmed gone, so the rename itself is
-//     retried for a few seconds instead of failing on the first attempt.
-const updateHelperScript = `param(
-    [string]$ExePath,
-    [string]$NewExePath,
-    [string]$OldExePath,
-    [int]$ProcessId
+// Args (positional, passed by Apply - never interpolated into the script
+// text, so they can't be misinterpreted regardless of spaces or special
+// characters): %1=ExePath %2=NewExePath %3=OldExePath %4=ProcessId.
+//
+// Force-kills the old process by PID (it's only *asked* to quit right
+// before Apply starts this helper - see Apply's doc comment - so it isn't
+// guaranteed to have fully exited yet) after a brief pause, then retries
+// the actual rename/swap for a few seconds before giving up, since a
+// transient lock (e.g. Windows Defender scanning the newly-downloaded exe)
+// can persist for a moment even after the old process is confirmed gone.
+//
+// Pauses use `ping -n 2 127.0.0.1` rather than the more obvious `timeout`:
+// this process (a -H=windowsgui build) has no console at all, and `timeout`
+// specifically errors out ("Input redirection is not supported") when
+// stdin isn't a real console - `ping` doesn't care and blocks for the same
+// ~1s regardless.
+const updateHelperScript = `@echo off
+setlocal
+set "EXE=%~1"
+set "NEWEXE=%~2"
+set "OLDEXE=%~3"
+set "PID=%~4"
+
+ping -n 2 127.0.0.1 >nul
+taskkill /F /PID %PID% >nul 2>&1
+ping -n 2 127.0.0.1 >nul
+
+for /L %%i in (1,1,10) do (
+    if exist "%OLDEXE%" del /f /q "%OLDEXE%" >nul 2>&1
+    if exist "%EXE%" move /y "%EXE%" "%OLDEXE%" >nul 2>&1
+    if exist "%NEWEXE%" move /y "%NEWEXE%" "%EXE%" >nul 2>&1
+    if not exist "%NEWEXE%" goto swapped
+    ping -n 2 127.0.0.1 >nul
 )
 
-try {
-    Wait-Process -Id $ProcessId -Timeout 10 -ErrorAction Stop
-} catch {
-    # Either it already exited (the common case - Apply's caller quits
-    # immediately) or it's still running after the timeout; force it closed
-    # either way so a wedged shutdown can't leave the update stuck forever.
-    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
-}
-
-$swapped = $false
-for ($i = 0; $i -lt 10; $i++) {
-    try {
-        if (Test-Path -LiteralPath $ExePath) {
-            Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $OldExePath
-            Rename-Item -LiteralPath $ExePath -NewName (Split-Path -Leaf $OldExePath) -ErrorAction Stop
-        }
-        if (Test-Path -LiteralPath $NewExePath) {
-            Rename-Item -LiteralPath $NewExePath -NewName (Split-Path -Leaf $ExePath) -ErrorAction Stop
-        }
-        $swapped = $true
-        break
-    } catch {
-        Start-Sleep -Milliseconds 500
-    }
-}
-
-if ($swapped) {
-    Start-Process -FilePath $ExePath
-}
-Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $OldExePath
-Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $PSCommandPath
+:swapped
+if not exist "%NEWEXE%" start "" "%EXE%"
+if exist "%OLDEXE%" del /f /q "%OLDEXE%" >nul 2>&1
+del /f /q "%~f0" >nul 2>&1
 `
 
 // Apply downloads assetURL (a zipped UniteVault.exe), then hands off to a
-// detached PowerShell helper that waits for this process to exit (see
-// updateHelperScript - it forcibly kills this process by PID if it hasn't
-// exited on its own after a few seconds), swaps the executable, and
-// relaunches it. The caller should still quit shortly after Apply returns
-// nil rather than relying on the forced kill, which exists as a safety net
-// for a wedged shutdown, not the primary shutdown path.
+// detached batch-script helper (see updateHelperScript for why it's a .bat
+// and not PowerShell) that force-kills this process by PID, swaps the
+// executable, and relaunches it. The caller should still quit shortly after
+// Apply returns nil rather than relying on the forced kill, which exists as
+// a safety net for a wedged shutdown, not the primary shutdown path.
 func Apply(ctx context.Context, assetURL string) error {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -106,21 +98,19 @@ func Apply(ctx context.Context, assetURL string) error {
 		return err
 	}
 
-	scriptPath := filepath.Join(os.TempDir(), "unitevault-update-helper.ps1")
-	if err := os.WriteFile(scriptPath, []byte(updateHelperScript), 0644); err != nil {
+	// cmd.exe's batch parser has known quirks with LF-only line endings
+	// inside multi-line ( ... ) blocks (like the for /L loop below) - the Go
+	// source has plain LF newlines, so convert to the CRLF real .bat files
+	// use before writing, rather than risk it.
+	scriptCRLF := strings.ReplaceAll(updateHelperScript, "\n", "\r\n")
+	scriptPath := filepath.Join(os.TempDir(), "unitevault-update-helper.bat")
+	if err := os.WriteFile(scriptPath, []byte(scriptCRLF), 0644); err != nil {
 		_ = os.Remove(newExePath)
 		return fmt.Errorf("failed to write the update helper script: %w", err)
 	}
 
 	oldExePath := exePath + ".old"
-	cmd := exec.Command("powershell",
-		"-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
-		"-File", scriptPath,
-		"-ExePath", exePath,
-		"-NewExePath", newExePath,
-		"-OldExePath", oldExePath,
-		"-ProcessId", strconv.Itoa(os.Getpid()),
-	)
+	cmd := exec.Command("cmd", "/c", scriptPath, exePath, newExePath, oldExePath, strconv.Itoa(os.Getpid()))
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: detachedProcess}
 	if err := cmd.Start(); err != nil {
 		_ = os.Remove(newExePath)
