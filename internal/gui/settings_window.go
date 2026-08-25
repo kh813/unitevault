@@ -253,15 +253,16 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			handlers.OnConfigureRemote(currentSnapshot())
 		}
 	})
-	rcloneButtons := []fyne.CanvasObject{configureRemoteBtn}
+	var rcloneButtonRow fyne.CanvasObject
 	if strings.HasPrefix(data.RcloneRemoteInfo, "Configured") && handlers.OnRemoveRemote != nil {
 		removeRemoteBtn := widget.NewButton("Remove Remote Configuration...", func() {
 			handlers.OnRemoveRemote(currentSnapshot())
 		})
-		rcloneButtons = append(rcloneButtons, removeRemoteBtn)
+		rcloneButtonRow = container.NewGridWithColumns(2, configureRemoteBtn, removeRemoteBtn)
+	} else {
+		rcloneButtonRow = container.NewHBox(configureRemoteBtn)
 	}
-	rcloneCardContent := append([]fyne.CanvasObject{rcloneBasicForm}, rcloneButtons...)
-	rcloneCardContent = append(rcloneCardContent, rcloneAdvanced)
+	rcloneCardContent := []fyne.CanvasObject{rcloneBasicForm, rcloneButtonRow, rcloneAdvanced}
 	rcloneCard := widget.NewCard("rclone", "", container.NewVBox(rcloneCardContent...))
 
 	// --- Status section ---
@@ -288,7 +289,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	if data.DriveSyncStatus != "" {
 		statusRows = append(statusRows, statusLine("Google Drive sync:", data.DriveSyncStatus, "", nil))
 	}
-	statusRows = append(statusRows, statusLine("Device role:", orDefault(data.DeviceRole, "Not Initialized"), "", nil))
+	statusRows = append(statusRows, statusLine("Device role:", orDefault(data.DeviceRole, "N/A"), "", nil))
 	statusCard := widget.NewCard("Status", "", container.NewVBox(statusRows...))
 
 	// --- Bottom action buttons ---

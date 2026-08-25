@@ -8,22 +8,17 @@ import (
 	"github.com/ncruces/zenity"
 )
 
-// Info shows a simple informational/alert dialog anchored to the shared
-// window. If the window was hidden (e.g. this is triggered from the tray
-// menu with Settings closed), it's shown just long enough to host the
-// dialog and hidden again once the user dismisses it, so a tray-triggered
-// notification like "Check for Update..." reads as a standalone dialog
-// instead of leaving an empty (or stale leftover Settings) window sitting
-// open behind it. Safe to call from any goroutine.
+// infoFunc displays an OS native alert dialog. Stored as a var for testing.
+var infoFunc = func(title, message string) error {
+	return zenity.Info(message, zenity.Title(title))
+}
+
+// Info shows a standalone OS-native informational/alert dialog.
+// Safe to call from any goroutine.
 func Info(title, message string) {
-	fyne.Do(func() {
-		wasHidden := ensureWindowVisible()
-		d := dialog.NewInformation(title, message, mainWindow)
-		if wasHidden {
-			d.SetOnClosed(hideWindowNow)
-		}
-		d.Show()
-	})
+	go func() {
+		_ = infoFunc(title, message)
+	}()
 }
 
 // Confirm shows a Yes/No confirmation dialog. Fyne dialogs are non-blocking,

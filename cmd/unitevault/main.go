@@ -373,7 +373,10 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 	// showing its (possibly stale, or simply absent) sync status would be
 	// misleading rather than just showing why there isn't one.
 	driveSyncStatus := "Never synced yet"
-	if role == "secondary" {
+	if role == "" {
+		driveSyncStatus = "N/A (not configured yet)"
+		role = "N/A"
+	} else if role == "secondary" {
 		driveSyncStatus = "N/A (this device is Secondary - Google Drive backup runs on the Primary device)"
 	} else if st, err := t.cfgMgr.LoadDriveSyncStatus(); err == nil && st != nil {
 		displayTime := st.Time
@@ -385,10 +388,6 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 		} else {
 			driveSyncStatus = fmt.Sprintf("Last sync failed (%s): %s", displayTime, st.Error)
 		}
-	}
-
-	if role == "" {
-		role = "Not Initialized"
 	}
 
 	gitStatus := "Not Found"

@@ -198,43 +198,41 @@ func findOnlyDialogButton(t *testing.T) *widget.Button {
 	return found
 }
 
-// TestInfo_HidesWindowAgainIfItWasHidden guards the fix for a real reported
-// bug: triggering Info (e.g. "Check for Update..." -> "Up to Date") from the
-// tray menu while Settings was closed forced the shared window open just to
-// host the dialog, then left it sitting open (empty, or showing stale
-// leftover Settings content) after the user dismissed what looked like it
-// should've been a standalone dialog. The window must go back to hidden
-// once the dialog it was shown for closes.
-func TestInfo_HidesWindowAgainIfItWasHidden(t *testing.T) {
-	newTestWindow()
-	if windowVisible {
-		t.Fatal("expected the window to start hidden")
-	}
-
-	Info("Up to Date", "You're running the latest version.")
-
-	if !windowVisible {
-		t.Fatal("expected Info to show the window in order to host its dialog")
-	}
-
-	test.Tap(findOnlyDialogButton(t))
-
-	if windowVisible {
-		t.Error("expected the window to hide again once the dialog it was shown for closes")
-	}
+// stubInfo replaces infoFunc for the duration of the test.
+func stubInfo(t *testing.T, fn func(title, message string) error) {
+	t.Helper()
+	orig := infoFunc
+	infoFunc = fn
+	t.Cleanup(func() { infoFunc = orig })
 }
 
-// TestInfo_LeavesWindowOpenIfAlreadyVisible is the counterpart: if Settings
-// was already open before Info was called, dismissing the dialog must not
-// close a window the user opened on purpose.
-func TestInfo_LeavesWindowOpenIfAlreadyVisible(t *testing.T) {
+// TestInfo_CallsNativeDialogInvoker guards that Info delegates to the OS native dialog
+// without altering the main Settings window's visible state.
+func TestInfo_CallsNativeDialogInvoker(t *testing.T) {
 	newTestWindow()
-	windowVisible = true // simulate Settings already being open
+	windowVisible = false
+
+	called := make(chan struct{})
+	var gotTitle, gotMessage string
+	stubInfo(t, func(title, message string) error {
+		gotTitle, gotMessage = title, message
+		close(called)
+		return nil
+	})
 
 	Info("Up to Date", "You're running the latest version.")
-	test.Tap(findOnlyDialogButton(t))
 
-	if !windowVisible {
-		t.Error("expected the window to remain open since it was already open before Info was called")
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for infoFunc to be called")
+	}
+
+	if gotTitle != "Up to Date" || gotMessage != "You're running the latest version." {
+		t.Errorf("unexpected args: title=%q, message=%q", gotTitle, gotMessage)
+	}
+
+	if windowVisible {
+		t.Error("expected windowVisible to remain unchanged when Info is triggered")
 	}
 }

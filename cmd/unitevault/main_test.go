@@ -20,8 +20,8 @@ func TestBuildFormData_DefaultsWhenUnconfigured(t *testing.T) {
 
 	data := tr.buildFormData()
 
-	if data.DeviceRole != "Not Initialized" {
-		t.Errorf("expected DeviceRole 'Not Initialized', got %q", data.DeviceRole)
+	if data.DeviceRole != "N/A" {
+		t.Errorf("expected DeviceRole 'N/A', got %q", data.DeviceRole)
 	}
 	if data.VaultPath != "" {
 		t.Errorf("expected empty VaultPath before any config is saved, got %q", data.VaultPath)
