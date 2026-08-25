@@ -70,7 +70,7 @@ iPhone/iPad側は追加インストール不要です。iCloud同期のみで完
 
 （すでにお使いの rclone 設定を使いたい場合は「Existing / CLI Config」を選ぶと、ターミナル／PowerShellでの対話設定に切り替わります。）
 
-Remote Name・Google Drive Target Folder Path・Sync Interval はデフォルト値のままで問題ありません。
+Remote Name・Sync Interval はデフォルト値のままで問題ありません。**Google Drive Target Folder Pathは選択したVaultフォルダ名が自動的に入力される**ので、通常は変更不要です（後述のVault変更時の注意も参照）。
 
 ### 6. 保存
 
@@ -98,6 +98,14 @@ Primary端末（基本的にMac、または最初にセットアップした端�
 
 iPhone/iPadは追加インストール不要（iCloud同期のみ）です。
 
+### 9. Vaultを変更する場合の注意
+
+Google Driveへのバックアップは`rclone sync`（同期先を同期元と完全一致させるミラー転送）で行われます。そのため、**同期するVaultを別のフォルダに切り替える際、Google Drive Target Folder Pathを前と同じにしたままにすると、次回の同期で以前のVaultのバックアップファイルが削除され、新しいVaultの内容で上書きされます**。
+
+これを防ぐため、Google Drive Target Folder Pathは選択したVaultフォルダ名を自動的に提案し、Vaultを選び直すたびに追従します（手動で変更した値は上書きされません）。基本的には何もしなくても安全ですが、意図的に同じ保存先を使い続けたい場合を除き、Target Folder Pathがちゃんと新しいVault名になっていることを保存前に確認してください。もし前回保存時と同じVaultパス・同じTarget Folder Pathの組み合わせのままVaultだけ変更して保存しようとすると、警告ダイアログが表示されます。
+
+不要になった過去のバックアップフォルダは、Google Drive上で手動削除してください（アプリからは自動削除しません）。
+
 ---
 
 ## Git と rclone、それぞれいつ必要になるか
@@ -115,6 +123,7 @@ Settingsウィンドウの「Status」セクションから、それぞれ未イ
 
 - **Git/rcloneのインストールを促すダイアログが毎回出る**: 未初期化のままGit/rcloneが未検出の場合、起動のたびに案内ダイアログが表示されます。表示不要な場合は「Don't show this again」にチェックを入れてください。
 - **設定をやり直したい**: Settingsウィンドウ内の **[ Reset Configuration ]** ボタンから、ローカルの設定・端末役割情報をクリアして初期状態に戻せます（誤操作防止のため、タスクトレイメニューには配置していません）。
+- **Google Driveの接続をやり直したい（別のGoogleアカウントに変更したい等）**: rcloneセクションの **[ Remove Remote Configuration... ]** ボタン（リモートが設定済みの場合のみ表示）から、確認の上でrclone側の認証情報を削除できます。Google Drive上のバックアップファイル自体は削除されません。削除後、改めて **[ Configure Google Drive Remote... ]** から設定し直せます。
 - **ローカルの設定・ログの保存場所**:
   - Mac: `~/.unitevault/`（`config.json`, `device_id`, `role`, `engine.log`）
   - Windows: `%APPDATA%\unitevault\`

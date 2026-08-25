@@ -393,6 +393,7 @@ func (t *trayApp) showSettingsGUI(data gui.SettingsFormData) {
 		OnInstallGit:      t.installGit,
 		OnInstallRclone:   t.installRclone,
 		OnConfigureRemote: t.configureRemote,
+		OnRemoveRemote:    t.removeRemote,
 		OnSave:            t.saveSettings,
 		OnReset:           t.performReset,
 	})
@@ -493,15 +494,92 @@ func (t *trayApp) configureRemote(current gui.SettingsFormData) {
 	)
 }
 
-// saveSettings handles the "Save Settings" button: validates input, saves
-// config.json, ensures the Google Drive remote is configured, and runs
-// primary/secondary node initialization (spec 3.6.1.1).
+// removeRemote handles the rclone section's "Remove Remote Configuration..."
+// button, letting the user cleanly delete an rclone remote's saved Google
+// Drive credentials so they can set it up again from scratch (e.g. with a
+// different Google account), which previously had no dedicated flow at all.
+func (t *trayApp) removeRemote(current gui.SettingsFormData) {
+	remoteName := strings.TrimSpace(current.RcloneRemote)
+	if remoteName == "" {
+		return
+	}
+
+	gui.Confirm(
+		"Remove rclone Remote",
+		fmt.Sprintf(
+			"Remove the rclone remote '%s'?\n\nThis deletes its saved Google Drive credentials from rclone's configuration (the files already backed up on Google Drive are not affected). You can set it up again afterwards.",
+			remoteName,
+		),
+		func(confirmed bool) {
+			if !confirmed {
+				return
+			}
+			go func() {
+				client := drive.NewClient(engineLogPath())
+				if err := client.RemoveRemote(context.Background(), remoteName); err != nil {
+					gui.Info("Remove Failed", fmt.Sprintf("Failed to remove remote '%s': %v", remoteName, err))
+				} else {
+					gui.Info("Remote Removed", fmt.Sprintf("Removed rclone remote '%s'.", remoteName))
+				}
+				t.reopenSettingsGUI(current)
+			}()
+		},
+	)
+}
+
+// saveSettings handles the "Save Settings" button: validates input, warns
+// about a Vault switch that would silently overwrite a previous Vault's
+// Google Drive backup, saves config.json, ensures the Google Drive remote is
+// configured, and runs primary/secondary node initialization (spec
+// 3.6.1.1).
 func (t *trayApp) saveSettings(data gui.SettingsFormData) {
 	if data.VaultPath == "" {
 		gui.Info("Vault Required", "Please select your Obsidian Vault directory before saving.")
 		return
 	}
 
+	// rclone sync mirrors its destination exactly, deleting anything not
+	// present in the source. If the Vault changed since the last save but
+	// the Google Drive Target Folder Path didn't, the next sync would wipe
+	// out the previous Vault's backed-up files. The Settings window already
+	// defaults the target path to the Vault's own folder name and keeps it
+	// following Vault changes (buildSettingsContent), so this only fires
+	// when the user has kept (or retyped) the same target path on purpose.
+	if prevCfg, err := t.cfgMgr.LoadConfig(); err == nil && vaultChangedWithSameTarget(prevCfg, data) {
+		gui.Confirm(
+			"Vault Changed - Same Backup Target",
+			fmt.Sprintf(
+				"You're changing the Vault from:\n%s\nto:\n%s\n\nbut the Google Drive Target Folder Path is still '%s'.\n\n"+
+					"Google Drive backup mirrors the Vault exactly, so the next sync will delete the previous Vault's files there and replace them with the new Vault's.\n\n"+
+					"Continue with this target folder anyway?",
+				prevCfg.VaultPath, data.VaultPath, data.RclonePath,
+			),
+			func(confirmed bool) {
+				if confirmed {
+					t.saveSettingsConfirmed(data)
+				}
+			},
+		)
+		return
+	}
+
+	t.saveSettingsConfirmed(data)
+}
+
+// vaultChangedWithSameTarget reports whether saving data would point a
+// *different* Vault at the *same* Google Drive backup target the
+// previously-saved config used - the scenario where the next rclone sync
+// would silently delete the old Vault's backed-up files (see saveSettings).
+func vaultChangedWithSameTarget(prevCfg *config.Config, data gui.SettingsFormData) bool {
+	if prevCfg == nil || prevCfg.VaultPath == "" {
+		return false
+	}
+	return prevCfg.VaultPath != data.VaultPath && prevCfg.RclonePath == data.RclonePath
+}
+
+// saveSettingsConfirmed does the actual work of saveSettings, once any
+// Vault-change warning has been confirmed (or didn't apply).
+func (t *trayApp) saveSettingsConfirmed(data gui.SettingsFormData) {
 	go func() {
 		driveClient := drive.NewClient(engineLogPath())
 

@@ -330,6 +330,14 @@ func (c *Client) CreateGoogleDriveRemote(ctx context.Context, remoteName string)
 	return cmd.Run()
 }
 
+// RemoveRemote deletes a configured rclone remote using `rclone config delete <name>`,
+// so the user can redo Google Drive setup from scratch (e.g. with a different account).
+func (c *Client) RemoveRemote(ctx context.Context, remoteName string) error {
+	target := strings.TrimSuffix(remoteName, ":")
+	cmd := exec.CommandContext(ctx, c.rcloneBinary, "config", "delete", target)
+	return cmd.Run()
+}
+
 // GetBinaryPath returns the resolved rclone executable path
 func (c *Client) GetBinaryPath() string {
 	return c.rcloneBinary

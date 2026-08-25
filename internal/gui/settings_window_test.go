@@ -81,9 +81,12 @@ func TestBuildSettingsContent_FillsDefaults(t *testing.T) {
 		t.Errorf("expected default remote 'ObsidianVault', got %q", remoteEntry.Text)
 	}
 
-	targetEntry := findEntry(t, content, "VaultBackup")
-	if targetEntry.Text != "VaultBackup" {
-		t.Errorf("expected default target path 'VaultBackup', got %q", targetEntry.Text)
+	// With a Vault path already set, the target path defaults to that
+	// folder's own name rather than a fixed string shared by every Vault
+	// (see TestBuildSettingsContent_TargetPathDefaultsToVaultName for why).
+	targetEntry := findEntry(t, content, "vault")
+	if targetEntry.Text != "vault" {
+		t.Errorf("expected default target path to be the Vault folder name 'vault', got %q", targetEntry.Text)
 	}
 
 	intervalEntry := findEntry(t, content, "120")
@@ -208,4 +211,126 @@ func TestBuildSettingsContent_ConfigureRemoteUsesEditedValue(t *testing.T) {
 	if gotRemote != "MyCustomRemote" {
 		t.Errorf("expected OnConfigureRemote to receive the edited remote name 'MyCustomRemote', got %q", gotRemote)
 	}
+}
+
+func TestVaultBaseName(t *testing.T) {
+	cases := map[string]string{
+		"":                          "",
+		"/Users/me/Vaults/MyVault":  "MyVault",
+		"MyVault":                   "MyVault",
+		"/Users/me/Vaults/MyVault/": "MyVault",
+	}
+	for input, want := range cases {
+		if got := vaultBaseName(input); got != want {
+			t.Errorf("vaultBaseName(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+// TestShouldFollowVaultRename guards the rule that decides whether changing
+// the Vault folder should also update the Google Drive Target Folder Path
+// suggestion. This matters because rclone sync mirrors its destination
+// exactly (deleting anything not in the source) - if the target path stayed
+// fixed across a Vault switch, the next sync would silently delete the
+// previous Vault's backed-up files. The rule must follow an untouched
+// auto-suggestion but never overwrite a value the user deliberately typed.
+func TestShouldFollowVaultRename(t *testing.T) {
+	cases := []struct {
+		name               string
+		currentTargetPath  string
+		lastAutoTargetPath string
+		want               bool
+	}{
+		{"empty field always follows", "", "", true},
+		{"empty field always follows even with a prior suggestion", "", "OldVault", true},
+		{"matches the last auto-suggestion", "OldVault", "OldVault", true},
+		{"legacy hardcoded default is treated as auto-generated", "VaultBackup", "", true},
+		{"deliberately customized value is preserved", "MyCustomBackupName", "OldVault", false},
+		{"a name that happens to match a different vault is not blindly followed", "SomeOtherVaultName", "OldVault", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := shouldFollowVaultRename(c.currentTargetPath, c.lastAutoTargetPath)
+			if got != c.want {
+				t.Errorf("shouldFollowVaultRename(%q, %q) = %v, want %v", c.currentTargetPath, c.lastAutoTargetPath, got, c.want)
+			}
+		})
+	}
+}
+
+// TestBuildSettingsContent_TargetPathDefaultsToVaultName guards against the
+// silent-data-loss scenario directly: a brand new form (no saved
+// RclonePath) should suggest the Vault folder's own name, not a fixed
+// string shared by every Vault.
+func TestBuildSettingsContent_TargetPathDefaultsToVaultName(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{
+		VaultPath: "/Users/me/iCloud/MyResearchVault",
+	}, SettingsHandlers{})
+
+	targetEntry := findEntry(t, content, "MyResearchVault")
+	if targetEntry.Text != "MyResearchVault" {
+		t.Errorf("expected Google Drive Target Folder Path to default to the Vault folder name 'MyResearchVault', got %q", targetEntry.Text)
+	}
+}
+
+// TestBuildSettingsContent_TargetPathFallsBackWithoutVault covers the case
+// where there's no Vault path yet to derive a name from (e.g. a completely
+// fresh, never-configured device) - the target path should still get some
+// reasonable default rather than staying empty.
+func TestBuildSettingsContent_TargetPathFallsBackWithoutVault(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{}, SettingsHandlers{})
+
+	targetEntry := findEntry(t, content, "VaultBackup")
+	if targetEntry.Text != "VaultBackup" {
+		t.Errorf("expected fallback target path 'VaultBackup' when no Vault is set, got %q", targetEntry.Text)
+	}
+}
+
+// TestBuildSettingsContent_RemoveRemoteButtonVisibility guards that the
+// destructive "Remove Remote Configuration..." button only appears once
+// there's actually something configured to remove.
+func TestBuildSettingsContent_RemoveRemoteButtonVisibility(t *testing.T) {
+	newTestWindow()
+
+	notConfigured := buildSettingsContent(SettingsFormData{
+		VaultPath:        "/tmp/vault",
+		RcloneRemoteInfo: "Not configured - remote 'ObsidianVault' not found in rclone",
+	}, SettingsHandlers{
+		OnRemoveRemote: func(SettingsFormData) {},
+	})
+	if hasButton(notConfigured, "Remove Remote Configuration...") {
+		t.Error("expected no Remove Remote Configuration button when the remote isn't configured")
+	}
+
+	configured := buildSettingsContent(SettingsFormData{
+		VaultPath:        "/tmp/vault",
+		RcloneRemoteInfo: "Configured (ObsidianVault)",
+	}, SettingsHandlers{
+		OnRemoveRemote: func(SettingsFormData) {},
+	})
+	if !hasButton(configured, "Remove Remote Configuration...") {
+		t.Error("expected a Remove Remote Configuration button when the remote is configured")
+	}
+
+	configuredNoHandler := buildSettingsContent(SettingsFormData{
+		VaultPath:        "/tmp/vault",
+		RcloneRemoteInfo: "Configured (ObsidianVault)",
+	}, SettingsHandlers{})
+	if hasButton(configuredNoHandler, "Remove Remote Configuration...") {
+		t.Error("expected no Remove Remote Configuration button when no OnRemoveRemote handler is wired")
+	}
+}
+
+func hasButton(root fyne.CanvasObject, text string) bool {
+	found := false
+	walkObjects(root, func(o fyne.CanvasObject) {
+		if b, ok := o.(*widget.Button); ok && b.Text == text {
+			found = true
+		}
+	})
+	return found
 }

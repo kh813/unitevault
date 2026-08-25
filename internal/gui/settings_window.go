@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -49,6 +50,10 @@ type SettingsHandlers struct {
 	// OnConfigureRemote is called with the form's current values when the
 	// user taps "Configure Google Drive Remote...".
 	OnConfigureRemote func(current SettingsFormData)
+	// OnRemoveRemote is called (after the user confirms) with the form's
+	// current values when they tap "Remove Remote Configuration...". Only
+	// shown when the remote currently appears configured.
+	OnRemoveRemote func(current SettingsFormData)
 	// OnSave is called with the current form values when the user taps
 	// "Save Settings".
 	OnSave func(data SettingsFormData)
@@ -88,27 +93,13 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	if data.RcloneRemote == "" {
 		data.RcloneRemote = "ObsidianVault"
 	}
-	if data.RclonePath == "" {
-		data.RclonePath = "VaultBackup"
-	}
+	// data.RclonePath's default is computed below, from the Vault folder's
+	// name where possible (see targetPathEntry).
 
 	// --- Obsidian Vault section ---
 	vaultEntry := widget.NewEntry()
 	vaultEntry.SetText(data.VaultPath)
 	vaultEntry.SetPlaceHolder("Path to your Obsidian Vault folder")
-
-	selectFolderBtn := widget.NewButton("Select Folder...", func() {
-		PickFolder("Select Obsidian Vault Directory", func(path string, ok bool) {
-			if ok {
-				vaultEntry.SetText(path)
-			}
-		})
-	})
-	vaultRow := container.NewBorder(nil, nil, nil, selectFolderBtn, vaultEntry)
-
-	vaultCard := widget.NewCard("Obsidian Vault", "", widget.NewForm(
-		widget.NewFormItem("Vault Directory Path", vaultRow),
-	))
 
 	// --- rclone section ---
 	// Everything about the Google Drive backup lives here, not in the
@@ -118,8 +109,49 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	remoteEntry := widget.NewEntry()
 	remoteEntry.SetText(data.RcloneRemote)
 
+	// The target folder path defaults to the Vault folder's own name rather
+	// than a fixed string. rclone sync mirrors its destination exactly
+	// (deleting anything not present in the source), so if two different
+	// Vaults ever synced to the same target path, switching which Vault
+	// this device points at would silently delete the other Vault's
+	// backed-up files on the very next cycle. Namespacing by Vault name
+	// keeps that from ever happening as long as this suggestion isn't
+	// overridden. lastAutoTargetPath tracks the most recent suggestion so
+	// we know whether the field still holds "an auto-suggestion" (safe to
+	// keep following the Vault) or something the user deliberately typed
+	// (never touch it again).
 	targetPathEntry := widget.NewEntry()
-	targetPathEntry.SetText(data.RclonePath)
+	lastAutoTargetPath := vaultBaseName(data.VaultPath)
+	initialTargetPath := data.RclonePath
+	if initialTargetPath == "" {
+		initialTargetPath = orDefault(lastAutoTargetPath, "VaultBackup")
+	}
+	targetPathEntry.SetText(initialTargetPath)
+	if initialTargetPath != lastAutoTargetPath {
+		// Whatever's shown didn't come from today's auto-suggestion (e.g. a
+		// previously-saved custom value) - stop tracking it as one so a
+		// future Vault change won't clobber it.
+		lastAutoTargetPath = ""
+	}
+
+	selectFolderBtn := widget.NewButton("Select Folder...", func() {
+		PickFolder("Select Obsidian Vault Directory", func(path string, ok bool) {
+			if !ok {
+				return
+			}
+			vaultEntry.SetText(path)
+			newSuggestion := vaultBaseName(path)
+			if shouldFollowVaultRename(strings.TrimSpace(targetPathEntry.Text), lastAutoTargetPath) {
+				targetPathEntry.SetText(newSuggestion)
+			}
+			lastAutoTargetPath = newSuggestion
+		})
+	})
+	vaultRow := container.NewBorder(nil, nil, nil, selectFolderBtn, vaultEntry)
+
+	vaultCard := widget.NewCard("Obsidian Vault", "", widget.NewForm(
+		widget.NewFormItem("Vault Directory Path", vaultRow),
+	))
 
 	intervalEntry := widget.NewEntry()
 	intervalEntry.SetText(fmt.Sprintf("%d", data.IntervalSeconds))
@@ -159,7 +191,15 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			handlers.OnConfigureRemote(currentSnapshot())
 		}
 	})
-	rcloneCard := widget.NewCard("rclone", "", container.NewVBox(rcloneForm, configureRemoteBtn))
+	rcloneButtons := []fyne.CanvasObject{configureRemoteBtn}
+	if strings.HasPrefix(data.RcloneRemoteInfo, "Configured") && handlers.OnRemoveRemote != nil {
+		removeRemoteBtn := widget.NewButton("Remove Remote Configuration...", func() {
+			handlers.OnRemoveRemote(currentSnapshot())
+		})
+		removeRemoteBtn.Importance = widget.DangerImportance
+		rcloneButtons = append(rcloneButtons, removeRemoteBtn)
+	}
+	rcloneCard := widget.NewCard("rclone", "", container.NewVBox(append([]fyne.CanvasObject{rcloneForm}, rcloneButtons...)...))
 
 	// --- Status section ---
 	var installGit, installRclone func()
@@ -213,4 +253,27 @@ func orDefault(v, def string) string {
 		return def
 	}
 	return v
+}
+
+// shouldFollowVaultRename decides whether the Google Drive Target Folder
+// Path should be updated to follow a newly picked Vault folder, given what
+// currently shows there (currentTargetPath) and the most recent
+// auto-suggested value (lastAutoTargetPath, "" if the current value isn't
+// one - see the comment above targetPathEntry's declaration). It returns
+// false whenever the field holds something the user deliberately chose, so
+// an intentional customization is never silently overwritten.
+func shouldFollowVaultRename(currentTargetPath, lastAutoTargetPath string) bool {
+	return currentTargetPath == "" || currentTargetPath == lastAutoTargetPath || currentTargetPath == "VaultBackup"
+}
+
+// vaultBaseName returns the folder name of vaultPath, suitable as a
+// suggested (and safely distinguishing) Google Drive target folder name.
+// Returns "" for an empty vaultPath (filepath.Base("") is "." which would
+// make a poor suggestion).
+func vaultBaseName(vaultPath string) string {
+	vaultPath = strings.TrimSpace(vaultPath)
+	if vaultPath == "" {
+		return ""
+	}
+	return filepath.Base(vaultPath)
 }

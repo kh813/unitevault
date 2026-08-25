@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kh813/unitevault/internal/config"
+	"github.com/kh813/unitevault/internal/gui"
 )
 
 // newTestTrayApp returns a trayApp wired to an isolated, temporary config
@@ -94,5 +95,57 @@ func TestBuildFormData_IgnoresZeroOrNegativeSavedInterval(t *testing.T) {
 
 	if data.IntervalSeconds != 120 {
 		t.Errorf("expected a zero saved interval to fall back to the default 120, got %d", data.IntervalSeconds)
+	}
+}
+
+// TestVaultChangedWithSameTarget guards the data-loss warning shown when
+// Save Settings would point a different Vault at the same Google Drive
+// backup target as before: rclone sync mirrors its destination exactly, so
+// that combination would silently delete the previous Vault's backed-up
+// files on the next sync.
+func TestVaultChangedWithSameTarget(t *testing.T) {
+	cases := []struct {
+		name    string
+		prevCfg *config.Config
+		data    gui.SettingsFormData
+		want    bool
+	}{
+		{
+			name:    "no previous config at all",
+			prevCfg: nil,
+			data:    gui.SettingsFormData{VaultPath: "/vaults/A", RclonePath: "A"},
+			want:    false,
+		},
+		{
+			name:    "previous config never had a Vault set (first save)",
+			prevCfg: &config.Config{RclonePath: "A"},
+			data:    gui.SettingsFormData{VaultPath: "/vaults/A", RclonePath: "A"},
+			want:    false,
+		},
+		{
+			name:    "same Vault, same target - an ordinary re-save",
+			prevCfg: &config.Config{VaultPath: "/vaults/A", RclonePath: "A"},
+			data:    gui.SettingsFormData{VaultPath: "/vaults/A", RclonePath: "A"},
+			want:    false,
+		},
+		{
+			name:    "Vault changed, target followed along - the safe/expected case",
+			prevCfg: &config.Config{VaultPath: "/vaults/A", RclonePath: "A"},
+			data:    gui.SettingsFormData{VaultPath: "/vaults/B", RclonePath: "B"},
+			want:    false,
+		},
+		{
+			name:    "Vault changed but target path did not - the dangerous case",
+			prevCfg: &config.Config{VaultPath: "/vaults/A", RclonePath: "A"},
+			data:    gui.SettingsFormData{VaultPath: "/vaults/B", RclonePath: "A"},
+			want:    true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := vaultChangedWithSameTarget(c.prevCfg, c.data); got != c.want {
+				t.Errorf("vaultChangedWithSameTarget(%+v, %+v) = %v, want %v", c.prevCfg, c.data, got, c.want)
+			}
+		})
 	}
 }

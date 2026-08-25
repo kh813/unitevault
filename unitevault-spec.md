@@ -178,6 +178,15 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
 - 認証：`rclone config` 実行時のブラウザOAuth同意フローで設定（APIキーの手動発行・貼り付けは不要。デバイスごとに個別設定でよい）
 - 対象：Vault現物ファイル一式 ＋ `_sync/` ログディレクトリ一式
 
+#### 3.5.0.1 バックアップ先フォルダ名とVault切り替え時の安全性
+`rclone sync` は同期先を同期元と完全一致させる**ミラー転送**であるため、同期元に存在しないファイルは同期先から削除される（2章）。もしGoogle Drive Target Folder Path（`rclone_path`）が固定文字列のままVaultを別のフォルダに変更すると、次回の同期で**旧Vaultのバックアップファイルが新Vaultの内容で上書き・削除されてしまう**。
+
+これを防ぐため、Google Drive Target Folder Pathは**選択したVaultフォルダ名を初期値として自動提案**する（例：Vaultフォルダ名が`MyVault`なら提案値も`MyVault`）。ユーザーが値を変更していない限り、Vaultフォルダを選び直すたびにこの提案値も追従して更新される。一方、ユーザーが明示的にカスタム値へ変更した場合は、以降Vaultを変更してもその値を保持する（自動上書きしない）。
+
+加えて、Save Settings実行時に「保存済みのVaultパスと異なるVaultへ変更されているのに、Google Drive Target Folder Pathが前回保存時から変わっていない」場合は、上記の事故が起こり得る旨を警告し、確認を求める（3.5.2節）。
+
+不要になった過去のバックアップは、Google Drive上で手動削除すればよい（アプリ側から自動削除は行わない）。
+
 #### 3.5.1 失敗時のリトライ・アラート方針
 - `rclone sync` が失敗した場合、**指数バックオフで再試行**する（例：30秒後→2分後→10分後の計3回）。
 - 3回とも失敗した場合はその回の転送をスキップし、失敗内容をローカルにログとして記録した上で、**次回の定期実行（3.4.1節のデバウンス済みの回）で改めて実行を試みる**。無限リトライで処理が詰まらないようにする。
@@ -199,11 +208,12 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
     - **Remote Name**: 設定されているリモート名（デフォルト `ObsidianVault`）
     - **Remote Status**: rcloneリモートの設定状態 (`Configured` / `Not Configured` )
     - **Executable**: 検出・利用中の `rclone` バイナリの実行パス
-    - **Google Drive Target Folder Path**: 転送先フォルダパス（デフォルト `VaultBackup`）
+    - **Google Drive Target Folder Path**: 転送先フォルダパス。**デフォルトは固定文字列ではなく、選択したVaultフォルダ名を自動提案する**（3.5.0.1節）。Vaultフォルダを選び直すたびに追従するが、ユーザーが手動で変更した値は上書きしない。
     - **Sync Interval**: プライマリノードがVaultをスキャンし、変更をマージしてGoogle Driveへバックアップする周期（秒単位、デフォルト `120` 秒。3.4.1節）。iCloud経由の端末間同期はOS側が自動で行うため、この間隔設定はGoogle Driveへのバックアップ頻度にのみ影響する。
     - **Configure Google Drive Remote... ボタン**: Save Settingsを押す前でも、その場でrcloneのGoogle Drive認証（新規セットアップ／既存・CLI設定）を実行できる。
+    - **Remove Remote Configuration... ボタン**: リモートが設定済みの場合のみ表示。確認ダイアログの後、`rclone config delete` でそのリモートのGoogle Drive認証情報を削除する（Google Drive上のバックアップ済みファイル自体は削除されない）。別のGoogleアカウントで設定し直したい場合などに使用する。以前はこの操作に対応するGUI動線が存在せず、Terminal/PowerShellでの手動操作が必要だった。
   - **操作ボタン**:
-    - **Save Settings ボタン**: 全設定を一括保存し、自動的に `init` 処理（初回セットアップ・役割判定）を実行して同期ループへ反映する
+    - **Save Settings ボタン**: 全設定を一括保存し、自動的に `init` 処理（初回セットアップ・役割判定）を実行して同期ループへ反映する。前回保存時からVaultパスが変更されているのにGoogle Drive Target Folder Pathが変わっていない場合は、保存前に警告・確認ダイアログを表示する（3.5.0.1節）。
     - **Cancel ボタン**: 変更を行わずに設定画面を閉じる
     - **Reset Configuration ボタン**: 設定およびローカルの役割情報をクリアし、初期設定状態へ戻す（誤設定時やVault再設定時に使用）。**Settings画面内のボタンとしてのみ提供し、メニューバー／タスクトレイのメニュー項目には配置しない**（誤操作防止のため、Settings画面を開いた上で明示的に実行する動線に統一する）。
 - **ビジュアルデザイン・アイコン仕様**:
