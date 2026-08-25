@@ -193,7 +193,7 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
     - Git インストール状態 (`Git status: Installed / Not Found`)
     - rclone インストール状態 (`rclone status: Installed / Not Found`)
     - デバイス役割 (`Device Role: Primary / Secondary`)
-  - **[ Config 設定フォームセクション ]**:
+  - **[ Obsidian Vault セクション ]**:
     - **Vault Directory Path**: テキスト入力 ＋ `[ Select Folder ]` ボタン（フォルダ選択ダイアログ）。iPhone/Windows間の同期はiCloudに委任するため（1.3節）、このセクションに同期間隔などの設定項目は置かない。
   - **[ rclone セクション ]**: Google Driveへのバックアップに関する設定は、それが有効になる（rcloneの設定が完了する）までは意味を持たないため、すべてこのセクションにまとめる。
     - **Remote Name**: 設定されているリモート名（デフォルト `ObsidianVault`）
@@ -495,7 +495,7 @@ unitevault/                         ← ソースコードリポジトリ（GitH
 
 - **設定一覧表示および rclone リモート接続状態の確認**:
   - すでに設定済みの状態で「Settings...」を開いた場合も、単一ウィンドウ（3.5.2節）にその場で現在値を反映して表示する（ステップ形式の要約ダイアログは介さない）。表示される項目は次の通り：
-    1. Vault ディレクトリパス（Config セクション）
+    1. Vault ディレクトリパス（Obsidian Vault セクション）
     2. rclone リモート名 (`rclone_remote`) と**接続設定状態**（`rclone listremotes` を実行し、指定リモートが rclone 側に登録済みか動的チェック）、rclone バイナリの参照パス、Google Drive バックアップ先パス (`rclone_path`)、同期インターバル秒数 (`interval_seconds`) （いずれも rclone セクション。3.5.2節）
     3. ノード役割 (Primary / Secondary)（Status セクション）
   2. **rclone リモート名設定と検証**: テキスト入力ダイアログ（デフォルト: `ObsidianVault`）。入力されたリモート名が `rclone listremotes` に存在しない場合、ダイアログで「新規Rclone設定（デフォルト、GUIのみで完結）」と「既存/カスタムRclone設定（Terminal/PowerShell）」をユーザーに選択させる。「新規Rclone設定」選択時は `rclone config create <remote> drive` を非対話実行して自動的にブラウザでのGoogle認証ページを開き、コマンド操作不要で設定を完了する。「既存/カスタムRclone設定」選択時は Terminal (macOS) や PowerShell (Windows) で `rclone config` を対話起動する。

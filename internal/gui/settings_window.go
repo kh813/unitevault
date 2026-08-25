@@ -12,8 +12,8 @@ import (
 )
 
 // SettingsFormData represents everything shown/edited in the single Settings
-// window: the Status section, the Config form, and the rclone details
-// (spec section 3.5.2 / 8.3).
+// window: the Status section, the Obsidian Vault path, and the rclone
+// details (spec section 3.5.2 / 8.3).
 type SettingsFormData struct {
 	// Status Info
 	GitStatus    string
@@ -92,7 +92,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		data.RclonePath = "VaultBackup"
 	}
 
-	// --- Config section ---
+	// --- Obsidian Vault section ---
 	vaultEntry := widget.NewEntry()
 	vaultEntry.SetText(data.VaultPath)
 	vaultEntry.SetPlaceHolder("Path to your Obsidian Vault folder")
@@ -106,14 +106,15 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	})
 	vaultRow := container.NewBorder(nil, nil, nil, selectFolderBtn, vaultEntry)
 
-	configCard := widget.NewCard("Config", "", widget.NewForm(
+	vaultCard := widget.NewCard("Obsidian Vault", "", widget.NewForm(
 		widget.NewFormItem("Vault Directory Path", vaultRow),
 	))
 
 	// --- rclone section ---
-	// Everything about the Google Drive backup lives here, not in Config:
-	// none of it does anything until the rclone remote is actually
-	// configured, including the target folder and how often backups run.
+	// Everything about the Google Drive backup lives here, not in the
+	// Obsidian Vault section above: none of it does anything until the
+	// rclone remote is actually configured, including the target folder and
+	// how often backups run.
 	remoteEntry := widget.NewEntry()
 	remoteEntry.SetText(data.RcloneRemote)
 
@@ -203,7 +204,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 
 	return container.NewBorder(
 		nil, container.NewVBox(widget.NewSeparator(), buttonRow), nil, nil,
-		container.NewVScroll(container.NewVBox(statusCard, configCard, rcloneCard)),
+		container.NewVScroll(container.NewVBox(statusCard, vaultCard, rcloneCard)),
 	)
 }
 
