@@ -207,12 +207,13 @@ var ErrICloudRequiresAdministrator = errors.New("installing iCloud for Windows r
 // can't be worked around) - there is no point even attempting either
 // install path, and doing so would just surface a confusing low-level
 // winget failure instead of the actual reason. For an administrator, tries
-// the Microsoft Store version first (a real UAC consent prompt still
-// appears on first run for the reasons above, but it's a plain "Yes/No"
-// dialog rather than a request for someone else's credentials) and falls
-// back to the classic/legacy winget package ("Apple.iCloud") if that
-// fails (no Store access, an older winget that still requires a signed-in
-// Store account, corporate policy blocking Store installs, ...).
+// the classic/legacy winget package ("Apple.iCloud") first: it performs
+// its own elevation as part of installing, so it's immediately usable
+// afterward, whereas the Microsoft Store package can leave iCloud
+// installed but not actually functional until further manual steps (see
+// ErrICloudRequiresAdministrator). Falls back to the Store package only if
+// the classic one fails outright (not available via winget's default
+// source, a source agreement issue, ...).
 func AutoInstallICloud() error {
 	if runtime.GOOS != "windows" {
 		return fmt.Errorf("iCloud auto-installation is only applicable on Windows")
@@ -230,42 +231,50 @@ func AutoInstallICloud() error {
 		return fmt.Errorf("winget was not found - please install iCloud for Windows manually from %s", GetICloudDownloadURL())
 	}
 
-	// storeOutput is kept even on success so a failed classic fallback can
-	// explain *why* the preferred, no-admin Store install didn't work
-	// instead of only ever reporting the classic package's own failure -
-	// the Store path is the only one that can install without elevation at
-	// all, so its failure reason is the actionable one for anyone who wants
-	// to avoid the UAC prompt entirely. Both stdout and stderr are captured
-	// together: winget prints its actual user-facing diagnosis (e.g. "No
-	// Microsoft Store account found") to stdout, not stderr, so stderr
-	// alone previously captured nothing worth showing.
+	// classicOutput is kept even on success so a failed Store fallback can
+	// explain *why* the preferred classic install didn't work instead of
+	// only ever reporting the Store package's own failure. Both stdout and
+	// stderr are captured together: winget prints its actual user-facing
+	// diagnosis (e.g. "No Microsoft Store account found") to stdout, not
+	// stderr, so stderr alone would miss it.
+	classicCmd := exec.Command(wingetPath, "install", "--id", "Apple.iCloud", "-e", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements", "--silent")
+	var classicOutput bytes.Buffer
+	classicCmd.Stdout = &classicOutput
+	classicCmd.Stderr = &classicOutput
+	classicErr := classicCmd.Run()
+	if classicErr == nil && CheckICloudInstalled() {
+		launchICloud()
+		return nil
+	}
+
 	storeCmd := exec.Command(wingetPath, "install", "--id", icloudMSStoreID, "-e", "--source", "msstore", "--accept-source-agreements", "--accept-package-agreements", "--silent")
-	var storeOutput bytes.Buffer
-	storeCmd.Stdout = &storeOutput
-	storeCmd.Stderr = &storeOutput
 	storeErr := storeCmd.Run()
 	if storeErr == nil && CheckICloudInstalled() {
 		launchICloud()
 		return nil
 	}
 
-	classicCmd := exec.Command(wingetPath, "install", "--id", "Apple.iCloud", "-e", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements", "--silent")
-	if err := classicCmd.Run(); err != nil {
-		msg := fmt.Sprintf("winget install failed: %v", err)
-		if hint := wingetInstallErrorHint(err); hint != "" {
+	// Neither left iCloud detected as installed. Report the preferred
+	// classic package's own failure as the primary reason whenever it
+	// actually failed outright (that's the actionable one - see
+	// wingetInstallErrorHint), noting the Store fallback's outcome
+	// alongside it. If the classic command itself reported success but
+	// iCloud still isn't detected, fall through to the generic message
+	// below instead - there's no specific failure to explain there.
+	if classicErr != nil {
+		msg := fmt.Sprintf("winget install failed: %v", classicErr)
+		if hint := wingetInstallErrorHint(classicErr); hint != "" {
 			msg += "\n\n" + hint
 		}
-		if detail := strings.TrimSpace(storeOutput.String()); storeErr != nil && detail != "" {
-			msg += "\n\nThe no-admin Microsoft Store install was tried first and also failed:\n" + detail
+		if detail := strings.TrimSpace(classicOutput.String()); detail != "" {
+			msg += "\n\n" + detail
+		}
+		if storeErr != nil {
+			msg += fmt.Sprintf("\n\nThe Microsoft Store fallback was also tried and failed: %v", storeErr)
 		}
 		return errors.New(msg)
 	}
-	if !CheckICloudInstalled() {
-		return fmt.Errorf("iCloud installation did not complete - please install manually from %s", GetICloudDownloadURL())
-	}
-
-	launchICloud()
-	return nil
+	return fmt.Errorf("iCloud installation did not complete - please install manually from %s", GetICloudDownloadURL())
 }
 
 // wingetInstallErrorCodeHint maps a handful of well-known winget exit codes
