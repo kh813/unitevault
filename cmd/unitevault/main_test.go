@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/lang"
+	"fyne.io/fyne/v2/test"
 	"github.com/kh813/unitevault/internal/config"
+	"github.com/kh813/unitevault/internal/drive"
+	"github.com/kh813/unitevault/internal/engine"
 	"github.com/kh813/unitevault/internal/gui"
 )
 
@@ -22,15 +27,165 @@ func TestMain(m *testing.M) {
 	if err := gui.LoadTranslations(); err != nil {
 		fyne.LogError("failed to load UI translations for tests", err)
 	}
+	// gui.SetMenuItemLabel (used by runCycleGuarded) goes through fyne.Do,
+	// which requires a current Fyne app to be set - without this, any test
+	// that exercises runCycleGuarded's status-label updates panics.
+	test.NewApp()
 	os.Exit(m.Run())
 }
 
 // newTestTrayApp returns a trayApp wired to an isolated, temporary config
-// directory so tests never touch the real ~/.unitevault.
+// directory so tests never touch the real ~/.unitevault. ctx/cancel are set
+// to a real, cancellable context (mirroring what runTrayMode wires up)
+// since startDaemonLoop derives its loop context from t.ctx - leaving it
+// nil would panic any test that exercises startDaemonLoop.
 func newTestTrayApp(t *testing.T) *trayApp {
 	t.Helper()
 	cfgMgr := config.NewConfigManagerWithDir(t.TempDir())
-	return &trayApp{cfgMgr: cfgMgr}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return &trayApp{cfgMgr: cfgMgr, ctx: ctx, cancel: cancel}
+}
+
+// noopDriveRunner is a minimal drive.RcloneRunner stub for tests that need
+// to exercise engine.SyncEngine.RunCycle without touching a real rclone
+// binary or network. FileExists always reports "not found" so RunCycle
+// takes the primary-initialization path; the tests below only care whether
+// RunCycle started at all (observable via the device_id file), not whether
+// it completes successfully.
+type noopDriveRunner struct{}
+
+func (noopDriveRunner) Sync(ctx context.Context, srcPath, remoteTarget string) error { return nil }
+func (noopDriveRunner) Copy(ctx context.Context, remoteSrc, dstPath string) error    { return nil }
+func (noopDriveRunner) FileExists(ctx context.Context, remoteTargetFile string) (bool, error) {
+	return false, nil
+}
+func (noopDriveRunner) DownloadFile(ctx context.Context, remoteSourceFile, localDstFile string) error {
+	return nil
+}
+func (noopDriveRunner) UploadFile(ctx context.Context, localSrcFile, remoteTargetFile string) error {
+	return nil
+}
+func (noopDriveRunner) DeleteFile(ctx context.Context, remoteTargetFile string) error { return nil }
+
+var _ drive.RcloneRunner = noopDriveRunner{}
+
+// TestTryBeginExclusiveOp_SerializesAccess is the core regression test for
+// the busy-guard mechanism: a second caller must be refused while the
+// first still holds the lock, and must succeed again once released.
+func TestTryBeginExclusiveOp_SerializesAccess(t *testing.T) {
+	tr := newTestTrayApp(t)
+
+	release1, ok1 := tr.tryBeginExclusiveOp()
+	if !ok1 {
+		t.Fatal("expected the first call to acquire successfully")
+	}
+
+	if _, ok2 := tr.tryBeginExclusiveOp(); ok2 {
+		t.Fatal("expected a second concurrent call to fail while the first is still held")
+	}
+
+	release1()
+
+	release3, ok3 := tr.tryBeginExclusiveOp()
+	if !ok3 {
+		t.Fatal("expected a call after release to succeed")
+	}
+	release3()
+}
+
+// TestStartDaemonLoop_CancelsPreviousLoop is the regression test for the
+// duplicate-daemon-loop bug: starting a new loop must cancel any
+// previously-running one rather than leaving it running alongside the new
+// one forever (see the trayApp.daemonMu doc comment).
+func TestStartDaemonLoop_CancelsPreviousLoop(t *testing.T) {
+	tr := newTestTrayApp(t)
+
+	var oldCancelled bool
+	tr.daemonMu.Lock()
+	tr.daemonCancel = func() { oldCancelled = true }
+	tr.daemonMu.Unlock()
+
+	cfg := &config.Config{VaultPath: filepath.Join(t.TempDir(), "Vault"), IntervalSeconds: 3600}
+	tr.startDaemonLoop(cfg)
+
+	if !oldCancelled {
+		t.Error("expected startDaemonLoop to cancel the previously-running loop before starting a new one")
+	}
+
+	tr.daemonMu.Lock()
+	newCancel := tr.daemonCancel
+	tr.daemonMu.Unlock()
+	if newCancel == nil {
+		t.Fatal("expected a new daemonCancel to be installed")
+	}
+	newCancel() // stop the real loop goroutine startDaemonLoop just spawned
+}
+
+func TestStopDaemonLoop_CancelsAndClears(t *testing.T) {
+	tr := newTestTrayApp(t)
+
+	var cancelled bool
+	tr.daemonMu.Lock()
+	tr.daemonCancel = func() { cancelled = true }
+	tr.daemonMu.Unlock()
+
+	tr.stopDaemonLoop()
+
+	if !cancelled {
+		t.Error("expected stopDaemonLoop to cancel the running loop")
+	}
+	tr.daemonMu.Lock()
+	got := tr.daemonCancel
+	tr.daemonMu.Unlock()
+	if got != nil {
+		t.Error("expected daemonCancel to be cleared to nil after stopDaemonLoop")
+	}
+}
+
+func TestStopDaemonLoop_NoOpWhenNoneRunning(t *testing.T) {
+	tr := newTestTrayApp(t)
+	tr.stopDaemonLoop() // must not panic when no loop is running
+}
+
+// TestRunCycleGuarded_SkipsWhenBusy verifies that a cycle never starts
+// while cycleMu is already held (e.g. by another cycle, or by a
+// destructive config change in progress) - proven by the fact that
+// RunCycle's very first action, GetDeviceID, never runs.
+func TestRunCycleGuarded_SkipsWhenBusy(t *testing.T) {
+	tr := newTestTrayApp(t)
+	tr.status = fyne.NewMenuItem("", nil)
+	tr.menu = fyne.NewMenu("", tr.status)
+	vaultPath := filepath.Join(t.TempDir(), "Vault")
+	eng := engine.NewSyncEngine(tr.cfgMgr, vaultPath, "test-device", noopDriveRunner{})
+
+	release, ok := tr.tryBeginExclusiveOp()
+	if !ok {
+		t.Fatal("expected to acquire the lock for test setup")
+	}
+	defer release()
+
+	tr.runCycleGuarded(context.Background(), eng, false)
+
+	if _, err := os.Stat(tr.cfgMgr.DeviceIDPath()); err == nil {
+		t.Error("expected RunCycle to never start (no device_id file created) while cycleMu is already held")
+	}
+}
+
+// TestRunCycleGuarded_RunsWhenFree is the companion case: with no
+// exclusive op in progress, runCycleGuarded must actually invoke RunCycle.
+func TestRunCycleGuarded_RunsWhenFree(t *testing.T) {
+	tr := newTestTrayApp(t)
+	tr.status = fyne.NewMenuItem("", nil)
+	tr.menu = fyne.NewMenu("", tr.status)
+	vaultPath := filepath.Join(t.TempDir(), "Vault")
+	eng := engine.NewSyncEngine(tr.cfgMgr, vaultPath, "test-device", noopDriveRunner{})
+
+	tr.runCycleGuarded(context.Background(), eng, false)
+
+	if _, err := os.Stat(tr.cfgMgr.DeviceIDPath()); err != nil {
+		t.Error("expected RunCycle to have started (device_id file created) when cycleMu was free")
+	}
 }
 
 func TestBuildFormData_DefaultsWhenUnconfigured(t *testing.T) {
@@ -221,4 +376,3 @@ func TestBuildFormData_DriveSyncStatusAndRoleVariations(t *testing.T) {
 		}
 	})
 }
-

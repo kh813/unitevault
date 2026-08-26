@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -86,6 +87,43 @@ type trayApp struct {
 	status *fyne.MenuItem
 
 	icloudNoticeShown bool
+
+	// daemonMu guards daemonCancel: exactly one daemon loop goroutine may
+	// ever be running at a time. Without this, every successful "Save
+	// Settings" started a brand new runDaemonLoop goroutine on top of
+	// whichever one(s) were already running (the first from startup(),
+	// then one more per save) - t.ctx is only ever cancelled on Quit, so
+	// nothing ever stopped the earlier ones. Each accumulated loop kept
+	// ticking independently and forever, concurrently scanning/merging/
+	// rclone-syncing (a Primary device's own past Vault path/config,
+	// stale after later saves, in addition to the current one) - a real,
+	// previously-unnoticed bug. startDaemonLoop/stopDaemonLoop are the
+	// only places allowed to touch daemonCancel; always go through them,
+	// never call runDaemonLoop directly.
+	daemonMu     sync.Mutex
+	daemonCancel context.CancelFunc
+
+	// cycleMu serializes every SyncEngine.RunCycle invocation on this
+	// device (from the daemon loop's ticker and "Sync Now" alike) so two
+	// never run concurrently, and doubles as the gate for destructive
+	// configuration changes (saveSettingsConfirmed, removeRemote,
+	// configureRemote, performReset) that would be unsafe to run while a
+	// cycle is mid-flight and actively reading/writing local sync state or
+	// using the rclone remote being changed. Always acquire via
+	// tryBeginExclusiveOp, never lock directly.
+	cycleMu sync.Mutex
+}
+
+// tryBeginExclusiveOp attempts to acquire exclusive access to run a sync
+// cycle or a destructive configuration change, without blocking. ok=false
+// means a cycle or another destructive operation is already in progress -
+// callers must warn the user and abort rather than proceeding or silently
+// queueing behind it (spec 3.5.3).
+func (t *trayApp) tryBeginExclusiveOp() (release func(), ok bool) {
+	if !t.cycleMu.TryLock() {
+		return nil, false
+	}
+	return t.cycleMu.Unlock, true
 }
 
 func runTrayMode() {
@@ -178,7 +216,35 @@ func (t *trayApp) startup() {
 	} else {
 		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Active"))
 	}
-	t.runDaemonLoop(cfg)
+	t.startDaemonLoop(cfg)
+}
+
+// startDaemonLoop (re)starts the periodic sync cycle for cfg, first
+// stopping any previously-running loop - see the trayApp.daemonMu doc
+// comment for why this must never be skipped. Safe to call from any
+// goroutine.
+func (t *trayApp) startDaemonLoop(cfg *config.Config) {
+	t.daemonMu.Lock()
+	if t.daemonCancel != nil {
+		t.daemonCancel()
+	}
+	loopCtx, cancel := context.WithCancel(t.ctx)
+	t.daemonCancel = cancel
+	t.daemonMu.Unlock()
+
+	go t.runDaemonLoop(loopCtx, cfg)
+}
+
+// stopDaemonLoop stops any currently-running daemon loop without starting
+// a replacement - used by performReset, since a reset device has no valid
+// config left for a loop to run against. Safe to call from any goroutine.
+func (t *trayApp) stopDaemonLoop() {
+	t.daemonMu.Lock()
+	if t.daemonCancel != nil {
+		t.daemonCancel()
+		t.daemonCancel = nil
+	}
+	t.daemonMu.Unlock()
 }
 
 // maybeShowInstallReminder nags the user, once per app launch, about missing
@@ -213,8 +279,10 @@ func (t *trayApp) maybeShowInstallReminder() {
 	})
 }
 
-// runDaemonLoop runs the periodic sync cycle until t.ctx is cancelled (Quit).
-func (t *trayApp) runDaemonLoop(cfg *config.Config) {
+// runDaemonLoop runs the periodic sync cycle until ctx is cancelled (either
+// Quit, or startDaemonLoop replacing this loop with a newer one). Only
+// ever call via startDaemonLoop, never directly.
+func (t *trayApp) runDaemonLoop(ctx context.Context, cfg *config.Config) {
 	hostname, _ := os.Hostname()
 	eng := engine.NewSyncEngine(t.cfgMgr, cfg.VaultPath, hostname, nil)
 
@@ -227,14 +295,38 @@ func (t *trayApp) runDaemonLoop(cfg *config.Config) {
 
 	for {
 		select {
-		case <-t.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Syncing..."))
-			_ = eng.RunCycle(t.ctx)
-			role, _ := t.cfgMgr.LoadRole()
-			gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Active ({{.Role}}) - {{.Time}}", map[string]string{"Role": role, "Time": time.Now().Format("15:04")}))
+			// reportBusy=false: a routine tick finding a cycle already in
+			// progress (from "Sync Now", most likely) just waits quietly
+			// for the next one rather than interrupting the user.
+			t.runCycleGuarded(ctx, eng, false)
 		}
+	}
+}
+
+// runCycleGuarded runs eng.RunCycle while holding cycleMu, so it can never
+// overlap with another cycle or a destructive configuration change (see
+// tryBeginExclusiveOp) - shared by runDaemonLoop's ticker and "Sync Now"
+// so both paths get the same guarding and status-label updates.
+func (t *trayApp) runCycleGuarded(ctx context.Context, eng *engine.SyncEngine, reportBusy bool) {
+	release, ok := t.tryBeginExclusiveOp()
+	if !ok {
+		if reportBusy {
+			gui.Info(lang.L("Sync In Progress"), lang.L("A sync is already running. Please wait for it to finish, then try again."))
+		}
+		return
+	}
+	defer release()
+
+	gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Syncing..."))
+	err := eng.RunCycle(ctx)
+	role, _ := t.cfgMgr.LoadRole()
+	if err != nil {
+		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Error ({{.Err}})", map[string]string{"Err": err.Error()}))
+	} else {
+		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Active ({{.Role}}) - {{.Time}}", map[string]string{"Role": role, "Time": time.Now().Format("15:04")}))
 	}
 }
 
@@ -247,16 +339,9 @@ func (t *trayApp) syncNow() {
 		return
 	}
 
-	gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Syncing..."))
 	hostname, _ := os.Hostname()
 	eng := engine.NewSyncEngine(t.cfgMgr, cfg.VaultPath, hostname, nil)
-	err = eng.RunCycle(t.ctx)
-	role, _ := t.cfgMgr.LoadRole()
-	if err != nil {
-		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Error ({{.Err}})", map[string]string{"Err": err.Error()}))
-	} else {
-		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Active ({{.Role}}) - {{.Time}}", map[string]string{"Role": role, "Time": time.Now().Format("15:04")}))
-	}
+	t.runCycleGuarded(t.ctx, eng, true)
 }
 
 // checkForUpdate handles the "Check for Update..." tray menu action:
@@ -345,6 +430,14 @@ func (t *trayApp) performSelfUpdate(info *selfupdate.ReleaseInfo) {
 // is already gated by its own confirm dialog (buildSettingsContent) - Reset
 // is deliberately not exposed anywhere in the tray menu itself.
 func (t *trayApp) performReset() {
+	release, ok := t.tryBeginExclusiveOp()
+	if !ok {
+		gui.Info(lang.L("Sync In Progress"), lang.L("A sync is currently running. Please wait for it to finish, then try again."))
+		return
+	}
+	defer release()
+
+	t.stopDaemonLoop()
 	_ = t.cfgMgr.ResetConfig()
 	t.icloudNoticeShown = false
 	gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Not Initialized"))
@@ -671,6 +764,13 @@ func (t *trayApp) configureRemote(current gui.SettingsFormData) {
 			switch choice {
 			case 1:
 				go func() {
+					release, ok := t.tryBeginExclusiveOp()
+					if !ok {
+						gui.Info(lang.L("Sync In Progress"), lang.L("A sync is currently running. Please wait for it to finish, then try again."))
+						return
+					}
+					defer release()
+
 					err := gui.RunWithProgress(
 						lang.L("Google Drive Setup"),
 						lang.L("Opening your browser for Google Drive authentication...\nPlease grant permissions, then return here."),
@@ -713,6 +813,13 @@ func (t *trayApp) removeRemote(current gui.SettingsFormData) {
 				return
 			}
 			go func() {
+				release, ok := t.tryBeginExclusiveOp()
+				if !ok {
+					gui.Info(lang.L("Sync In Progress"), lang.L("A sync is currently running and may be using this remote. Please wait for it to finish, then try again."))
+					return
+				}
+				defer release()
+
 				client := drive.NewClient(engineLogPath())
 				if err := client.RemoveRemote(context.Background(), remoteName); err != nil {
 					gui.Info(lang.L("Remove Failed"), lang.L("Failed to remove remote '{{.Remote}}': {{.Err}}", map[string]string{"Remote": remoteName, "Err": err.Error()}))
@@ -832,6 +939,13 @@ func vaultChangedWithSameTarget(prevCfg *config.Config, data gui.SettingsFormDat
 // Vault-change warning has been confirmed (or didn't apply).
 func (t *trayApp) saveSettingsConfirmed(data gui.SettingsFormData) {
 	go func() {
+		release, ok := t.tryBeginExclusiveOp()
+		if !ok {
+			gui.Info(lang.L("Sync In Progress"), lang.L("A sync is currently running. Please wait for it to finish, then try Save Settings again."))
+			return
+		}
+		defer release()
+
 		driveClient := drive.NewClient(engineLogPath())
 
 		if !driveClient.IsRemoteConfigured(context.Background(), data.RcloneRemote) {
@@ -902,7 +1016,7 @@ func (t *trayApp) saveSettingsConfirmed(data gui.SettingsFormData) {
 		))
 		gui.HideWindow()
 
-		go t.runDaemonLoop(newCfg)
+		t.startDaemonLoop(newCfg)
 	}()
 }
 

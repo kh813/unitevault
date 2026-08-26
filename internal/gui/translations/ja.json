@@ -158,5 +158,11 @@
   "Promoted to Primary": "Primaryに昇格しました",
   "This device is now Primary and will run the sync engine and Google Drive backups.": "このデバイスは現在Primaryとなり、同期エンジンとGoogle Driveバックアップを実行します。",
   "Not Promoted": "昇格されませんでした",
-  "Another device became Primary at the same time. This device remains Secondary.": "同時に別のデバイスがPrimaryになりました。このデバイスはSecondaryのままです。"
+  "Another device became Primary at the same time. This device remains Secondary.": "同時に別のデバイスがPrimaryになりました。このデバイスはSecondaryのままです。",
+
+  "Sync In Progress": "同期処理が進行中です",
+  "A sync is already running. Please wait for it to finish, then try again.": "同期処理が既に実行中です。完了してからもう一度お試しください。",
+  "A sync is currently running. Please wait for it to finish, then try again.": "同期処理が現在実行中です。完了してからもう一度お試しください。",
+  "A sync is currently running and may be using this remote. Please wait for it to finish, then try again.": "同期処理が現在実行中で、このリモートを使用している可能性があります。完了してからもう一度お試しください。",
+  "A sync is currently running. Please wait for it to finish, then try Save Settings again.": "同期処理が現在実行中です。完了してから改めて「設定を保存」をお試しください。"
 }
