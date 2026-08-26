@@ -13,7 +13,7 @@ import (
 	"github.com/kh813/unitevault/internal/eventlog"
 )
 
-const AppVersion = "0.0.46"
+const AppVersion = "0.0.47"
 const PrimaryMarkerRelPath = "_sync/PRIMARY_MARKER.json"
 
 // ConflictMarkerRelPath is the Google Drive path (not mirrored into the
