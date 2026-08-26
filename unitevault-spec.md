@@ -251,6 +251,7 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
   - **Reset Configuration**（設定・役割情報の初期化。合わせて`stopDaemonLoop`でループ自体も停止する）
   - **Configure Google Drive Remote...**（rcloneのGoogle Drive認証セットアップ）
   - **Remove Remote Configuration...**（rcloneリモート設定の削除）
+  - **Promote to Primary...**（役割・`PRIMARY_MARKER.json`・`PRIMARY_CONFLICT.json`の書き換えを伴う。3.6.1.2節・3.6.1.4節）
   - ロック取得に失敗した場合（＝いずれかの同期サイクルまたは他の破壊的操作が進行中）は、操作を中断し「Sync In Progress」ダイアログで、完了を待って再試行するよう案内する。待機キューに入れて自動的に後から実行する、という挙動はあえて採らない（ユーザーが気づかないタイミングで意図しない変更が走ることを避けるため）。
 
 セカンダリのrclone設定を先に、プライマリのrclone設定を後に削除するといった**複数デバイスをまたぐ**順序（本節が扱うのは単一デバイス内の排他制御のみ）については、3.6.1.4節のマルチPrimary衝突検知・解決の仕組み（`PRIMARY_MARKER.json` / `PRIMARY_CONFLICT.json`）が実質的にカバーする。

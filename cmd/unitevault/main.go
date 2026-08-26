@@ -833,15 +833,25 @@ func (t *trayApp) removeRemote(current gui.SettingsFormData) {
 }
 
 // promoteToPrimary handles the Status section's "Promote to Primary..."
-// button (spec 3.6.1.2 / 3.6.1.4), shown whenever
+// button (spec 3.6.1.2 / 3.6.1.4 / 3.5.3), shown whenever
 // SettingsFormData.CanPromoteToPrimary is true - either this device is a
 // plain Secondary wanting to take over (e.g. the old Primary is
 // unreachable), or it's resolving an active multi-Primary conflict in this
 // device's favor. settings_window.go already confirms with the user
 // (using different wording for each case) before calling this, so it
-// proceeds directly.
+// proceeds directly. Guarded by tryBeginExclusiveOp since
+// bootstrapper.PromoteToPrimary writes the same local role file and
+// PRIMARY_MARKER.json/PRIMARY_CONFLICT.json that a concurrently-running
+// RunCycle reads and writes.
 func (t *trayApp) promoteToPrimary(current gui.SettingsFormData) {
 	go func() {
+		release, ok := t.tryBeginExclusiveOp()
+		if !ok {
+			gui.Info(lang.L("Sync In Progress"), lang.L("A sync is currently running. Please wait for it to finish, then try again."))
+			return
+		}
+		defer release()
+
 		vaultPath := strings.TrimSpace(current.VaultPath)
 		if vaultPath == "" {
 			gui.Info(lang.L("Vault Required"), lang.L("Please select your Obsidian Vault directory before saving."))
