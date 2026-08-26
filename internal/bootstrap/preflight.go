@@ -213,15 +213,19 @@ func AutoInstallICloud() error {
 		return fmt.Errorf("winget was not found - please install iCloud for Windows manually from %s", GetICloudDownloadURL())
 	}
 
-	// storeStderr is kept even on success so a failed classic fallback can
+	// storeOutput is kept even on success so a failed classic fallback can
 	// explain *why* the preferred, no-admin Store install didn't work
 	// instead of only ever reporting the classic package's own failure -
 	// the Store path is the only one that can install without elevation at
 	// all, so its failure reason is the actionable one for anyone who wants
-	// to avoid the UAC prompt entirely.
+	// to avoid the UAC prompt entirely. Both stdout and stderr are captured
+	// together: winget prints its actual user-facing diagnosis (e.g. "No
+	// Microsoft Store account found") to stdout, not stderr, so stderr
+	// alone previously captured nothing worth showing.
 	storeCmd := exec.Command(wingetPath, "install", "--id", icloudMSStoreID, "-e", "--source", "msstore", "--accept-source-agreements", "--accept-package-agreements", "--silent")
-	var storeStderr bytes.Buffer
-	storeCmd.Stderr = &storeStderr
+	var storeOutput bytes.Buffer
+	storeCmd.Stdout = &storeOutput
+	storeCmd.Stderr = &storeOutput
 	storeErr := storeCmd.Run()
 	if storeErr == nil && CheckICloudInstalled() {
 		launchICloud()
@@ -234,7 +238,7 @@ func AutoInstallICloud() error {
 		if hint := wingetInstallErrorHint(err); hint != "" {
 			msg += "\n\n" + hint
 		}
-		if detail := strings.TrimSpace(storeStderr.String()); storeErr != nil && detail != "" {
+		if detail := strings.TrimSpace(storeOutput.String()); storeErr != nil && detail != "" {
 			msg += "\n\nThe no-admin Microsoft Store install was tried first and also failed:\n" + detail
 		}
 		return errors.New(msg)
