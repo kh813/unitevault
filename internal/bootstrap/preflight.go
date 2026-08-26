@@ -1,6 +1,8 @@
 package bootstrap
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // CheckGitInstalled checks if git is available in PATH or common install directories.
@@ -210,15 +213,31 @@ func AutoInstallICloud() error {
 		return fmt.Errorf("winget was not found - please install iCloud for Windows manually from %s", GetICloudDownloadURL())
 	}
 
+	// storeStderr is kept even on success so a failed classic fallback can
+	// explain *why* the preferred, no-admin Store install didn't work
+	// instead of only ever reporting the classic package's own failure -
+	// the Store path is the only one that can install without elevation at
+	// all, so its failure reason is the actionable one for anyone who wants
+	// to avoid the UAC prompt entirely.
 	storeCmd := exec.Command(wingetPath, "install", "--id", icloudMSStoreID, "-e", "--source", "msstore", "--accept-source-agreements", "--accept-package-agreements", "--silent")
-	if storeCmd.Run() == nil && CheckICloudInstalled() {
+	var storeStderr bytes.Buffer
+	storeCmd.Stderr = &storeStderr
+	storeErr := storeCmd.Run()
+	if storeErr == nil && CheckICloudInstalled() {
 		launchICloud()
 		return nil
 	}
 
 	classicCmd := exec.Command(wingetPath, "install", "--id", "Apple.iCloud", "-e", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements", "--silent")
 	if err := classicCmd.Run(); err != nil {
-		return fmt.Errorf("winget install failed: %w", err)
+		msg := fmt.Sprintf("winget install failed: %v", err)
+		if hint := wingetInstallErrorHint(err); hint != "" {
+			msg += "\n\n" + hint
+		}
+		if detail := strings.TrimSpace(storeStderr.String()); storeErr != nil && detail != "" {
+			msg += "\n\nThe no-admin Microsoft Store install was tried first and also failed:\n" + detail
+		}
+		return errors.New(msg)
 	}
 	if !CheckICloudInstalled() {
 		return fmt.Errorf("iCloud installation did not complete - please install manually from %s", GetICloudDownloadURL())
@@ -226,6 +245,39 @@ func AutoInstallICloud() error {
 
 	launchICloud()
 	return nil
+}
+
+// wingetInstallErrorCodeHint maps a handful of well-known winget exit codes
+// (see APPINSTALLER_CLI_ERROR_* in
+// https://github.com/microsoft/winget-cli/blob/master/src/AppInstallerSharedLib/Public/AppInstallerErrors.h)
+// to a short, actionable hint, or "" if exitCode isn't one of them. Kept
+// separate from wingetInstallErrorHint (which extracts the code from an
+// error) purely so it's testable with a plain int literal, without needing
+// to fabricate an *exec.ExitError.
+func wingetInstallErrorCodeHint(exitCode int) string {
+	switch exitCode {
+	case 0x8A150006: // APPINSTALLER_CLI_ERROR_SHELLEXEC_INSTALL_FAILED
+		// The classic "Apple.iCloud" package requires administrator
+		// elevation (see AutoInstallICloud's doc comment) - this specific
+		// code means winget found and downloaded the installer but the OS
+		// itself failed to launch it, which in practice almost always means
+		// the Windows administrator permission (UAC) prompt it triggered
+		// was denied, dismissed, or timed out before being approved.
+		return `This usually means a Windows administrator permission (UAC) prompt appeared and wasn't approved - try again and click "Yes" on the prompt when it appears.`
+	default:
+		return ""
+	}
+}
+
+// wingetInstallErrorHint is wingetInstallErrorCodeHint applied to whatever
+// exit code err carries, or "" if err isn't a process exit error at all
+// (e.g. winget wasn't found, or was killed rather than exiting normally).
+func wingetInstallErrorHint(err error) string {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return ""
+	}
+	return wingetInstallErrorCodeHint(exitErr.ExitCode())
 }
 
 // GetRcloneDownloadURL returns the official download URL for rclone.
