@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/lang"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -41,6 +42,12 @@ type SettingsFormData struct {
 	// rclone Details
 	RcloneExecPath   string
 	RcloneRemoteInfo string
+	// RcloneConfigured reports whether RcloneRemote is actually registered
+	// with rclone (i.e. client.IsRemoteConfigured), independent of
+	// RcloneRemoteInfo's own (localized, so unsafe to string-match)
+	// display text - it's what actually gates showing "Remove Remote
+	// Configuration...".
+	RcloneConfigured bool
 }
 
 // SettingsHandlers wires the Settings window's actions back to the business
@@ -83,7 +90,7 @@ func ShowSettingsWindow(data SettingsFormData, handlers SettingsHandlers) {
 	fyne.Do(func() {
 		content := buildSettingsContent(data, handlers)
 		mainWindow.SetContent(content)
-		mainWindow.SetTitle("UniteVault Settings")
+		mainWindow.SetTitle(lang.L("UniteVault Settings"))
 		// Resize to fit this exact content every time: how many
 		// Install/Configure/Remove buttons are showing changes the form's
 		// natural height release to release (and even within one session,
@@ -124,7 +131,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// --- Obsidian Vault section ---
 	vaultEntry := widget.NewEntry()
 	vaultEntry.SetText(data.VaultPath)
-	vaultEntry.SetPlaceHolder("Your Obsidian Vault folder")
+	vaultEntry.SetPlaceHolder(lang.L("Your Obsidian Vault folder"))
 
 	// --- rclone section ---
 	// Everything about the Google Drive backup lives here, not in the
@@ -159,8 +166,8 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		lastAutoTargetPath = ""
 	}
 
-	selectFolderBtn := widget.NewButton("Select Folder...", func() {
-		PickFolder("Select Your Obsidian Vault Folder", func(path string, ok bool) {
+	selectFolderBtn := widget.NewButton(lang.L("Select Folder..."), func() {
+		PickFolder(lang.L("Select Your Obsidian Vault Folder"), func(path string, ok bool) {
 			if !ok {
 				return
 			}
@@ -174,8 +181,8 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	})
 	vaultRow := container.NewBorder(nil, nil, nil, selectFolderBtn, vaultEntry)
 
-	vaultCard := widget.NewCard("Obsidian Vault", "", widget.NewForm(
-		widget.NewFormItem("Vault Folder Location", vaultRow),
+	vaultCard := widget.NewCard(lang.L("Obsidian Vault"), "", widget.NewForm(
+		widget.NewFormItem(lang.L("Vault Folder Location"), vaultRow),
 	))
 
 	intervalEntry := widget.NewEntry()
@@ -192,7 +199,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	baselineTargetPath := strings.TrimSpace(targetPathEntry.Text)
 	baselineInterval := strings.TrimSpace(intervalEntry.Text)
 
-	unsavedLabel := canvas.NewText("● Unsaved changes", theme.Color(theme.ColorNameWarning))
+	unsavedLabel := canvas.NewText("● "+lang.L("Unsaved changes"), theme.Color(theme.ColorNameWarning))
 	unsavedLabel.TextStyle = fyne.TextStyle{Bold: true}
 	unsavedLabel.Hidden = true
 
@@ -210,8 +217,11 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	intervalEntry.OnChanged = updateDirtyState
 
 	rcloneBasicForm := widget.NewForm(
-		widget.NewFormItem("Remote Status", widget.NewLabel(orDefault(data.RcloneRemoteInfo, "Unknown"))),
-		widget.NewFormItem("Executable", widget.NewLabel(orDefault(data.RcloneExecPath, "Not Found"))),
+		// data.RcloneRemoteInfo is built in main.go via lang.L with template
+		// data (it embeds a variable remote name), so it already arrives
+		// pre-localized - it must not be wrapped in lang.L again here.
+		widget.NewFormItem(lang.L("Remote Status"), widget.NewLabel(orDefault(data.RcloneRemoteInfo, lang.L("Unknown")))),
+		widget.NewFormItem(lang.L("Executable"), widget.NewLabel(orDefault(data.RcloneExecPath, lang.L("Not Found")))),
 	)
 
 	// Remote Name / Target Folder Path / Sync Interval all have sensible
@@ -220,11 +230,11 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// isn't cluttered with fields nobody needs to touch, while still being
 	// one click away for anyone who does want to customize them.
 	rcloneAdvancedForm := widget.NewForm(
-		widget.NewFormItem("Remote Name", remoteEntry),
-		widget.NewFormItem("Google Drive Target Folder Path", targetPathEntry),
-		widget.NewFormItem("Sync Interval (seconds)", intervalEntry),
+		widget.NewFormItem(lang.L("Remote Name"), remoteEntry),
+		widget.NewFormItem(lang.L("Google Drive Target Folder Path"), targetPathEntry),
+		widget.NewFormItem(lang.L("Sync Interval (seconds)"), intervalEntry),
 	)
-	rcloneAdvanced := widget.NewAccordion(widget.NewAccordionItem("Advanced Options", rcloneAdvancedForm))
+	rcloneAdvanced := widget.NewAccordion(widget.NewAccordionItem(lang.L("Advanced Options"), rcloneAdvancedForm))
 
 	// currentSnapshot captures the form's fields exactly as currently typed.
 	// Every handler that may trigger a window rebuild (install/configure
@@ -245,17 +255,18 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			IntervalSeconds:  sec,
 			RcloneExecPath:   data.RcloneExecPath,
 			RcloneRemoteInfo: data.RcloneRemoteInfo,
+			RcloneConfigured: data.RcloneConfigured,
 		}
 	}
 
-	configureRemoteBtn := widget.NewButton("Configure Google Drive Remote...", func() {
+	configureRemoteBtn := widget.NewButton(lang.L("Configure Google Drive Remote..."), func() {
 		if handlers.OnConfigureRemote != nil {
 			handlers.OnConfigureRemote(currentSnapshot())
 		}
 	})
 	var rcloneButtonRow fyne.CanvasObject
-	if strings.HasPrefix(data.RcloneRemoteInfo, "Configured") && handlers.OnRemoveRemote != nil {
-		removeRemoteBtn := widget.NewButton("Remove Remote Configuration...", func() {
+	if data.RcloneConfigured && handlers.OnRemoveRemote != nil {
+		removeRemoteBtn := widget.NewButton(lang.L("Remove Remote Configuration..."), func() {
 			// Always remove the remote actually reported as "Configured"
 			// (baselineRemote, captured when this window was built), not
 			// whatever name currently sits typed-but-unsaved in the Remote
@@ -270,7 +281,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		rcloneButtonRow = container.NewHBox(configureRemoteBtn)
 	}
 	rcloneCardContent := []fyne.CanvasObject{rcloneBasicForm, rcloneButtonRow, rcloneAdvanced}
-	rcloneCard := widget.NewCard("rclone", "", container.NewVBox(rcloneCardContent...))
+	rcloneCard := widget.NewCard(lang.L("rclone"), "", container.NewVBox(rcloneCardContent...))
 
 	// --- Status section ---
 	var installGit, installRclone, installICloud func()
@@ -284,37 +295,40 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		installICloud = func() { handlers.OnInstallICloud(currentSnapshot()) }
 	}
 	statusRows := []fyne.CanvasObject{
-		statusLine("Git status:", orDefault(data.GitStatus, "Unknown"), "Install Git...", installGit),
-		statusLine("rclone status:", orDefault(data.RcloneStatus, "Unknown"), "Install rclone...", installRclone),
+		statusLine(lang.L("Git status:"), lang.L(orDefault(data.GitStatus, "Unknown")), lang.L("Install Git..."), installGit),
+		statusLine(lang.L("rclone status:"), lang.L(orDefault(data.RcloneStatus, "Unknown")), lang.L("Install rclone..."), installRclone),
 	}
 	// ICloudStatus is only ever populated on Windows (see SettingsFormData) -
 	// hiding the row entirely elsewhere instead of showing "Not Found" for a
 	// concept (a separate iCloud install) that doesn't apply there.
 	if data.ICloudStatus != "" {
-		statusRows = append(statusRows, statusLine("iCloud status:", data.ICloudStatus, "Install iCloud...", installICloud))
+		statusRows = append(statusRows, statusLine(lang.L("iCloud status:"), lang.L(data.ICloudStatus), lang.L("Install iCloud..."), installICloud))
 	}
 	if data.DriveSyncStatus != "" {
-		statusRows = append(statusRows, statusLine("Google Drive sync:", data.DriveSyncStatus, "", nil))
+		// data.DriveSyncStatus is built in main.go via lang.L with template
+		// data (it embeds a variable timestamp/error), so it already
+		// arrives pre-localized - it must not be wrapped in lang.L again.
+		statusRows = append(statusRows, statusLine(lang.L("Google Drive sync:"), data.DriveSyncStatus, "", nil))
 	}
-	statusRows = append(statusRows, statusLine("Device role:", orDefault(data.DeviceRole, "N/A"), "", nil))
-	statusCard := widget.NewCard("Status", "", container.NewVBox(statusRows...))
+	statusRows = append(statusRows, statusLine(lang.L("Device role:"), lang.L(orDefault(data.DeviceRole, "N/A")), "", nil))
+	statusCard := widget.NewCard(lang.L("Status"), "", container.NewVBox(statusRows...))
 
 	// --- Bottom action buttons ---
-	saveBtn := widget.NewButton("Save Settings", func() {
+	saveBtn := widget.NewButton(lang.L("Save Settings"), func() {
 		if handlers.OnSave != nil {
 			handlers.OnSave(currentSnapshot())
 		}
 	})
 	saveBtn.Importance = widget.HighImportance
 
-	cancelBtn := widget.NewButton("Cancel", func() {
+	cancelBtn := widget.NewButton(lang.L("Cancel"), func() {
 		hideWindowNow()
 	})
 
-	resetBtn := widget.NewButton("Reset Configuration", func() {
+	resetBtn := widget.NewButton(lang.L("Reset Configuration"), func() {
 		ConfirmDanger(
-			"Reset Configuration",
-			"Are you sure you want to reset UniteVault configuration?\nThis clears local settings and role info, returning this device to an uninitialized state.",
+			lang.L("Reset Configuration"),
+			lang.L("Are you sure you want to reset UniteVault configuration?\nThis clears local settings and role info, returning this device to an uninitialized state."),
 			func(confirmed bool) {
 				if confirmed && handlers.OnReset != nil {
 					handlers.OnReset()

@@ -407,6 +407,7 @@ func TestBuildSettingsContent_RemoveRemoteIgnoresUnsavedEdit(t *testing.T) {
 		VaultPath:        "/tmp/vault",
 		RcloneRemote:     "ObsidianVault",
 		RcloneRemoteInfo: "Configured (ObsidianVault)",
+		RcloneConfigured: true,
 		RcloneStatus:     "Installed",
 	}, SettingsHandlers{
 		OnRemoveRemote: func(current SettingsFormData) { gotRemote = current.RcloneRemote },
@@ -520,6 +521,7 @@ func TestBuildSettingsContent_RemoveRemoteButtonVisibility(t *testing.T) {
 	configured := buildSettingsContent(SettingsFormData{
 		VaultPath:        "/tmp/vault",
 		RcloneRemoteInfo: "Configured (ObsidianVault)",
+		RcloneConfigured: true,
 	}, SettingsHandlers{
 		OnRemoveRemote: func(SettingsFormData) {},
 	})
@@ -530,6 +532,7 @@ func TestBuildSettingsContent_RemoveRemoteButtonVisibility(t *testing.T) {
 	configuredNoHandler := buildSettingsContent(SettingsFormData{
 		VaultPath:        "/tmp/vault",
 		RcloneRemoteInfo: "Configured (ObsidianVault)",
+		RcloneConfigured: true,
 	}, SettingsHandlers{})
 	if hasButton(configuredNoHandler, "Remove Remote Configuration...") {
 		t.Error("expected no Remove Remote Configuration button when no OnRemoveRemote handler is wired")
@@ -573,6 +576,7 @@ func TestBuildSettingsContent_DestructiveButtonsAreNotDanger(t *testing.T) {
 	content := buildSettingsContent(SettingsFormData{
 		VaultPath:        "/tmp/vault",
 		RcloneRemoteInfo: "Configured (ObsidianVault)",
+		RcloneConfigured: true,
 	}, SettingsHandlers{
 		OnReset:        func() {},
 		OnRemoveRemote: func(SettingsFormData) {},
@@ -645,6 +649,7 @@ func TestBuildSettingsContent_RcloneButtonsLayout(t *testing.T) {
 		content := buildSettingsContent(SettingsFormData{
 			VaultPath:        "/tmp/vault",
 			RcloneRemoteInfo: "Configured (ObsidianVault)",
+			RcloneConfigured: true,
 		}, SettingsHandlers{
 			OnRemoveRemote: func(SettingsFormData) {},
 		})
@@ -656,4 +661,3 @@ func TestBuildSettingsContent_RcloneButtonsLayout(t *testing.T) {
 		}
 	})
 }
-

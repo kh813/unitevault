@@ -18,13 +18,27 @@
 package gui
 
 import (
+	"embed"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/lang"
 )
 
 // AppID is the unique application identifier used for Fyne preferences storage.
 const AppID = "com.unitevault.app"
+
+// translationFiles holds this app's own UI translation bundles (spec section
+// 8.5) - go-i18n format JSON, one file per locale (e.g. "ja.json"), keyed by
+// the English string as it appears in a lang.L(...) call. English itself has
+// no file here since it's always the fallback/original text passed to
+// lang.L, not a translation of anything. Loaded via lang.AddTranslationsFS
+// in InitApp, alongside Fyne's own built-in translations (e.g. the Yes/No
+// buttons on dialog.NewConfirm) which are loaded automatically.
+//
+//go:embed translations
+var translationFiles embed.FS
 
 var (
 	fyneApp    fyne.App
@@ -51,12 +65,16 @@ func InitApp(appIcon fyne.Resource) fyne.App {
 		Migrations: map[string]bool{"fyneDo": true},
 	})
 
+	if err := lang.AddTranslationsFS(translationFiles, "translations"); err != nil {
+		fyne.LogError("Failed to load UI translations", err)
+	}
+
 	fyneApp = app.NewWithID(AppID)
 	if appIcon != nil {
 		fyneApp.SetIcon(appIcon)
 	}
 
-	mainWindow = fyneApp.NewWindow("UniteVault Settings")
+	mainWindow = fyneApp.NewWindow(lang.L("UniteVault Settings"))
 	// A modest placeholder size, only ever visible if a dialog (Info/
 	// Confirm/...) needs to show before ShowSettingsWindow has built any
 	// real content yet. ShowSettingsWindow resizes this window to fit its

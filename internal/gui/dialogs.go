@@ -4,6 +4,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/lang"
 	"fyne.io/fyne/v2/widget"
 	"github.com/ncruces/zenity"
 )
@@ -79,7 +80,7 @@ func Choice(title, message, btn1Text, btn2Text string, onChoice func(result int)
 			container.NewGridWithColumns(2, b1, b2),
 		)
 
-		d = dialog.NewCustom(title, "Cancel", content, mainWindow)
+		d = dialog.NewCustom(title, lang.L("Cancel"), content, mainWindow)
 		d.SetOnClosed(func() {
 			if onChoice != nil {
 				onChoice(result)
@@ -103,11 +104,11 @@ func InstallReminder(title, message string, onClose func(dontShowAgain bool)) {
 
 		msgLabel := widget.NewLabel(message)
 		msgLabel.Wrapping = fyne.TextWrapWord
-		check := widget.NewCheck("Don't show this again", nil)
+		check := widget.NewCheck(lang.L("Don't show this again"), nil)
 
 		content := container.NewVBox(msgLabel, check)
 
-		d := dialog.NewCustom(title, "OK", content, mainWindow)
+		d := dialog.NewCustom(title, lang.L("OK"), content, mainWindow)
 		d.Resize(fyne.NewSize(420, 220))
 		d.SetOnClosed(func() {
 			if onClose != nil {
