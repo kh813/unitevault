@@ -187,18 +187,32 @@ func launchICloud() {
 // (visible at https://apps.microsoft.com/detail/9pktq5699m62).
 const icloudMSStoreID = "9PKTQ5699M62"
 
+// ErrICloudRequiresAdministrator is returned by AutoInstallICloud when the
+// current Windows user isn't a member of the Administrators group. Despite
+// the Microsoft Store package itself installing per-user with no
+// elevation, iCloud for Windows registers several system-level components
+// on first run regardless of which package installed it - an Explorer
+// shell integration/virtual drive filter driver, Outlook/Photos COM
+// add-ins, and HKLM registry keys - none of which a standard user can
+// register on their own. There is no supported way to install a working
+// copy of iCloud for Windows without administrator (UAC) access.
+var ErrICloudRequiresAdministrator = errors.New("installing iCloud for Windows requires administrator privileges on this computer - please contact your system administrator")
+
 // AutoInstallICloud attempts to install Apple's iCloud for Windows client
 // via winget (Windows only - iCloud ships with macOS/iOS, so this has
 // nothing to do there).
 //
-// Tries the Microsoft Store version first: Store (AppX/MSIX) packages
-// install per-user with no administrator elevation, unlike the classic
-// installer below - a real UAC prompt is a meaningfully worse experience
-// for something this app triggers on the user's behalf. If that fails (no
-// Store access, an older winget that still requires a signed-in Store
-// account, corporate policy blocking Store installs, ...), falls back to
-// the classic/legacy winget package ("Apple.iCloud"), which does require
-// elevation but is more predictably scriptable via --silent.
+// Bails out immediately with ErrICloudRequiresAdministrator if the current
+// user isn't an administrator (see that error's doc comment for why this
+// can't be worked around) - there is no point even attempting either
+// install path, and doing so would just surface a confusing low-level
+// winget failure instead of the actual reason. For an administrator, tries
+// the Microsoft Store version first (a real UAC consent prompt still
+// appears on first run for the reasons above, but it's a plain "Yes/No"
+// dialog rather than a request for someone else's credentials) and falls
+// back to the classic/legacy winget package ("Apple.iCloud") if that
+// fails (no Store access, an older winget that still requires a signed-in
+// Store account, corporate policy blocking Store installs, ...).
 func AutoInstallICloud() error {
 	if runtime.GOOS != "windows" {
 		return fmt.Errorf("iCloud auto-installation is only applicable on Windows")
@@ -206,6 +220,9 @@ func AutoInstallICloud() error {
 	if CheckICloudInstalled() {
 		launchICloud()
 		return nil
+	}
+	if !IsAdministrator() {
+		return ErrICloudRequiresAdministrator
 	}
 
 	wingetPath, err := exec.LookPath("winget")

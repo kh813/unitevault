@@ -1,7 +1,9 @@
 package bootstrap_test
 
 import (
+	"errors"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/kh813/unitevault/internal/bootstrap"
@@ -39,5 +41,33 @@ func TestAutoInstallICloud_NonWindowsIsANoOp(t *testing.T) {
 	}
 	if err := bootstrap.AutoInstallICloud(); err == nil {
 		t.Error("expected AutoInstallICloud to return an error on a non-Windows OS")
+	}
+}
+
+// TestIsAdministrator_NonWindowsIsAlwaysFalse guards that IsAdministrator
+// never attempts any Windows-only privilege check off Windows - the
+// concept (and AutoInstallICloud, its only caller) doesn't apply there.
+func TestIsAdministrator_NonWindowsIsAlwaysFalse(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("this guards the non-Windows stub specifically")
+	}
+	if bootstrap.IsAdministrator() {
+		t.Error("expected IsAdministrator to always report false on a non-Windows OS")
+	}
+}
+
+// TestErrICloudRequiresAdministrator_IsMatchableAndActionable guards two
+// properties real callers depend on: main.go's installICloud handler uses
+// errors.Is to detect this specific sentinel and show a distinct dialog
+// (see cmd/unitevault/main.go), and that dialog's fallback text is just
+// this error's own message - so it must actually explain what to do
+// ("contact your system administrator"), not just restate that something
+// failed.
+func TestErrICloudRequiresAdministrator_IsMatchableAndActionable(t *testing.T) {
+	if !errors.Is(bootstrap.ErrICloudRequiresAdministrator, bootstrap.ErrICloudRequiresAdministrator) {
+		t.Fatal("expected ErrICloudRequiresAdministrator to match itself via errors.Is")
+	}
+	if !strings.Contains(bootstrap.ErrICloudRequiresAdministrator.Error(), "administrator") {
+		t.Errorf("expected the error message to mention administrator privileges, got: %q", bootstrap.ErrICloudRequiresAdministrator.Error())
 	}
 }

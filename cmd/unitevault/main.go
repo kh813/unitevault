@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -409,6 +410,11 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 		icloudStatus = "Not Found"
 		if bootstrap.CheckICloudInstalled() {
 			icloudStatus = "Installed"
+		} else if !bootstrap.IsAdministrator() {
+			// Surface this here too, not just in the dialog "Install
+			// iCloud..." shows after a failed attempt - so it's visible
+			// without the user having to click the button at all first.
+			icloudStatus = "Not Found (requires an administrator account to install)"
 		}
 	}
 
@@ -464,6 +470,12 @@ func (t *trayApp) openSettingsGUI() {
 	data := t.buildFormData()
 	t.showSettingsGUI(data)
 
+	// data.ICloudStatus == "Not Found" specifically (not just "starts with
+	// Not Found") deliberately excludes the "requires an administrator
+	// account" variant here: offering to install it right now and having
+	// that dead-end into "ask your system administrator" on every single
+	// startup would be a worse experience than just letting them discover
+	// the requirement passively in Settings > Status when they get there.
 	if runtime.GOOS == "windows" && !t.icloudNoticeShown && data.VaultPath == "" && data.ICloudStatus == "Not Found" {
 		t.icloudNoticeShown = true
 		gui.Confirm(
@@ -579,12 +591,18 @@ func (t *trayApp) installICloud(current gui.SettingsFormData) {
 			func() error { return bootstrap.AutoInstallICloud() },
 		)
 
-		if installErr == nil {
+		switch {
+		case installErr == nil:
 			gui.Info(
 				"iCloud Installed",
 				"iCloud for Windows was successfully installed and launched.\n\nPlease sign in with your Apple ID and turn on iCloud Drive, then return here to select your Vault folder.",
 			)
-		} else {
+		case errors.Is(installErr, bootstrap.ErrICloudRequiresAdministrator):
+			gui.Info(
+				"Administrator Privileges Required",
+				fmt.Sprintf("%v.\n\niCloud for Windows registers system-level components (Explorer integration, Outlook/Photos add-ins, registry entries) that only an administrator account can install, even through the Microsoft Store.\n\nPlease ask your system administrator to install it, or download it yourself from:\n%s", installErr, bootstrap.GetICloudDownloadURL()),
+			)
+		default:
 			gui.Info(
 				"iCloud Install Failed",
 				fmt.Sprintf("Automatic installation failed: %v\n\nYou can download it manually from:\n%s", installErr, bootstrap.GetICloudDownloadURL()),
