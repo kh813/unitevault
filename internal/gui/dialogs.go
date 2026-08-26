@@ -134,10 +134,25 @@ var pickFolderFunc = func(title string) (string, error) {
 
 // PickFolder opens a native folder selection dialog. onPicked receives the
 // chosen absolute path and ok=true, or ok=false if the user cancelled. Safe
-// to call from any goroutine; onPicked always runs on the Fyne main thread.
+// to call from any goroutine - including the Fyne main goroutine itself
+// (e.g. directly from a button's OnTapped, which is how settings_window.go
+// calls it): this MUST stay fyne.Do, never fyne.DoAndWait. DoAndWait blocks
+// the calling goroutine until Fyne's main loop processes the queued
+// closure - if the caller *is* the main loop goroutine (as it is here),
+// nothing else can ever drain that queue and it deadlocks solid, freezing
+// the whole app the instant "Select Folder..." is clicked (a real,
+// reported bug - the fyne/test driver used by this package's own tests
+// can't catch this: DoFromGoroutine there runs synchronously with no
+// queue at all, so it never deadlocks even when this bug is present). Do
+// is safe here specifically because it never waits - it only enqueues,
+// and the spawned goroutine below only reads wasHidden after
+// pickFolderFunc returns, by which point the queued closure that sets it
+// has always long since run (see RunWithProgress for the one place in
+// this file DoAndWait actually is correct - it's never called from the
+// main goroutine).
 func PickFolder(title string, onPicked func(path string, ok bool)) {
 	var wasHidden bool
-	fyne.DoAndWait(func() {
+	fyne.Do(func() {
 		wasHidden = ensureWindowVisible()
 	})
 	go func() {

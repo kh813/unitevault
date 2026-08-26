@@ -2,6 +2,8 @@ package gui
 
 import (
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,6 +73,67 @@ func TestPickFolder_ReportsCancellation(t *testing.T) {
 	if gotOK {
 		t.Error("expected ok=false when the native dialog reports an error/cancellation")
 	}
+}
+
+// TestPickFolder_NeverUsesDoAndWait guards a real, reported bug: PickFolder
+// is called directly and synchronously from settings_window.go's "Select
+// Folder..." button - i.e. from the Fyne main goroutine itself, while the
+// app is already running. fyne.DoAndWait there deadlocks the entire app
+// solid the instant the button is clicked (it blocks the calling goroutine
+// waiting for Fyne's main loop to process a closure it just queued, but
+// the main loop *is* that same, now-blocked goroutine - nothing is left
+// to ever drain the queue). PickFolder must use the non-blocking fyne.Do,
+// which only enqueues and returns, for every fyne package call it makes.
+//
+// This can't be caught by actually calling PickFolder in this test suite:
+// the fyne/test driver used here runs DoFromGoroutine synchronously with
+// no queue at all regardless of wait, so it can never reproduce the
+// deadlock that only happens under the real (glfw) driver - hence this
+// guards the source text directly instead.
+func TestPickFolder_NeverUsesDoAndWait(t *testing.T) {
+	src, err := os.ReadFile("dialogs.go")
+	if err != nil {
+		t.Fatalf("failed to read dialogs.go: %v", err)
+	}
+
+	body, ok := funcBody(string(src), "func PickFolder(")
+	if !ok {
+		t.Fatal("expected to find func PickFolder in dialogs.go")
+	}
+	if strings.Contains(body, "fyne.DoAndWait(") {
+		t.Error("PickFolder must never call fyne.DoAndWait - it deadlocks the app when PickFolder is called from the Fyne main goroutine (e.g. a button's OnTapped), which is exactly how it's actually used. Use fyne.Do instead.")
+	}
+}
+
+// funcBody extracts the brace-delimited body text of the first top-level
+// function whose declaration starts with marker (e.g. "func Foo(") in src,
+// by counting braces from that function's opening "{" - good enough for
+// this package's own well-formatted source, without pulling in go/parser
+// for a single test.
+func funcBody(src, marker string) (string, bool) {
+	start := strings.Index(src, marker)
+	if start == -1 {
+		return "", false
+	}
+	open := strings.IndexByte(src[start:], '{')
+	if open == -1 {
+		return "", false
+	}
+	open += start
+
+	depth := 0
+	for i := open; i < len(src); i++ {
+		switch src[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return src[open : i+1], true
+			}
+		}
+	}
+	return "", false
 }
 
 // TestConfirmDanger_UsesDangerImportanceOnConfirmButton guards the split
