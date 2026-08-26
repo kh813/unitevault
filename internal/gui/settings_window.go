@@ -334,9 +334,22 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// wrapped in VScroll as a safety net: it keeps the window's fixed size
 	// while still making the expanded fields and the fixed bottom button row
 	// reachable instead of being clipped outside the window bounds.
+	//
+	// A bare Scroll's own MinSize() ignores its content's natural height
+	// entirely (Fyne hardcodes a 32px floor for a vertical-only scroller),
+	// so leaving it unset shrank the whole window down to ~32px tall on
+	// every open - SetMinSize pins it back to the topContent's real
+	// (accordion-closed) height so ShowSettingsWindow's resize is unchanged,
+	// while scrolling for an expanded accordion still works exactly the
+	// same (that's evaluated against the window's actual on-screen size at
+	// layout time, independent of this MinSize hint).
+	topContent := container.NewVBox(statusCard, vaultCard, rcloneCard)
+	scroll := container.NewVScroll(topContent)
+	scroll.SetMinSize(topContent.MinSize())
+
 	return container.NewBorder(
 		nil, container.NewVBox(widget.NewSeparator(), buttonRow), nil, nil,
-		container.NewVScroll(container.NewVBox(statusCard, vaultCard, rcloneCard)),
+		scroll,
 	)
 }
 

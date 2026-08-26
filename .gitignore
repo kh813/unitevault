@@ -3,6 +3,7 @@
 /unitevault.exe
 bin/
 dist/
+*.syso
 
 # Logs & temporary files
 *.log

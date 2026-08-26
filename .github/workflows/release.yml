@@ -72,6 +72,16 @@ jobs:
       - name: Install Windows cross-compile toolchain (mingw-w64)
         run: brew install mingw-w64
 
+      # Go's linker embeds any *_windows_amd64.syso file found in the main
+      # package directory as the binary's Win32 resources - this is the only
+      # way to set the .exe file's own icon (what Explorer/taskbar/shortcuts
+      # show for the file itself); it's unrelated to the tray icon, which is
+      # set purely at runtime via Fyne's SetSystemTrayIcon and worked already
+      # without this. rsrc is a pure-Go tool (no mingw needed for this step).
+      - name: Generate Windows .exe icon resource
+        run: |
+          go run github.com/akavel/rsrc -ico assets/tray/icon.ico -o cmd/unitevault/rsrc_windows_amd64.syso
+
       - name: Build Windows binary & Create ZIP
         run: |
           CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \

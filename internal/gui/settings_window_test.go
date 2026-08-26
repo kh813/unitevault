@@ -321,6 +321,30 @@ func TestBuildSettingsContent_ScrollableAgainstAccordionExpansion(t *testing.T) 
 	}
 }
 
+// TestBuildSettingsContent_MinSizeReflectsFullContent guards a real
+// regression from wrapping the top section in a bare VScroll: Fyne's
+// vertical-only Scroll.MinSize() ignores its content's natural height
+// entirely and reports a hardcoded ~32px floor instead, so
+// ShowSettingsWindow's `mainWindow.Resize(content.MinSize()...)` shrank the
+// whole Settings window down to about 77px tall on every single open
+// (measured directly against the pre-fix code) instead of the ~500+px the
+// Status/Vault/rclone cards actually need. That tiny window is what made an
+// unrelated overlay dialog (e.g. the Windows iCloud setup notice) look like
+// it had "shrunk the app window to the dialog's size" - the window was
+// already broken before the dialog ever appeared. The scroll's MinSize must
+// be pinned back to its content's real size (see buildSettingsContent's use
+// of Scroll.SetMinSize).
+func TestBuildSettingsContent_MinSizeReflectsFullContent(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault"}, SettingsHandlers{})
+
+	const minReasonableHeight = 300 // real content measures ~538px; the bug produced ~77px
+	if got := content.MinSize().Height; got < minReasonableHeight {
+		t.Errorf("expected the Settings window's MinSize height to reflect its full content (>= %v), got %v - the scroll container is likely reporting its own tiny floor instead of the wrapped content's real height", minReasonableHeight, got)
+	}
+}
+
 func TestBuildSettingsContent_ResetRequiresConfirmation(t *testing.T) {
 	newTestWindow()
 
