@@ -116,3 +116,20 @@ func TestUpdateHelperScript_RestoresBackupOnTotalFailure(t *testing.T) {
 		t.Error("expected the script to restore EXE from OLDEXE when every retry attempt fails")
 	}
 }
+
+// TestCreateNoWindowFlag guards the exact bit values of the two Windows
+// process creation flag constants Apply combines to keep the update helper
+// (and the console commands it runs internally, like ping) from ever
+// flashing a visible cmd.exe window - a real user-reported bug caused by
+// DETACHED_PROCESS alone not being enough to suppress it. These are magic
+// numbers copied from the Windows API (mirrored by hand rather than
+// pulling in golang.org/x/sys/windows), so a typo here would silently
+// reintroduce the flash without any compiler error to catch it.
+func TestCreateNoWindowFlag(t *testing.T) {
+	if detachedProcess != 0x00000008 {
+		t.Errorf("detachedProcess must mirror windows.DETACHED_PROCESS (0x8), got %#x", detachedProcess)
+	}
+	if createNoWindow != 0x08000000 {
+		t.Errorf("createNoWindow must mirror windows.CREATE_NO_WINDOW (0x08000000), got %#x", createNoWindow)
+	}
+}

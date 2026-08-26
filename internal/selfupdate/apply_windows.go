@@ -20,6 +20,18 @@ import (
 // survives after this process exits, without pulling in golang.org/x/sys.
 const detachedProcess = 0x00000008
 
+// createNoWindow mirrors windows.CREATE_NO_WINDOW. DETACHED_PROCESS alone
+// only stops the helper from *inheriting* this process's console - cmd.exe
+// and the console commands it runs internally (ping, taskkill, ...) are
+// still console-subsystem programs, so without this flag Windows can
+// allocate them a brand new console anyway and briefly flash it on screen
+// (e.g. showing ping's loopback output) before HideWindow below hides it.
+// CREATE_NO_WINDOW tells Windows not to create that console's window at
+// all, which is the actual fix for the flash - HideWindow alone hides a
+// window after it's created, which isn't fast enough to prevent it from
+// ever being visible.
+const createNoWindow = 0x08000000
+
 // updateHelperScript is a plain cmd.exe batch script, deliberately *not*
 // PowerShell: an earlier version used a PowerShell script here (even with
 // -ExecutionPolicy Bypass), and real-world updates kept failing with the
@@ -45,7 +57,11 @@ const detachedProcess = 0x00000008
 // this process (a -H=windowsgui build) has no console at all, and `timeout`
 // specifically errors out ("Input redirection is not supported") when
 // stdin isn't a real console - `ping` doesn't care and blocks for the same
-// ~1s regardless.
+// ~1s regardless. It never actually touches the network (127.0.0.1 is the
+// loopback address) - it's purely a delay with no real ping behind it. A
+// visible cmd.exe window briefly flashing ping's output is a separate,
+// unrelated bug in how Apply launches this whole script (see createNoWindow
+// below) - swapping ping for something else here wouldn't have fixed that.
 //
 // The backup at OLDEXE is deliberately deleted only once, *before* the
 // retry loop starts, and again only after the swap has actually succeeded -
@@ -133,7 +149,7 @@ func Apply(ctx context.Context, assetURL string) error {
 
 	oldExePath := exePath + ".old"
 	cmd := exec.Command("cmd", "/c", scriptPath, exePath, newExePath, oldExePath, strconv.Itoa(os.Getpid()))
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: detachedProcess}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: detachedProcess | createNoWindow}
 	if err := cmd.Start(); err != nil {
 		_ = os.Remove(newExePath)
 		_ = os.Remove(scriptPath)
