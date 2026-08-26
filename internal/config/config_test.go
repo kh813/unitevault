@@ -45,8 +45,8 @@ func TestConfigManager_Config(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error loading initial config, got: %v", err)
 	}
-	if cfg.IntervalSeconds != 120 {
-		t.Errorf("expected default IntervalSeconds=120, got %d", cfg.IntervalSeconds)
+	if cfg.IntervalSeconds != config.DefaultIntervalSeconds {
+		t.Errorf("expected default IntervalSeconds=%d, got %d", config.DefaultIntervalSeconds, cfg.IntervalSeconds)
 	}
 
 	// Save modified config

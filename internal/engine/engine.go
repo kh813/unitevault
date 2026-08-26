@@ -10,6 +10,7 @@ import (
 	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/drive"
+	"github.com/kh813/unitevault/internal/eventlog"
 	"github.com/kh813/unitevault/internal/merge"
 	"github.com/kh813/unitevault/internal/scan"
 	"github.com/kh813/unitevault/internal/syncedlog"
@@ -44,6 +45,12 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get device ID: %w", err)
 	}
+
+	// Prune this device's own old application-event-log entries (spec
+	// 3.2.1) - purely local housekeeping on a file only this device ever
+	// writes to, so it's safe regardless of role and doesn't need to block
+	// the rest of the cycle on failure.
+	_ = eventlog.NewManager(e.vaultPath).PruneOwnEvents(deviceID, eventlog.DefaultRetentionDays)
 
 	role, err := e.cfgMgr.LoadRole()
 	if err != nil || role == "" {
@@ -97,6 +104,27 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 
 	// Secondary node stops here (only records local log)
 	if role == "secondary" {
+		return nil
+	}
+
+	// Primary node: re-confirm every cycle that this device is still the
+	// Primary PRIMARY_MARKER.json actually names, and that no unresolved
+	// multi-Primary conflict is open (spec 3.6.1.4) - role above is only
+	// ever set once (at InitializeNode/PromoteToPrimary time) and never
+	// otherwise re-checked, so without this a device superseded elsewhere
+	// (e.g. via Settings > "Promote to Primary...") would keep merging and
+	// pushing conflicting rclone syncs indefinitely.
+	primaryCfg, err := e.cfgMgr.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config for primary status check: %w", err)
+	}
+	remoteTarget := fmt.Sprintf("%s:%s", primaryCfg.RcloneRemote, primaryCfg.RclonePath)
+	bootstrapper := bootstrap.NewBootstrapper(e.cfgMgr, e.drive)
+	proceed, err := bootstrapper.VerifyPrimaryStatus(ctx, e.vaultPath, remoteTarget, deviceID, e.label)
+	if err != nil {
+		return fmt.Errorf("primary status check failed: %w", err)
+	}
+	if !proceed {
 		return nil
 	}
 
@@ -183,7 +211,7 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 // RunDaemon runs RunCycle in a continuous loop with the specified interval until ctx is canceled.
 func (e *SyncEngine) RunDaemon(ctx context.Context, interval int) error {
 	if interval <= 0 {
-		interval = 120
+		interval = config.DefaultIntervalSeconds
 	}
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()

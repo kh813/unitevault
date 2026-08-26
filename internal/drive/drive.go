@@ -33,6 +33,11 @@ type RcloneRunner interface {
 	FileExists(ctx context.Context, remoteTargetFile string) (bool, error)
 	DownloadFile(ctx context.Context, remoteSourceFile, localDstFile string) error
 	UploadFile(ctx context.Context, localSrcFile, remoteTargetFile string) error
+	// DeleteFile removes a single remote file. Implementations must treat a
+	// file that's already gone as success (idempotent) - callers clearing
+	// a marker that may have already been cleared by another device (e.g.
+	// PRIMARY_CONFLICT.json once resolved) shouldn't need to check first.
+	DeleteFile(ctx context.Context, remoteTargetFile string) error
 }
 
 // Client implements RcloneRunner using os/exec with retry & exponential backoff.
@@ -284,6 +289,21 @@ func (c *Client) DownloadFile(ctx context.Context, remoteSourceFile, localDstFil
 // UploadFile uploads a single local file to remote target using `rclone copyto`
 func (c *Client) UploadFile(ctx context.Context, localSrcFile, remoteTargetFile string) error {
 	return c.executeWithRetry(ctx, "copyto", localSrcFile, remoteTargetFile)
+}
+
+// DeleteFile removes a single remote file using `rclone deletefile`. Checks
+// existence first rather than trusting deletefile's own not-found exit
+// behavior (which isn't guaranteed stable across rclone versions), so
+// deleting an already-gone file is always a safe no-op for callers.
+func (c *Client) DeleteFile(ctx context.Context, remoteTargetFile string) error {
+	exists, err := c.FileExists(ctx, remoteTargetFile)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	return c.executeWithRetry(ctx, "deletefile", remoteTargetFile)
 }
 
 // ListRemotes executes `rclone listremotes` and returns configured remote names without trailing colon.

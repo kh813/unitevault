@@ -114,9 +114,9 @@ func TestBuildSettingsContent_FillsDefaults(t *testing.T) {
 		t.Errorf("expected default target path to be the Vault folder name 'vault', got %q", targetEntry.Text)
 	}
 
-	intervalEntry := findEntry(t, content, "120")
-	if intervalEntry.Text != "120" {
-		t.Errorf("expected default interval '120', got %q", intervalEntry.Text)
+	intervalEntry := findEntry(t, content, "600")
+	if intervalEntry.Text != "600" {
+		t.Errorf("expected default interval '600', got %q", intervalEntry.Text)
 	}
 }
 
@@ -169,8 +169,8 @@ func TestBuildSettingsContent_SaveRoundTripsEditedValues(t *testing.T) {
 	if saved.RclonePath != "Backups/Vault" {
 		t.Errorf("expected RclonePath to round-trip, got %q", saved.RclonePath)
 	}
-	if saved.IntervalSeconds != 120 {
-		t.Errorf("expected default IntervalSeconds 120, got %d", saved.IntervalSeconds)
+	if saved.IntervalSeconds != 600 {
+		t.Errorf("expected default IntervalSeconds 600, got %d", saved.IntervalSeconds)
 	}
 }
 
@@ -660,4 +660,127 @@ func TestBuildSettingsContent_RcloneButtonsLayout(t *testing.T) {
 			t.Fatal("expected both Configure and Remove buttons to be present")
 		}
 	})
+}
+
+// TestBuildSettingsContent_PromoteToPrimaryButtonVisibility guards the
+// gating rules for "Promote to Primary..." (spec 3.6.1.2 / 3.6.1.4): shown
+// for a plain Secondary or during an active conflict, hidden for a normal
+// Primary with no conflict, and hidden entirely without a wired handler.
+func TestBuildSettingsContent_PromoteToPrimaryButtonVisibility(t *testing.T) {
+	newTestWindow()
+
+	secondary := buildSettingsContent(SettingsFormData{
+		VaultPath:           "/tmp/vault",
+		DeviceRole:          "secondary",
+		CanPromoteToPrimary: true,
+	}, SettingsHandlers{
+		OnPromoteToPrimary: func(SettingsFormData) {},
+	})
+	if !hasButton(secondary, "Promote to Primary...") {
+		t.Error("expected a Promote to Primary button for a plain Secondary device")
+	}
+
+	primaryNoConflict := buildSettingsContent(SettingsFormData{
+		VaultPath:  "/tmp/vault",
+		DeviceRole: "primary",
+	}, SettingsHandlers{
+		OnPromoteToPrimary: func(SettingsFormData) {},
+	})
+	if hasButton(primaryNoConflict, "Promote to Primary...") {
+		t.Error("expected no Promote to Primary button for a healthy Primary device")
+	}
+
+	primaryWithConflict := buildSettingsContent(SettingsFormData{
+		VaultPath:              "/tmp/vault",
+		DeviceRole:             "primary",
+		CanPromoteToPrimary:    true,
+		PrimaryConflictActive:  true,
+		PrimaryConflictMessage: "another device also claims Primary",
+	}, SettingsHandlers{
+		OnPromoteToPrimary: func(SettingsFormData) {},
+	})
+	if !hasButton(primaryWithConflict, "Promote to Primary...") {
+		t.Error("expected a Promote to Primary button while a conflict is active, even for the currently-recognized Primary")
+	}
+
+	secondaryNoHandler := buildSettingsContent(SettingsFormData{
+		VaultPath:           "/tmp/vault",
+		DeviceRole:          "secondary",
+		CanPromoteToPrimary: true,
+	}, SettingsHandlers{})
+	if hasButton(secondaryNoHandler, "Promote to Primary...") {
+		t.Error("expected no Promote to Primary button when no OnPromoteToPrimary handler is wired")
+	}
+}
+
+// TestBuildSettingsContent_ConflictBanner_ShownWhenActive guards that the
+// conflict warning row only appears while PrimaryConflictActive, and shows
+// the pre-localized message as-is (main.go builds it via lang.L with
+// template data, so settings_window.go must not wrap it again).
+func TestBuildSettingsContent_ConflictBanner_ShownWhenActive(t *testing.T) {
+	newTestWindow()
+
+	noConflict := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault"}, SettingsHandlers{})
+	if hasLabelText(noConflict, "windows-desktop also believes it is Primary") {
+		t.Error("expected no conflict banner text when there is no active conflict")
+	}
+
+	withConflict := buildSettingsContent(SettingsFormData{
+		VaultPath:              "/tmp/vault",
+		PrimaryConflictActive:  true,
+		PrimaryConflictMessage: "windows-desktop also believes it is Primary",
+	}, SettingsHandlers{})
+	if !hasLabelText(withConflict, "windows-desktop also believes it is Primary") {
+		t.Error("expected the conflict banner to show PrimaryConflictMessage verbatim")
+	}
+}
+
+// TestBuildSettingsContent_PromoteToPrimary_ConfirmThenInvokesHandler
+// guards the full interaction: tapping the button shows a confirmation
+// dialog (matching the Reset Configuration button's own pattern), and only
+// confirming it calls OnPromoteToPrimary with the current form snapshot.
+func TestBuildSettingsContent_PromoteToPrimary_ConfirmThenInvokesHandler(t *testing.T) {
+	newTestWindow()
+
+	var got SettingsFormData
+	called := false
+	content := buildSettingsContent(SettingsFormData{
+		VaultPath:           "/tmp/vault",
+		RcloneRemote:        "ObsidianVault",
+		DeviceRole:          "secondary",
+		CanPromoteToPrimary: true,
+	}, SettingsHandlers{
+		OnPromoteToPrimary: func(current SettingsFormData) {
+			called = true
+			got = current
+		},
+	})
+
+	promoteBtn := findButton(t, content, "Promote to Primary...")
+	test.Tap(promoteBtn)
+	if called {
+		t.Fatal("expected OnPromoteToPrimary not to fire before the confirmation dialog is answered")
+	}
+
+	confirmBtn := findDialogConfirmButton(t)
+	test.Tap(confirmBtn)
+
+	if !called {
+		t.Fatal("expected OnPromoteToPrimary to fire once the confirmation dialog is confirmed")
+	}
+	if got.VaultPath != "/tmp/vault" || got.RcloneRemote != "ObsidianVault" {
+		t.Errorf("expected the current form snapshot to be passed through, got %+v", got)
+	}
+}
+
+// hasLabelText reports whether any widget.Label in the content tree has
+// exactly this text.
+func hasLabelText(root fyne.CanvasObject, text string) bool {
+	found := false
+	walkObjects(root, func(o fyne.CanvasObject) {
+		if l, ok := o.(*widget.Label); ok && l.Text == text {
+			found = true
+		}
+	})
+	return found
 }

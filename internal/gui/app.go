@@ -51,6 +51,17 @@ var (
 	windowVisible bool
 )
 
+// LoadTranslations registers this app's own UI translation bundles (see
+// translationFiles) with Fyne's lang package. InitApp always calls this
+// itself; it's exported separately so code that exercises lang.L(...)-using
+// logic without going through InitApp (e.g. cmd/unitevault's tests, which
+// call buildFormData directly) can load the same bundle explicitly instead
+// of every such call silently falling back to English with a logged
+// "Translation failure" for each one.
+func LoadTranslations() error {
+	return lang.AddTranslationsFS(translationFiles, "translations")
+}
+
 // InitApp creates the singleton Fyne application and the shared utility window
 // used to host the Settings form and all dialogs. Must be called once from the
 // main goroutine before Run(). appIcon may be nil.
@@ -65,7 +76,7 @@ func InitApp(appIcon fyne.Resource) fyne.App {
 		Migrations: map[string]bool{"fyneDo": true},
 	})
 
-	if err := lang.AddTranslationsFS(translationFiles, "translations"); err != nil {
+	if err := LoadTranslations(); err != nil {
 		fyne.LogError("Failed to load UI translations", err)
 	}
 

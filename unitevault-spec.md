@@ -126,6 +126,14 @@ Obsidian Vault（Markdownファイル群）を Mac / iPhone 間で安全に利�
 
 ※ `rename` の場合は `old_path` / `new_path` を追加で持たせる。
 
+#### 3.2.1 アプリケーションイベントログ
+3.2節のログはVault内容の差分（ファイル変更）を記録するものだが、それとは別に、**役割（Primary/Secondary）のライフサイクルに関する操作ログ**も必要になる（3.6.1.4節の多重Primary衝突検出・解決で使用）。データ量は小さく頻度も低いため、3.2節と同じ「各デバイスは自分のログにしか書き込まない」方式をそのまま踏襲する。
+
+- 配置：`Vault/_sync/events-<device-uuid>.jsonl`（3.2節のデバイスIDをそのまま使う）
+- 形式：1行1エントリのJSON Lines（追記のみ）
+- 記録するイベント：`initialized_as_primary` / `initialized_as_secondary` / `promoted_to_primary` / `conflict_detected` / `demoted_to_secondary` / `conflict_resolved`
+- 保持期間：デフォルト365日。各デバイスが自分のサイクルの中で、自分のログファイルのみを対象に古いエントリを間引く（他デバイスのログには一切書き込まない）。これは3.4節で将来タスクとしているログ圧縮の一部を、このイベントログに限り先行実装したもの（3.2節のコンテンツ差分ログ自体の圧縮は、マージの`base_hash`履歴と絡むため引き続きTodoとする）。
+
 ### 3.3 マージエンジン
 **プライマリノード**（基本はMac、3.6節参照）上でのみ動作する定期実行プログラム（Mac: cron / launchd、Windows: タスクスケジューラ）。Go言語でMac用・Windows用バイナリをそれぞれクロスコンパイルし、単一の実行ファイルとして配布する（ランタイムのインストール不要）。
 
@@ -165,11 +173,13 @@ Obsidian Vault（Markdownファイル群）を Mac / iPhone 間で安全に利�
 iCloud（および iCloud for Windows）には「同期完了」を外部から確実に検知できる公式な仕組みが無い。内部APIを使う方法もあるが非公式であり、将来の変更で壊れるリスクを新たに持ち込むことになるため採用しない。またGoogle Drive公式アプリは不採用（2章参照）のため、そちらの同期タイミングに合わせる必要もない。
 
 **採用方式：変化が止まるまで待つ「デバウンス」方式**
-1. プライマリノードは1〜2分間隔でVaultを定期スキャンする。
+1. プライマリノードはデフォルト**600秒（10分）**間隔でVaultを定期スキャンする（Settings > rclone > Advanced Optionsで変更可能。旧デフォルトは120秒だったが、以下の理由で緩和した）。
 2. あるファイルの内容ハッシュが**2回連続のスキャンで変化していない**場合にのみ「安定した」とみなし、そのファイルをログ記録・マージ対象に含める。
 3. 直近のスキャンでハッシュが変化し続けているファイルは「まだ同期中／編集中」とみなし、その回の処理対象からは除外し、次回以降に持ち越す。
 
 この方式はOS・同期アプリの内部実装に依存せず、Mac/Windows共通のロジックで実現できる。
+
+**間隔のデフォルトを600秒に緩和した理由：** この間隔が制御するのはGoogle Driveバックアップの反映頻度であり、端末間の同期自体（iCloud経由、1.3節）には一切影響しない。Google Driveは「人間が直接編集しない、読み取り専用に近いバックアップ先」（3.5節）であり、リアルタイム性より低頻度なバックアップの方が実用上十分である。加えて、3.6.1.4節で追加した「毎サイクルのPrimaryマーカー再確認」処理はサイクルごとに小さなGoogle Drive API呼び出しを伴うため、間隔を伸ばすことでその負荷も抑えられる。
 
 ### 3.5 Google Driveへのミラー転送
 - ツール：rclone（`rclone sync`）
@@ -203,7 +213,8 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
     - rclone インストール状態 (`rclone status: Installed / Not Found`)
     - iCloud for Windows インストール状態（Windowsのみ表示。`Install iCloud...` ボタンで自動インストール、3.6.4節）
     - Google Driveの同期状況（`Last synced: <日時>` / `Last sync failed (<日時>): <エラー>` / 未実行なら `Never synced yet`。Secondary機では実行主体でないことを示す固定文言を表示。ボタンは無し、直近の`rclone sync`結果を表示するのみ）
-    - デバイス役割 (`Device Role: Primary / Secondary`)
+    - デバイス役割 (`Device Role: Primary / Secondary`)。Secondaryのとき、または多重Primary衝突が発生しているときは、この行に`Promote to Primary...`ボタンが表示される（3.6.1.2節・3.6.1.4節）
+    - 多重Primary衝突が発生している場合のみ追加表示される警告行（`⚠ Primary conflict: ...`）: 相手デバイスのラベルと状況の説明（3.6.1.4節）
   - **[ Obsidian Vault セクション ]**:
     - **Vault Folder Location**: テキスト入力 ＋ `[ Select Folder... ]` ボタン。ラベルや案内文には「Directory」「Path」等の専門用語を避け、一般ユーザーにもわかりやすい「Folder」表記に統一する。`[ Select Folder... ]` は実行中のOSが提供する標準のフォルダ選択ダイアログ（macOS: Cocoaのフォルダ選択パネル、Windows: `IFileDialog`）を表示する。SettingsウィンドウはFyne製だが、フォルダ選択だけはFyne独自のダイアログ（見た目がOS標準と異なり違和感を与える）ではなく、OS標準の見た目のダイアログを使う。iPhone/Windows間の同期はiCloudに委任するため（1.3節）、このセクションに同期間隔などの設定項目は置かない。
   - **[ rclone セクション ]**: Google Driveへのバックアップに関する設定は、それが有効になる（rcloneの設定が完了する）までは意味を持たないため、すべてこのセクションにまとめる。
@@ -212,9 +223,10 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
     - **[ Advanced Options ]（折りたたみ表示、デフォルトで閉じた状態）**: 以下の3項目は、いずれもデフォルト値のまま動作する「通常は触る必要のない」設定であるため、`widget.Accordion`で折りたたみ、初期表示では隠す。展開すれば通常通り編集できる。
       - **Remote Name**: 設定されているリモート名（デフォルト `ObsidianVault`）
       - **Google Drive Target Folder Path**: 転送先フォルダパス。**デフォルトは固定文字列ではなく、選択したVaultフォルダ名を自動提案する**（3.5.0.1節）。Vaultフォルダを選び直すたびに追従するが、ユーザーが手動で変更した値は上書きしない。
-      - **Sync Interval**: プライマリノードがVaultをスキャンし、変更をマージしてGoogle Driveへバックアップする周期（秒単位、デフォルト `120` 秒。3.4.1節）。iCloud経由の端末間同期はOS側が自動で行うため、この間隔設定はGoogle Driveへのバックアップ頻度にのみ影響する。
+      - **Sync Interval**: プライマリノードがVaultをスキャンし、変更をマージしてGoogle Driveへバックアップする周期（秒単位、デフォルト `600` 秒。3.4.1節）。iCloud経由の端末間同期はOS側が自動で行うため、この間隔設定はGoogle Driveへのバックアップ頻度にのみ影響する。
     - **Configure Google Drive Remote... ボタン**: Save Settingsを押す前でも、その場でrcloneのGoogle Drive認証（新規セットアップ／既存・CLI設定）を実行できる。
     - **Remove Remote Configuration... ボタン**: リモートが設定済みの場合のみ表示。確認ダイアログの後、`rclone config delete` でそのリモートのGoogle Drive認証情報を削除する（Google Drive上のバックアップ済みファイル自体は削除されない）。別のGoogleアカウントで設定し直したい場合などに使用する。以前はこの操作に対応するGUI動線が存在せず、Terminal/PowerShellでの手動操作が必要だった。
+    - **Promote to Primary... ボタン**（Statusセクション、Device roleの行）: このデバイスがSecondaryのとき、または多重Primary衝突が発生しているときに表示される（3.6.1.2節・3.6.1.4節）。確認ダイアログの後、このデバイスをPrimaryとして`PRIMARY_MARKER.json`に書き込む。衝突が発生していた場合は、併せて`PRIMARY_CONFLICT.json`を解消する。
   - **操作ボタン**:
     - **Save Settings ボタン**: 全設定を一括保存し、自動的に `init` 処理（初回セットアップ・役割判定）を実行して同期ループへ反映する。前回保存時からVaultパスが変更されているのにGoogle Drive Target Folder Pathが変わっていない場合は、保存前に警告・確認ダイアログを表示する（3.5.0.1節）。
     - **Cancel ボタン**: 変更を行わずに設定画面を閉じる
@@ -275,18 +287,34 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
    - 以降はこのVaultフォルダ（iCloud経由で既に取得済みの内容）を起点に、通常の編集・自分のログへの追記のみを行う（マージ処理・Google Driveへの書き込みは一切行わない）。
    - **Google Drive上のVault・ログ一式を`rclone copy`でダウンロードする処理は行わない。** 端末間のVault本体の配布は常にiCloud Driveが担っており（1.3節）、セカンダリの同期サイクル自身も他デバイスのログを一切参照しない（参照するのはプライマリのマージフェーズのみ）ため、この`rclone copy`はセカンダリの動作上一度も必要にならない。過去のバージョンでは「念のため」実行していたが、これはiCloudが既に配置済みのVaultフォルダにGoogle Drive側の内容を重ねて書き込む形になり、Windows環境で実際にファイル競合を引き起こす不具合の原因になっていた。
 
-##### 3.6.1.2 プライマリノードの移行（将来的な昇格）
-Macが故障・引退する等でプライマリを他デバイスに引き継ぎたい場合は、以下の手順で対応できる。
+##### 3.6.1.2 プライマリノードの移行（手動昇格）
+Macが故障・引退する等でプライマリを他デバイスに引き継ぎたい場合、Settings画面のStatusセクションから**「Promote to Primary...」ボタン**で昇格できる（Secondary機のDevice role行に表示される）。
 
-1. 旧プライマリの`PRIMARY_MARKER.json`をGoogle Drive上から削除する。
-2. 新しくプライマリにしたいデバイスで同期エンジンを起動する（3.6.1.1節の「マーカーが存在しない場合」の手順がそのまま使える）。
-3. 旧プライマリは以降セカンダリとして動作させる（または利用を停止する）。
+- 昇格処理は、新しくPrimaryにしたいデバイスで`PRIMARY_MARKER.json`に自分のデバイス情報を書き込み、Google Driveへアップロードするだけでよい（`rclone`の`copyto`は上書き転送のため、**旧マーカーを事前に削除する手順は不要**）。
+- 旧プライマリの扱いについては3.6.1.4節を参照。旧プライマリが完全に故障している場合はそのまま放置してよいが、旧プライマリが一時的にオフラインだっただけで後日オンラインに復帰する可能性がある場合は、3.6.1.4節の多重Primary衝突検出の仕組みにより自動的に安全な状態へ収束する。
 
 ##### 3.6.1.3 （参考）動的ロック方式を不採用とした理由
 `_sync/engine.lock`（デバイスID・取得時刻を記載）をVault内に置き、早い者勝ちでプライマリ役を起動する方式も検討したが、以下の理由で不採用とした。
 
 - iCloudの同期反映にはラグがあるため、ごく短時間に複数デバイスが同時にロックを取得してしまう可能性がある。
 - 個人利用では「常時複数デバイスが同時に処理を試みる」状況自体が稀であり、固定ハブ方式の単純さに対するメリットが小さい。
+
+##### 3.6.1.4 Primary役の継続的検証と多重Primary衝突の検出・解決
+
+**背景・課題：** 3.6.1.1節の役割判定は初回起動時（正確には、ローカルにキャッシュされた役割が無い場合）にのみ行われ、一度Primaryと判定されたデバイスは、以降そのキャッシュ（ローカルの`role`ファイル）を無条件に信頼し続ける。しかし3.6.1.2節のようにSecondary機がPromote to Primaryで昇格すると、**旧Primary機は自分が降格したことを知る手段がなく、動作し続けている限り両方のデバイスが「自分こそPrimaryだ」と信じてマージ処理・Google Drive転送を並行して実行してしまう**（いわゆるスプリットブレイン）。この状態でGoogle Drive同期が2台から同時に走ると、Google Drive上のバックアップ内容が競合・破損しかねない。
+
+**採用方式：毎サイクルのマーカー再確認＋多重Primary衝突の検出・一時停止・人手による解決**
+
+1. **毎サイクルの再確認**：Primaryとしてマージ・Google Drive同期を実行する**直前**に、必ずGoogle Drive上の`PRIMARY_MARKER.json`を再ダウンロードし、`primary_device_id`が自分自身のままかを確認する（3.6.1.1節の初回判定とは別に、サイクルごとに行う）。一致しなければ、それ以降の処理を一切行わずそのサイクルを終える。これにより、2台が同時にGoogle Driveへ書き込むこと自体をほぼ確実に防止する。
+2. **衝突の記録**：上記の再確認で「自分が既にPrimaryだと思っていたのに、マーカーが別のデバイスを指している」ことを検出した場合、単純に黙って降格するのではなく、`_sync/PRIMARY_CONFLICT.json`という共有ファイルをGoogle Drive上に作成する（存在しない場合のみ。既に他デバイスが作成済みならそれを採用する）。このファイルには「降格されたデバイス」と「マーカー上の現Primary」双方のデバイスID・ラベルを記録する。
+3. **双方の同期停止**：`PRIMARY_CONFLICT.json`が存在する間は、**どちらの側のデバイスもGoogle Drive同期を一時停止する**。マーカー上のPrimaryとして認識されている側のデバイスも、次のサイクルで`PRIMARY_CONFLICT.json`の存在を検知したら同様に同期を停止する（自分が「正しい」側だと思っていても、人手による解決が済むまでは同期しない）。早期に問題を解決する動機付けにもなる。
+4. **GUIへの可視化**：`PRIMARY_CONFLICT.json`が存在する間、影響を受けている側のSettings画面のStatusセクションに警告行（`⚠ Primary conflict: ...`）と「Promote to Primary...」ボタンが表示される（8.3節）。降格された側・現Primary側のどちらのデバイスでもこのボタンを押すことができ、それが実質的な「Authorize（承認）」操作になる。
+5. **人手による解決（Authorize）**：いずれかのデバイスで「Promote to Primary...」を実行すると、そのデバイスを正式なPrimaryとして`PRIMARY_MARKER.json`に書き込み、`PRIMARY_CONFLICT.json`を削除する（3.6.1.2節の昇格処理と全く同じ実装を再利用する）。
+6. **もう一方の自動収束**：解決されなかった側のデバイスは、次回のサイクルで「マーカーは依然として自分を指していないが、`PRIMARY_CONFLICT.json`は消えている」ことを検知し、その時点で初めて正式にSecondaryへ降格する（ローカルの`role`ファイルを更新）。つまり、**旧Primary機が長期間オフラインで、後日オンライン復帰した場合でも、すぐにGoogle Drive同期を再開せず、まずこの手順で安全性を確認してから収束する**。
+
+**アプリケーションイベントログとの関係：** 上記の`conflict_detected` / `demoted_to_secondary` / `conflict_resolved` / `promoted_to_primary`は、3.2.1節のアプリケーションイベントログに記録され、後から経緯を追跡できる。
+
+**設計判断の要点：** 降格するかどうかの安全性に関わる判定は、常に`PRIMARY_MARKER.json`の内容のみを根拠とし、イベントログの有無では判定しない。Google Drive同期の反映には遅延があり得るため、「イベントログが見つかったら初めて降格する」という設計にすると、ログの反映が遅れている間は旧Primaryが誤って同期を継続してしまう可能性がある。イベントログはあくまで人間向けの説明・監査証跡としてのみ用いる。
 
 #### 3.6.2 改行コード（CRLF/LF）の正規化
 Windows環境のエディタや `core.autocrlf` 設定により、内容が同じでも改行コードだけが変わることがある。これを放置すると、実際には変更していないファイルが「変更あり」と誤検知され、偽の競合が多発する。
@@ -393,10 +421,9 @@ codesign --verify --verbose unitevault-mac-arm64
 
 v1の実装に必要な設計判断はここまでで完了している。以下は意図的に「初期バージョンは最小構成、将来拡張する」と決めた事項であり、実装開始のブロッカーではない。
 
-- **ログ圧縮の実装**：初期バージョンでは圧縮なし。将来、3.4節の方針に沿って具体的なアルゴリズム・実行タイミングを実装する。
+- **コンテンツ差分ログ（3.2節、`log-<uuid>.jsonl`）の圧縮**：初期バージョンでは圧縮なし。マージの`base_hash`履歴と絡むため、3.4節の方針に沿って具体的なアルゴリズム・実行タイミングを実装する必要がある（3.2.1節のアプリケーションイベントログは既に365日保持＋自動間引きを実装済みだが、こちらは対象外）。
 - **コンフリクト通知・処理結果のデスクトップアプリ化**：初期バージョンはTerminal.app / PowerShellへの標準出力のみ（3.5.2節）。将来、通知センター／トースト通知等に対応するデスクトップアプリを実装する。
 - **iCloud for Windowsの導入・動作確認**：実機での動作検証（Mac版との挙動差の有無）を今後行う。
-- **プライマリノード移行の専用コマンド化**：現状は手動手順（3.6.1.2節）。将来、専用コマンドとして提供するかを検討する。
 - **バイナリの正式署名・公証（notarization）**：現状はアドホック署名＋検疫属性除去の案内で「壊れている」エラーのみ回避（3.6.6.1節）。Gatekeeper確認ダイアログ自体を消すには、Apple Developer Program（年会費）での正式署名・公証が必要。将来的に導入するかどうかを検討する（3.6.6.4節）。
 
 ---
@@ -409,17 +436,20 @@ v1の実装に必要な設計判断はここまでで完了している。以下
 Vault/                              ← Obsidianが直接扱うVaultルート（既存のまま）
 ├── (これまで通りのノート・添付ファイル群を自由に配置)
 └── _sync/                          ← 同期システム専用ディレクトリ（新規追加）
-    ├── log-<device-uuid-A>.jsonl   ← Mac のログ（3.2節）
-    ├── log-<device-uuid-B>.jsonl   ← iPhone のログ
-    ├── log-<device-uuid-C>.jsonl   ← Windows機A のログ
-    ├── log-<device-uuid-D>.jsonl   ← Windows機B のログ（台数分増える）
-    ├── PRIMARY_MARKER.json         ← プライマリノードの判定情報（3.6.1.1節。詳細は6.3節の注意点を参照）
+    ├── log-<device-uuid-A>.jsonl      ← Mac のログ（3.2節）
+    ├── log-<device-uuid-B>.jsonl      ← iPhone のログ
+    ├── log-<device-uuid-C>.jsonl      ← Windows機A のログ
+    ├── log-<device-uuid-D>.jsonl      ← Windows機B のログ（台数分増える）
+    ├── events-<device-uuid-A>.jsonl   ← Mac のアプリケーションイベントログ（3.2.1節）
+    ├── events-<device-uuid-B>.jsonl   ← 同様に台数分増える
+    ├── PRIMARY_MARKER.json            ← プライマリノードの判定情報（3.6.1.1節。詳細は6.3節の注意点を参照）
     └── state/
         └── last_scan.json          ← プライマリノードの前回スキャン結果（全ファイルパス＋ハッシュ一覧。3.3.0節・3.4.1節の変更検出に使用。プライマリのみが書き込む、ローカル専用の作業ファイル）
 ```
 
 - `_sync/` はObsidianのノートと同じVault内に置くことで、iCloud同期にそのまま乗る（Windows/iPhoneへも自動的に配布される）。
 - `state/last_scan.json` は各デバイスの直近スキャン結果を持つワーキングファイルであり、他デバイスと共有する必要はない。プライマリノードのみが使用する想定だが、実装簡略化のため配置場所はVault内`_sync/`とする（末端デバイスは無視してよい）。
+- `PRIMARY_CONFLICT.json`（3.6.1.4節）は**ここには置かない**。理由は6.3節を参照。
 
 ### 6.2 Google Drive上のバックアップ構成（rcloneのミラー先）
 
@@ -427,10 +457,13 @@ Vault/                              ← Obsidianが直接扱うVaultルート（
 GoogleDrive:VaultBackup/            ← rclone sync の転送先フォルダ
 ├── (Vaultの内容一式のミラー：ノート・添付ファイル)
 └── _sync/
-    ├── log-<device-uuid-A>.jsonl   ← 全デバイスのログのミラー
+    ├── log-<device-uuid-A>.jsonl      ← 全デバイスのログのミラー
     ├── log-<device-uuid-B>.jsonl
+    ├── events-<device-uuid-A>.jsonl   ← 全デバイスのイベントログのミラー
+    ├── events-<device-uuid-B>.jsonl
     ├── ...
-    └── PRIMARY_MARKER.json         ← 6.3節の注意点を参照
+    ├── PRIMARY_MARKER.json            ← 6.3節の注意点を参照
+    └── PRIMARY_CONFLICT.json          ← 多重Primary衝突が発生している間のみ存在（3.6.1.4節）。ミラー転送ではなく都度直接アップロード/削除される特殊ファイル（6.3節参照）
 ```
 
 - Google Drive側は3.5節の通り、人間が直接編集しない**読み取り専用に近いバックアップ先**として扱う。
@@ -440,6 +473,8 @@ GoogleDrive:VaultBackup/            ← rclone sync の転送先フォルダ
 
 そのため、**プライマリノードは`PRIMARY_MARKER.json`をローカルのVault内`_sync/`にも同じ内容で保持し、通常のVaultファイルと同様に`rclone sync`でミラーされる対象に含める**。3.6.1.1節の初期化フローに、この複製手順を含めるものとする。
 
+**`PRIMARY_CONFLICT.json`（3.6.1.4節）はこの複製ルールの対象外：** このファイルは、書き込む側のデバイス（マーカーに超された、または他デバイスから衝突を通知されたデバイス）自身は`rclone sync`を一切実行しない状態にあり、`rclone`の`copyto`／`deletefile`で直接Google Drive上のみを操作する。ローカルVault側の`_sync/`には複製を置かない。仮に複製を置いてしまうと、**衝突が解決されるまでの間、現Primary側のデバイスも`rclone sync`を停止している**（3.6.1.4節の設計）ため、`PRIMARY_MARKER.json`のような「複製しておかないとミラー転送で消される」問題自体が起こり得ない。むしろ複製を置くと、衝突解決後に通常の`rclone sync`が再開した際、ローカルに残った古い複製がGoogle Drive側に再アップロードされてしまう不具合の方が心配になるため、意図的に複製しない。
+
 ### 6.4 デバイスローカルの設定領域（Vault外、iCloud同期対象外）
 
 各デバイスは、Vaultとは別に、そのデバイス固有の設定を保持するローカル領域を持つ。
@@ -448,10 +483,12 @@ GoogleDrive:VaultBackup/            ← rclone sync の転送先フォルダ
 Mac:      ~/.unitevault/
 Windows:  %APPDATA%\unitevault\
 
-├── config.json      ← Vaultのパス、rcloneのリモート名・バックアップ先パス、実行間隔等の設定
-├── device_id         ← このデバイス固有のUUID（3.2節）
-├── role               ← 自動判定結果のキャッシュ（"primary" / "secondary"、3.6.1.1節）
-└── engine.log         ← 実行ログ（rclone失敗・コンフリクト記録等。3.5.1節・3.5.2節の出力先）
+├── config.json             ← Vaultのパス、rcloneのリモート名・バックアップ先パス、実行間隔等の設定
+├── device_id                ← このデバイス固有のUUID（3.2節）
+├── role                      ← 自動判定結果のキャッシュ（"primary" / "secondary"、3.6.1.1節）
+├── drive_sync_status.json    ← 直近のGoogle Drive同期結果のキャッシュ（Settings > Statusの表示用）
+├── primary_conflict.json     ← 多重Primary衝突の検出状況のローカルキャッシュ（存在する間のみ。3.6.1.4節。Google Drive上の`PRIMARY_CONFLICT.json`の内容を都度取りに行かず、Settings画面の警告表示をこのキャッシュから即座に描画するためのもの）
+└── engine.log                ← 実行ログ（rclone失敗・コンフリクト記録等。3.5.1節・3.5.2節の出力先）
 ```
 
 - ここはVaultの外（iCloud同期対象外）に置く。デバイスごとに固有の情報であり、他デバイスと共有すべきではないため。
@@ -466,8 +503,9 @@ unitevault/                         ← ソースコードリポジトリ（GitH
 ├── internal/
 │   ├── scan/                       ← ハッシュ計算・変更検出・リネーム推測（3.3.0節）
 │   ├── syncedlog/                  ← デバイス別JSON Linesログの読み書き（3.2節）
+│   ├── eventlog/                   ← デバイス別アプリケーションイベントログの読み書き・間引き（3.2.1節）
 │   ├── merge/                      ← git merge-file 呼び出し、N-way merge（3.3節）
-│   ├── bootstrap/                  ← プライマリ／セカンダリ自動判定（3.6.1.1節）
+│   ├── bootstrap/                  ← プライマリ／セカンダリ自動判定、継続的検証・多重Primary衝突の検出/解決（3.6.1.1節・3.6.1.4節）
 │   ├── drive/                      ← rclone 呼び出しラッパー、リトライ制御（3.5節）
 │   ├── config/                     ← ローカル設定ファイル（6.4節）の読み書き
 │   ├── gui/                        ← Settingsウィンドウ・ダイアログ（Fyne。3.5.2節・8.3節）

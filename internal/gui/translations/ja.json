@@ -18,6 +18,10 @@
   "Advanced Options": "詳細オプション",
   "Configure Google Drive Remote...": "Google Driveリモートを設定...",
   "Remove Remote Configuration...": "リモート設定を削除...",
+  "Promote to Primary...": "Primaryに昇格...",
+  "Promote this device to Primary?\n\nThis device will take over running the sync engine and Google Drive backups. If another device is still running as Primary, the conflict is detected automatically and Google Drive sync pauses on both devices until resolved.": "このデバイスをPrimaryに昇格させますか？\n\nこのデバイスが同期エンジンとGoogle Driveバックアップの実行を引き継ぎます。もし別のデバイスがまだPrimaryとして動作している場合、自動的に衝突が検出され、解決するまで両方のデバイスでGoogle Drive同期が一時停止します。",
+  "Authorize this device as Primary?\n\nThis resolves the current Primary conflict in favor of this device. The other device will automatically step down and resume as Secondary once it reconnects.": "このデバイスをPrimaryとして確定しますか？\n\n現在発生しているPrimaryの衝突が、このデバイスを正式なPrimaryとする形で解決されます。もう一方のデバイスは、次回オンラインに復帰した際に自動的にSecondaryへ移行します。",
+  "⚠ Primary conflict:": "⚠ Primaryの衝突:",
   "rclone": "rclone",
   "Git status:": "Gitの状態:",
   "rclone status:": "rcloneの状態:",
@@ -142,5 +146,17 @@
   "Last sync failed ({{.Time}}): {{.Error}}": "同期失敗（{{.Time}}）: {{.Error}}",
   "rclone not installed yet": "rcloneが未インストールです",
   "Configured ({{.Remote}})": "設定済み（{{.Remote}}）",
-  "Not configured - remote '{{.Remote}}' not found in rclone": "未設定 - リモート「{{.Remote}}」がrcloneに見つかりません"
+  "Not configured - remote '{{.Remote}}' not found in rclone": "未設定 - リモート「{{.Remote}}」がrcloneに見つかりません",
+
+  "another device": "別のデバイス",
+  "{{.Other}} also believes it is Primary. Google Drive sync is paused on both devices until this is resolved.": "{{.Other}}も自身をPrimaryだと認識しています。解決するまで両方のデバイスでGoogle Drive同期が一時停止します。",
+  "{{.Other}} was promoted to Primary. Google Drive sync is paused until this is resolved.": "{{.Other}}がPrimaryに昇格しました。解決するまでGoogle Drive同期が一時停止します。",
+  "Promoting to Primary": "Primaryに昇格中",
+  "Updating Primary status on Google Drive...": "Google Drive上のPrimary状態を更新しています...",
+  "Promotion Failed": "昇格に失敗しました",
+  "Could not promote this device to Primary: {{.Err}}": "このデバイスをPrimaryに昇格できませんでした: {{.Err}}",
+  "Promoted to Primary": "Primaryに昇格しました",
+  "This device is now Primary and will run the sync engine and Google Drive backups.": "このデバイスは現在Primaryとなり、同期エンジンとGoogle Driveバックアップを実行します。",
+  "Not Promoted": "昇格されませんでした",
+  "Another device became Primary at the same time. This device remains Secondary.": "同時に別のデバイスがPrimaryになりました。このデバイスはSecondaryのままです。"
 }

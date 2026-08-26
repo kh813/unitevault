@@ -32,6 +32,20 @@ type SettingsFormData struct {
 	// sync failed: <error>", or a note that this device's role doesn't
 	// perform Google Drive backup). Always shown when non-empty.
 	DriveSyncStatus string
+	// CanPromoteToPrimary shows "Promote to Primary..." next to Device
+	// role when true - normally only when this device is Secondary, but
+	// also while PrimaryConflictActive (see below), since resolving a
+	// conflict is the same action from this device's side (spec 3.6.1.4).
+	CanPromoteToPrimary bool
+	// PrimaryConflictActive is true while this device has an unresolved
+	// multi-Primary conflict (spec 3.6.1.4) - Google Drive sync is paused
+	// on every device that sees it, whichever side of the disagreement
+	// they're on, until a human resolves it via "Promote to Primary...".
+	PrimaryConflictActive bool
+	// PrimaryConflictMessage is a human-readable, already-localized
+	// explanation of the conflict (which other device is involved and
+	// since when), shown only when PrimaryConflictActive.
+	PrimaryConflictMessage string
 
 	// Configurable Form
 	VaultPath       string
@@ -75,6 +89,10 @@ type SettingsHandlers struct {
 	// current values when they tap "Remove Remote Configuration...". Only
 	// shown when the remote currently appears configured.
 	OnRemoveRemote func(current SettingsFormData)
+	// OnPromoteToPrimary is called (after the user confirms) with the
+	// form's current values when they tap "Promote to Primary...". Shown
+	// whenever data.CanPromoteToPrimary is true (spec 3.6.1.2 / 3.6.1.4).
+	OnPromoteToPrimary func(current SettingsFormData)
 	// OnSave is called with the current form values when the user taps
 	// "Save Settings".
 	OnSave func(data SettingsFormData)
@@ -120,7 +138,9 @@ func statusLine(label, value, actionLabel string, action func()) fyne.CanvasObje
 
 func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne.CanvasObject {
 	if data.IntervalSeconds <= 0 {
-		data.IntervalSeconds = 120
+		// Mirrors config.DefaultIntervalSeconds - not imported directly to
+		// keep this package independent of internal/config.
+		data.IntervalSeconds = 600
 	}
 	if data.RcloneRemote == "" {
 		data.RcloneRemote = "ObsidianVault"
@@ -226,7 +246,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 
 	// Remote Name / Target Folder Path / Sync Interval all have sensible
 	// defaults that just work (ObsidianVault / the Vault's own folder name /
-	// 120s) - collapsed by default as "Advanced Options" so the common case
+	// 600s) - collapsed by default as "Advanced Options" so the common case
 	// isn't cluttered with fields nobody needs to touch, while still being
 	// one click away for anyone who does want to customize them.
 	rcloneAdvancedForm := widget.NewForm(
@@ -243,19 +263,22 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	currentSnapshot := func() SettingsFormData {
 		sec, err := strconv.Atoi(strings.TrimSpace(intervalEntry.Text))
 		if err != nil || sec <= 0 {
-			sec = 120
+			sec = 600 // mirrors config.DefaultIntervalSeconds
 		}
 		return SettingsFormData{
-			GitStatus:        data.GitStatus,
-			RcloneStatus:     data.RcloneStatus,
-			DeviceRole:       data.DeviceRole,
-			VaultPath:        strings.TrimSpace(vaultEntry.Text),
-			RcloneRemote:     strings.TrimSpace(remoteEntry.Text),
-			RclonePath:       strings.TrimSpace(targetPathEntry.Text),
-			IntervalSeconds:  sec,
-			RcloneExecPath:   data.RcloneExecPath,
-			RcloneRemoteInfo: data.RcloneRemoteInfo,
-			RcloneConfigured: data.RcloneConfigured,
+			GitStatus:              data.GitStatus,
+			RcloneStatus:           data.RcloneStatus,
+			DeviceRole:             data.DeviceRole,
+			VaultPath:              strings.TrimSpace(vaultEntry.Text),
+			RcloneRemote:           strings.TrimSpace(remoteEntry.Text),
+			RclonePath:             strings.TrimSpace(targetPathEntry.Text),
+			IntervalSeconds:        sec,
+			RcloneExecPath:         data.RcloneExecPath,
+			RcloneRemoteInfo:       data.RcloneRemoteInfo,
+			RcloneConfigured:       data.RcloneConfigured,
+			CanPromoteToPrimary:    data.CanPromoteToPrimary,
+			PrimaryConflictActive:  data.PrimaryConflictActive,
+			PrimaryConflictMessage: data.PrimaryConflictMessage,
 		}
 	}
 
@@ -294,6 +317,23 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	if data.ICloudStatus != "" && data.ICloudStatus != "Installed" && handlers.OnInstallICloud != nil {
 		installICloud = func() { handlers.OnInstallICloud(currentSnapshot()) }
 	}
+	var promoteToPrimaryLabel string
+	var promoteToPrimary func()
+	if data.CanPromoteToPrimary && handlers.OnPromoteToPrimary != nil {
+		promoteToPrimaryLabel = lang.L("Promote to Primary...")
+		message := lang.L("Promote this device to Primary?\n\nThis device will take over running the sync engine and Google Drive backups. If another device is still running as Primary, the conflict is detected automatically and Google Drive sync pauses on both devices until resolved.")
+		if data.PrimaryConflictActive {
+			message = lang.L("Authorize this device as Primary?\n\nThis resolves the current Primary conflict in favor of this device. The other device will automatically step down and resume as Secondary once it reconnects.")
+		}
+		promoteToPrimary = func() {
+			snapshot := currentSnapshot()
+			Confirm(promoteToPrimaryLabel, message, func(confirmed bool) {
+				if confirmed {
+					handlers.OnPromoteToPrimary(snapshot)
+				}
+			})
+		}
+	}
 	statusRows := []fyne.CanvasObject{
 		statusLine(lang.L("Git status:"), lang.L(orDefault(data.GitStatus, "Unknown")), lang.L("Install Git..."), installGit),
 		statusLine(lang.L("rclone status:"), lang.L(orDefault(data.RcloneStatus, "Unknown")), lang.L("Install rclone..."), installRclone),
@@ -310,7 +350,13 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		// arrives pre-localized - it must not be wrapped in lang.L again.
 		statusRows = append(statusRows, statusLine(lang.L("Google Drive sync:"), data.DriveSyncStatus, "", nil))
 	}
-	statusRows = append(statusRows, statusLine(lang.L("Device role:"), lang.L(orDefault(data.DeviceRole, "N/A")), "", nil))
+	statusRows = append(statusRows, statusLine(lang.L("Device role:"), lang.L(orDefault(data.DeviceRole, "N/A")), promoteToPrimaryLabel, promoteToPrimary))
+	if data.PrimaryConflictActive {
+		// data.PrimaryConflictMessage is built in main.go via lang.L with
+		// template data (it embeds the other device's label/timestamp), so
+		// it already arrives pre-localized.
+		statusRows = append(statusRows, statusLine(lang.L("⚠ Primary conflict:"), data.PrimaryConflictMessage, "", nil))
+	}
 	statusCard := widget.NewCard(lang.L("Status"), "", container.NewVBox(statusRows...))
 
 	// --- Bottom action buttons ---

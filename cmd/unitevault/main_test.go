@@ -1,11 +1,29 @@
 package main
 
 import (
+	"os"
 	"testing"
 
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/lang"
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/gui"
 )
+
+// TestMain loads this app's own translation bundle once before any test
+// runs. buildFormData (exercised directly by these tests, without going
+// through gui.InitApp/runTrayMode) calls lang.L(...) - without this, every
+// such call on a machine whose OS locale is Japanese would find Fyne's own
+// built-in "ja" bundle already registered (loaded by the lang package's
+// own init()) but none of this app's custom strings in it, logging a noisy
+// (harmless - it still falls back to English) "Translation failure" for
+// every single one.
+func TestMain(m *testing.M) {
+	if err := gui.LoadTranslations(); err != nil {
+		fyne.LogError("failed to load UI translations for tests", err)
+	}
+	os.Exit(m.Run())
+}
 
 // newTestTrayApp returns a trayApp wired to an isolated, temporary config
 // directory so tests never touch the real ~/.unitevault.
@@ -32,8 +50,8 @@ func TestBuildFormData_DefaultsWhenUnconfigured(t *testing.T) {
 	if data.RclonePath != "VaultBackup" {
 		t.Errorf("expected default RclonePath 'VaultBackup', got %q", data.RclonePath)
 	}
-	if data.IntervalSeconds != 120 {
-		t.Errorf("expected default IntervalSeconds 120, got %d", data.IntervalSeconds)
+	if data.IntervalSeconds != config.DefaultIntervalSeconds {
+		t.Errorf("expected default IntervalSeconds %d, got %d", config.DefaultIntervalSeconds, data.IntervalSeconds)
 	}
 	// GitStatus/RcloneStatus reflect this machine's actual PATH, so we only
 	// assert they're populated with one of the two known values rather than
@@ -93,8 +111,8 @@ func TestBuildFormData_IgnoresZeroOrNegativeSavedInterval(t *testing.T) {
 
 	data := tr.buildFormData()
 
-	if data.IntervalSeconds != 120 {
-		t.Errorf("expected a zero saved interval to fall back to the default 120, got %d", data.IntervalSeconds)
+	if data.IntervalSeconds != config.DefaultIntervalSeconds {
+		t.Errorf("expected a zero saved interval to fall back to the default %d, got %d", config.DefaultIntervalSeconds, data.IntervalSeconds)
 	}
 }
 
@@ -159,8 +177,12 @@ func TestBuildFormData_DriveSyncStatusAndRoleVariations(t *testing.T) {
 		if data.DeviceRole != "secondary" {
 			t.Errorf("expected DeviceRole 'secondary', got %q", data.DeviceRole)
 		}
-		if data.DriveSyncStatus != "N/A (this device is Secondary - Google Drive backup runs on the Primary device)" {
-			t.Errorf("unexpected DriveSyncStatus for secondary: %q", data.DriveSyncStatus)
+		// Computed via lang.L (not hardcoded English) so this assertion
+		// holds regardless of which locale TestMain's loaded translations
+		// resolve to on the machine running the test.
+		want := lang.L("N/A (this device is Secondary - Google Drive backup runs on the Primary device)")
+		if data.DriveSyncStatus != want {
+			t.Errorf("unexpected DriveSyncStatus for secondary: got %q, want %q", data.DriveSyncStatus, want)
 		}
 	})
 

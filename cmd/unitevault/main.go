@@ -220,7 +220,7 @@ func (t *trayApp) runDaemonLoop(cfg *config.Config) {
 
 	interval := cfg.IntervalSeconds
 	if interval <= 0 {
-		interval = 120
+		interval = config.DefaultIntervalSeconds
 	}
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()
@@ -426,7 +426,7 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 		DeviceRole:       role,
 		RcloneRemote:     "ObsidianVault",
 		RclonePath:       "VaultBackup",
-		IntervalSeconds:  120,
+		IntervalSeconds:  config.DefaultIntervalSeconds,
 		RcloneExecPath:   rcloneExecPath,
 		RcloneRemoteInfo: lang.L("rclone not installed yet"),
 	}
@@ -457,7 +457,38 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 		}
 	}
 
+	applyPrimaryConflictStatus(t.cfgMgr, &data)
+
 	return data
+}
+
+// applyPrimaryConflictStatus fills in CanPromoteToPrimary /
+// PrimaryConflictActive / PrimaryConflictMessage from the locally cached
+// multi-Primary conflict state (see bootstrap.Bootstrapper.
+// VerifyPrimaryStatus, spec 3.6.1.4) - that cache, refreshed every sync
+// cycle, is what the Settings window reads rather than a live Google Drive
+// round-trip on every render (matching how DriveSyncStatus is sourced
+// above).
+func applyPrimaryConflictStatus(cfgMgr *config.ConfigManager, data *gui.SettingsFormData) {
+	data.CanPromoteToPrimary = data.DeviceRole == "secondary"
+
+	conflict, err := cfgMgr.LoadPrimaryConflict()
+	if err != nil || conflict == nil {
+		return
+	}
+
+	data.PrimaryConflictActive = true
+	data.CanPromoteToPrimary = true
+
+	other := conflict.OtherLabel
+	if other == "" {
+		other = lang.L("another device")
+	}
+	if conflict.Role == config.ConflictRoleClaimed {
+		data.PrimaryConflictMessage = lang.L("{{.Other}} also believes it is Primary. Google Drive sync is paused on both devices until this is resolved.", map[string]string{"Other": other})
+	} else {
+		data.PrimaryConflictMessage = lang.L("{{.Other}} was promoted to Primary. Google Drive sync is paused until this is resolved.", map[string]string{"Other": other})
+	}
 }
 
 // openSettingsGUI (re)builds and shows the single-window Settings GUI (spec
@@ -520,13 +551,14 @@ func (t *trayApp) reopenSettingsGUI(current gui.SettingsFormData) {
 
 func (t *trayApp) showSettingsGUI(data gui.SettingsFormData) {
 	gui.ShowSettingsWindow(data, gui.SettingsHandlers{
-		OnInstallGit:      t.installGit,
-		OnInstallRclone:   t.installRclone,
-		OnInstallICloud:   t.installICloud,
-		OnConfigureRemote: t.configureRemote,
-		OnRemoveRemote:    t.removeRemote,
-		OnSave:            t.saveSettings,
-		OnReset:           t.performReset,
+		OnInstallGit:       t.installGit,
+		OnInstallRclone:    t.installRclone,
+		OnInstallICloud:    t.installICloud,
+		OnConfigureRemote:  t.configureRemote,
+		OnRemoveRemote:     t.removeRemote,
+		OnPromoteToPrimary: t.promoteToPrimary,
+		OnSave:             t.saveSettings,
+		OnReset:            t.performReset,
 	})
 }
 
@@ -693,6 +725,59 @@ func (t *trayApp) removeRemote(current gui.SettingsFormData) {
 	)
 }
 
+// promoteToPrimary handles the Status section's "Promote to Primary..."
+// button (spec 3.6.1.2 / 3.6.1.4), shown whenever
+// SettingsFormData.CanPromoteToPrimary is true - either this device is a
+// plain Secondary wanting to take over (e.g. the old Primary is
+// unreachable), or it's resolving an active multi-Primary conflict in this
+// device's favor. settings_window.go already confirms with the user
+// (using different wording for each case) before calling this, so it
+// proceeds directly.
+func (t *trayApp) promoteToPrimary(current gui.SettingsFormData) {
+	go func() {
+		vaultPath := strings.TrimSpace(current.VaultPath)
+		if vaultPath == "" {
+			gui.Info(lang.L("Vault Required"), lang.L("Please select your Obsidian Vault directory before saving."))
+			t.reopenSettingsGUI(current)
+			return
+		}
+
+		remoteName := strings.TrimSpace(current.RcloneRemote)
+		if remoteName == "" {
+			remoteName = "ObsidianVault"
+		}
+		remoteTarget := fmt.Sprintf("%s:%s", remoteName, strings.TrimSpace(current.RclonePath))
+
+		hostname, _ := os.Hostname()
+		bootstrapper := bootstrap.NewBootstrapper(t.cfgMgr, drive.NewClient(engineLogPath()))
+
+		err := gui.RunWithProgress(
+			lang.L("Promoting to Primary"),
+			lang.L("Updating Primary status on Google Drive..."),
+			func() error {
+				return bootstrapper.PromoteToPrimary(context.Background(), vaultPath, remoteTarget, hostname)
+			},
+		)
+		if err != nil {
+			gui.Info(lang.L("Promotion Failed"), lang.L("Could not promote this device to Primary: {{.Err}}", map[string]string{"Err": err.Error()}))
+			t.reopenSettingsGUI(current)
+			return
+		}
+
+		role, _ := t.cfgMgr.LoadRole()
+		if role == "primary" {
+			gui.Info(lang.L("Promoted to Primary"), lang.L("This device is now Primary and will run the sync engine and Google Drive backups."))
+			gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Active ({{.Role}})", map[string]string{"Role": role}))
+		} else {
+			// Lost a race to another device promoting at the same instant
+			// (see bootstrap.PromoteToPrimary's own doc comment) - this
+			// device remains Secondary instead.
+			gui.Info(lang.L("Not Promoted"), lang.L("Another device became Primary at the same time. This device remains Secondary."))
+		}
+		t.reopenSettingsGUI(current)
+	}()
+}
+
 // saveSettings handles the "Save Settings" button: validates input, warns
 // about a Vault switch that would silently overwrite a previous Vault's
 // Google Drive backup, saves config.json, ensures the Google Drive remote is
@@ -855,7 +940,7 @@ func handleInit(args []string) {
 		VaultPath:       *vaultPath,
 		RcloneRemote:    *remoteName,
 		RclonePath:      *remotePath,
-		IntervalSeconds: 120,
+		IntervalSeconds: config.DefaultIntervalSeconds,
 	}
 
 	if err := cfgMgr.SaveConfig(cfg); err != nil {

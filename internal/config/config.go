@@ -13,10 +13,10 @@ import (
 
 // Config represents the local application configuration (~/.unitevault/config.json)
 type Config struct {
-	VaultPath        string `json:"vault_path"`
-	RcloneRemote     string `json:"rclone_remote"`
-	RclonePath       string `json:"rclone_path"`
-	IntervalSeconds  int    `json:"interval_seconds"`
+	VaultPath       string `json:"vault_path"`
+	RcloneRemote    string `json:"rclone_remote"`
+	RclonePath      string `json:"rclone_path"`
+	IntervalSeconds int    `json:"interval_seconds"`
 }
 
 // ConfigManager handles loading and saving settings in the local config directory
@@ -132,6 +132,77 @@ func (cm *ConfigManager) LoadDriveSyncStatus() (*DriveSyncStatus, error) {
 	return &status, nil
 }
 
+// PrimaryConflictRole distinguishes the two sides of an unresolved
+// multi-Primary conflict (see internal/bootstrap.Bootstrapper.
+// VerifyPrimaryStatus and unitevault-spec.md section 3.6.1.4):
+type PrimaryConflictRole string
+
+const (
+	// ConflictRoleSuperseded means this device believed it was Primary,
+	// but PRIMARY_MARKER.json now names a different device.
+	ConflictRoleSuperseded PrimaryConflictRole = "superseded"
+	// ConflictRoleClaimed means PRIMARY_MARKER.json still names this
+	// device, but a PRIMARY_CONFLICT.json filed by another device shows
+	// it disagrees.
+	ConflictRoleClaimed PrimaryConflictRole = "claimed"
+)
+
+// PrimaryConflict is this device's locally cached view of an unresolved
+// multi-Primary conflict, so the Settings window can show a warning
+// without a live Google Drive round-trip on every render (matching
+// DriveSyncStatus's pattern above) - it's refreshed each cycle by
+// VerifyPrimaryStatus and cleared once the conflict resolves.
+type PrimaryConflict struct {
+	DetectedAt    string              `json:"detected_at"`
+	Role          PrimaryConflictRole `json:"role"`
+	OtherDeviceID string              `json:"other_device_id"`
+	OtherLabel    string              `json:"other_label"`
+}
+
+// PrimaryConflictPath returns the path to primary_conflict.json.
+func (cm *ConfigManager) PrimaryConflictPath() string {
+	return filepath.Join(cm.configDir, "primary_conflict.json")
+}
+
+// SavePrimaryConflict persists the currently-detected multi-Primary
+// conflict, if any.
+func (cm *ConfigManager) SavePrimaryConflict(c PrimaryConflict) error {
+	if err := cm.EnsureDir(); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal primary conflict state: %w", err)
+	}
+	return os.WriteFile(cm.PrimaryConflictPath(), data, 0644)
+}
+
+// LoadPrimaryConflict reads the locally cached conflict state, or returns
+// (nil, nil) if there is no unresolved conflict recorded.
+func (cm *ConfigManager) LoadPrimaryConflict() (*PrimaryConflict, error) {
+	data, err := os.ReadFile(cm.PrimaryConflictPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read primary conflict state: %w", err)
+	}
+	var c PrimaryConflict
+	if err := json.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("failed to parse primary conflict state: %w", err)
+	}
+	return &c, nil
+}
+
+// ClearPrimaryConflict removes the locally cached conflict state once
+// resolved. Removing an already-absent file is not an error.
+func (cm *ConfigManager) ClearPrimaryConflict() error {
+	if err := os.Remove(cm.PrimaryConflictPath()); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to clear primary conflict state: %w", err)
+	}
+	return nil
+}
+
 // IsInstallReminderDismissed reports whether the user previously checked
 // "Don't show this again" on the missing-dependency startup reminder.
 func (cm *ConfigManager) IsInstallReminderDismissed() bool {
@@ -148,6 +219,17 @@ func (cm *ConfigManager) SetInstallReminderDismissed() error {
 	return os.WriteFile(cm.InstallReminderDismissedPath(), []byte("1"), 0644)
 }
 
+// DefaultIntervalSeconds is the Google Drive sync interval used whenever
+// nothing else has been configured (spec section 3.4.1). Google Drive
+// backup is a background safety net, not the channel that keeps devices in
+// sync with each other (iCloud handles device-to-device propagation on its
+// own schedule, independent of this interval - spec section 1.3), so a
+// wider default cadence than the original 120s trades a little backup
+// freshness for meaningfully less background rclone/API traffic - which
+// also includes the per-cycle Primary-conflict check added alongside this
+// (see bootstrap.Bootstrapper.VerifyPrimaryStatus).
+const DefaultIntervalSeconds = 600
+
 // LoadConfig reads config.json if present, or returns default values
 func (cm *ConfigManager) LoadConfig() (*Config, error) {
 	path := cm.ConfigPath()
@@ -155,7 +237,7 @@ func (cm *ConfigManager) LoadConfig() (*Config, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Config{
-				IntervalSeconds: 120,
+				IntervalSeconds: DefaultIntervalSeconds,
 			}, nil
 		}
 		return nil, fmt.Errorf("failed to read config file: %w", err)
@@ -234,5 +316,6 @@ func (cm *ConfigManager) ResetConfig() error {
 	_ = os.Remove(cm.RolePath())
 	_ = os.Remove(cm.InstallReminderDismissedPath())
 	_ = os.Remove(cm.DriveSyncStatusPath())
+	_ = os.Remove(cm.PrimaryConflictPath())
 	return nil
 }
