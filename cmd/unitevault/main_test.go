@@ -56,8 +56,12 @@ func newTestTrayApp(t *testing.T) *trayApp {
 // it completes successfully.
 type noopDriveRunner struct{}
 
-func (noopDriveRunner) Sync(ctx context.Context, srcPath, remoteTarget string) error { return nil }
-func (noopDriveRunner) Copy(ctx context.Context, remoteSrc, dstPath string) error    { return nil }
+func (noopDriveRunner) Sync(ctx context.Context, srcPath, remoteTarget string, excludes ...string) error {
+	return nil
+}
+func (noopDriveRunner) Copy(ctx context.Context, remoteSrc, dstPath string, excludes ...string) error {
+	return nil
+}
 func (noopDriveRunner) FileExists(ctx context.Context, remoteTargetFile string) (bool, error) {
 	return false, nil
 }

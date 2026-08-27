@@ -23,25 +23,28 @@ import (
 // PRIMARY_CONFLICT.json) precisely, matching internal/bootstrap's own
 // mockDrive test double.
 type mockDriveRunner struct {
-	remoteFiles map[string][]byte
-	syncCalled  bool
-	copyCalls   []copyCall
+	remoteFiles  map[string][]byte
+	syncCalled   bool
+	syncExcludes []string
+	copyCalls    []copyCall
 }
 
 type copyCall struct {
 	Src, Dst string
+	Excludes string // strings.Join(excludes, ",") - kept a plain string so copyCall stays comparable with ==
 }
 
 func newMockDriveRunner() *mockDriveRunner {
 	return &mockDriveRunner{remoteFiles: make(map[string][]byte)}
 }
 
-func (m *mockDriveRunner) Sync(ctx context.Context, srcPath, remoteTarget string) error {
+func (m *mockDriveRunner) Sync(ctx context.Context, srcPath, remoteTarget string, excludes ...string) error {
 	m.syncCalled = true
+	m.syncExcludes = excludes
 	return nil
 }
-func (m *mockDriveRunner) Copy(ctx context.Context, remoteSrc, dstPath string) error {
-	m.copyCalls = append(m.copyCalls, copyCall{Src: remoteSrc, Dst: dstPath})
+func (m *mockDriveRunner) Copy(ctx context.Context, remoteSrc, dstPath string, excludes ...string) error {
+	m.copyCalls = append(m.copyCalls, copyCall{Src: remoteSrc, Dst: dstPath, Excludes: strings.Join(excludes, ",")})
 	return nil
 }
 func (m *mockDriveRunner) FileExists(ctx context.Context, remoteTargetFile string) (bool, error) {
@@ -119,7 +122,7 @@ type failingDriveRunner struct {
 	mockDriveRunner
 }
 
-func (m *failingDriveRunner) Sync(ctx context.Context, srcPath, remoteTarget string) error {
+func (m *failingDriveRunner) Sync(ctx context.Context, srcPath, remoteTarget string, excludes ...string) error {
 	return errors.New("network error")
 }
 
@@ -264,7 +267,7 @@ func TestSyncEngine_RunCycle_Primary_PullsSyncFolderBeforePublishing(t *testing.
 		t.Fatalf("RunCycle failed: %v", err)
 	}
 
-	wantPull := copyCall{Src: "ObsidianVault:MyVault/_sync", Dst: filepath.Join(vaultPath, "_sync")}
+	wantPull := copyCall{Src: "ObsidianVault:MyVault/_sync", Dst: filepath.Join(vaultPath, "_sync"), Excludes: "state/**"}
 	found := false
 	for _, c := range mock.copyCalls {
 		if c == wantPull {
@@ -276,6 +279,9 @@ func TestSyncEngine_RunCycle_Primary_PullsSyncFolderBeforePublishing(t *testing.
 	}
 	if !mock.syncCalled {
 		t.Error("expected the existing full-Vault rclone sync publish to still happen")
+	}
+	if strings.Join(mock.syncExcludes, ",") != "/_sync/state/**" {
+		t.Errorf("expected the publish sync to exclude /_sync/state/** (this device's own private scanner bookkeeping), got %v", mock.syncExcludes)
 	}
 }
 
@@ -304,8 +310,8 @@ func TestSyncEngine_RunCycle_Secondary_PushesAndPullsViaCopy(t *testing.T) {
 		t.Fatalf("RunCycle failed: %v", err)
 	}
 
-	wantPush := copyCall{Src: filepath.Join(vaultPath, "_sync"), Dst: "ObsidianVault:MyVault/_sync"}
-	wantPull := copyCall{Src: "ObsidianVault:MyVault", Dst: vaultPath}
+	wantPush := copyCall{Src: filepath.Join(vaultPath, "_sync"), Dst: "ObsidianVault:MyVault/_sync", Excludes: "state/**"}
+	wantPull := copyCall{Src: "ObsidianVault:MyVault", Dst: vaultPath, Excludes: "/_sync/state/**"}
 	var gotPush, gotPull bool
 	for _, c := range mock.copyCalls {
 		if c == wantPush {

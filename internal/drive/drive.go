@@ -28,8 +28,13 @@ var ProgressFunc = func(title, message string, work func() error) error {
 
 // RcloneRunner defines the interface for executing rclone commands (allows mocking in tests)
 type RcloneRunner interface {
-	Sync(ctx context.Context, srcPath, remoteTarget string) error
-	Copy(ctx context.Context, remoteSrc, dstPath string) error
+	// Sync and Copy both take optional rclone --exclude patterns
+	// (relative to srcPath/remoteSrc), e.g. to keep a device's own
+	// private per-device bookkeeping (Scanner.ConfirmedStateFilePath's
+	// state/ directory) from ever being pulled from - and so silently
+	// overwritten by - another device's copy of it (spec 1.6.4).
+	Sync(ctx context.Context, srcPath, remoteTarget string, excludes ...string) error
+	Copy(ctx context.Context, remoteSrc, dstPath string, excludes ...string) error
 	FileExists(ctx context.Context, remoteTargetFile string) (bool, error)
 	DownloadFile(ctx context.Context, remoteSourceFile, localDstFile string) error
 	UploadFile(ctx context.Context, localSrcFile, remoteTargetFile string) error
@@ -255,14 +260,24 @@ func (c *Client) executeWithRetry(ctx context.Context, args ...string) error {
 	return fmt.Errorf("rclone operation failed after retries: %w", lastErr)
 }
 
-// Sync runs `rclone sync <srcPath> <remoteTarget>`
-func (c *Client) Sync(ctx context.Context, srcPath, remoteTarget string) error {
-	return c.executeWithRetry(ctx, "sync", srcPath, remoteTarget)
+// Sync runs `rclone sync <srcPath> <remoteTarget>` (plus --exclude per
+// excludes, if any).
+func (c *Client) Sync(ctx context.Context, srcPath, remoteTarget string, excludes ...string) error {
+	return c.executeWithRetry(ctx, withExcludes([]string{"sync", srcPath, remoteTarget}, excludes)...)
 }
 
-// Copy runs `rclone copy <remoteSrc> <dstPath>`
-func (c *Client) Copy(ctx context.Context, remoteSrc, dstPath string) error {
-	return c.executeWithRetry(ctx, "copy", remoteSrc, dstPath)
+// Copy runs `rclone copy <remoteSrc> <dstPath>` (plus --exclude per
+// excludes, if any).
+func (c *Client) Copy(ctx context.Context, remoteSrc, dstPath string, excludes ...string) error {
+	return c.executeWithRetry(ctx, withExcludes([]string{"copy", remoteSrc, dstPath}, excludes)...)
+}
+
+// withExcludes appends "--exclude <pattern>" for each pattern to args.
+func withExcludes(args, excludes []string) []string {
+	for _, e := range excludes {
+		args = append(args, "--exclude", e)
+	}
+	return args
 }
 
 // FileExists checks if a remote file exists using `rclone lsf <remoteTargetFile>`

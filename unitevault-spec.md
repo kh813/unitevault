@@ -97,7 +97,9 @@ iCloud Bridgeフォルダを、**通常のデバイスと同列の「仮想デ�
 - **Primary → Google Drive（publish）**：マージ後のVault全体を`rclone sync`でGoogle Driveへミラーする（Primaryのみがこの権限を持つ、という固定ハブ方式の既存方針を維持。変更なし）。
 - **Secondary → Google Drive（pull）**：Primaryが公開した最新のマージ結果（Vault全体）を`rclone copy`でローカルへ反映する。
 
-**既知の制約（v1）：** Secondaryのpullは`copy`（追加・更新のみ）であるため、Primaryが削除したファイルは自動的にはローカルから削除されない。また、直近の未確定（デバウンス未安定）なローカル編集が、稀にこのpullによって上書きされる可能性がある。Obsidianが実際に編集中のVaultフォルダに対して破壊的な`rclone sync`は使わない、という安全側の判断による受け入れ済みの制約とする（`unitevault-todo.md`のPhase 16参照）。
+**既知の制約（v1）：** Secondaryのpullは`copy`（追加・更新のみ）であるため、Primaryが削除したファイルは自動的にはローカルから削除されない。また、直近の未確定（デバウンス未安定）なローカル編集が、稀にこのpullによって上書きされる可能性がある。Obsidianが実際に編集中のVaultフォルダに対して破壊的な`rclone sync`は使わない、という安全側の判断による受け入れ済みの制約とする（`unitevault-todo.md`のPhase 16参照。削除の伝播については同Phaseの追記も参照）。
+
+**重要な補足：`_sync/state/`（3.4.2節、各デバイス専有のスキャナ内部状態）は、どのSync/Copy呼び出しからも`--exclude`で常に除外する。** これを怠ると、あるデバイスがpushした`_sync/state/`が他デバイスのpull時にそのデバイス自身の内部状態を上書きしてしまい、3.4.2節で修正したのと同種の不具合（デバウンス・変更確定の基準が壊れる）を再発させる。
 
 #### 1.6.5 同期スケジューリング（交互実行方式）
 

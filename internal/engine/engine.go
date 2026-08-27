@@ -156,10 +156,18 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		}
 		if secondaryCfg.RcloneRemote != "" && secondaryCfg.RclonePath != "" {
 			remoteTarget := fmt.Sprintf("%s:%s", secondaryCfg.RcloneRemote, secondaryCfg.RclonePath)
-			if err := e.drive.Copy(ctx, filepath.Join(e.vaultPath, "_sync"), remoteTarget+"/_sync"); err != nil {
+			// state/** (Scanner.ConfirmedStateFilePath's directory) is this
+			// device's own private scanner bookkeeping - excluded so
+			// pushing it never lets another device's pull silently
+			// overwrite that other device's own copy of the same relative
+			// path with this device's state instead.
+			if err := e.drive.Copy(ctx, filepath.Join(e.vaultPath, "_sync"), remoteTarget+"/_sync", "state/**"); err != nil {
 				return fmt.Errorf("failed to push local changes to Google Drive: %w", err)
 			}
-			if err := e.drive.Copy(ctx, remoteTarget, e.vaultPath); err != nil {
+			// _sync/state/** excluded here so this pull can never
+			// overwrite this device's own scanner bookkeeping with
+			// Primary's.
+			if err := e.drive.Copy(ctx, remoteTarget, e.vaultPath, "/_sync/state/**"); err != nil {
 				return fmt.Errorf("failed to pull latest changes from Google Drive: %w", err)
 			}
 		}
@@ -194,7 +202,9 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	// overwrite this device's own just-edited Vault content with a stale
 	// Drive copy - only the log entries flow in, not raw files.
 	if primaryCfg.RcloneRemote != "" && primaryCfg.RclonePath != "" {
-		if err := e.drive.Copy(ctx, remoteTarget+"/_sync", filepath.Join(e.vaultPath, "_sync")); err != nil {
+		// state/** excluded so this pull can never overwrite Primary's own
+		// scanner bookkeeping with whichever other device pushed last.
+		if err := e.drive.Copy(ctx, remoteTarget+"/_sync", filepath.Join(e.vaultPath, "_sync"), "state/**"); err != nil {
 			return fmt.Errorf("failed to pull other devices' changes from Google Drive: %w", err)
 		}
 	}
@@ -233,7 +243,11 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 
 	if cfg.RcloneRemote != "" && cfg.RclonePath != "" {
 		remoteTarget := fmt.Sprintf("%s:%s", cfg.RcloneRemote, cfg.RclonePath)
-		syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget)
+		// /_sync/state/** excluded so Primary's own private scanner
+		// bookkeeping is never published to Drive at all - keeping it
+		// local-only is what lets every other device's pull safely
+		// exclude the same pattern without missing anything real.
+		syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget, "/_sync/state/**")
 
 		// Recorded regardless of outcome so the Settings window can surface
 		// "last synced" / "last sync failed" without needing a live

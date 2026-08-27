@@ -32,11 +32,11 @@ func newMockDrive() *mockDrive {
 	return &mockDrive{remoteFiles: make(map[string][]byte)}
 }
 
-func (m *mockDrive) Sync(ctx context.Context, srcPath, remoteTarget string) error {
+func (m *mockDrive) Sync(ctx context.Context, srcPath, remoteTarget string, excludes ...string) error {
 	return nil
 }
 
-func (m *mockDrive) Copy(ctx context.Context, remoteSrc, dstPath string) error {
+func (m *mockDrive) Copy(ctx context.Context, remoteSrc, dstPath string, excludes ...string) error {
 	m.copyCalled = true
 	return nil
 }
@@ -636,4 +636,3 @@ func TestPromoteToPrimary_LosesInitAsPrimaryRace_DoesNotLogPromotion(t *testing.
 		}
 	}
 }
-
