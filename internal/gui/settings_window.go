@@ -37,6 +37,17 @@ type SettingsFormData struct {
 	// also while PrimaryConflictActive (see below), since resolving a
 	// conflict is the same action from this device's side (spec 3.6.1.4).
 	CanPromoteToPrimary bool
+	// MultiDeviceStatus is an already-localized "Standalone" or "Syncing"
+	// (or "" while DeviceRole is still N/A) - whether any other *PC*
+	// (Mac/Windows - iPhone/iPad never run this app at all, so they never
+	// count; spec 1.4) shows any sign of currently participating in this
+	// Vault (spec 3.6.1.5). A Secondary is always "Syncing" (it implies a
+	// Primary exists somewhere); a Primary is "Standalone" only once every
+	// other PC that ever joined has since explicitly decommissioned itself
+	// (Reset Configuration), or none ever did. Purely informational here;
+	// it doesn't gate anything in this window - the Vault-change/Reset-
+	// Configuration warnings it relaxes live in main.go.
+	MultiDeviceStatus string
 	// PrimaryConflictActive is true while this device has an unresolved
 	// multi-Primary conflict (spec 3.6.1.4) - Google Drive sync is paused
 	// on every device that sees it, whichever side of the disagreement
@@ -201,9 +212,24 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	})
 	vaultRow := container.NewBorder(nil, nil, nil, selectFolderBtn, vaultEntry)
 
-	vaultCard := widget.NewCard(lang.L("Obsidian Vault"), "", widget.NewForm(
-		widget.NewFormItem(lang.L("Vault Folder Location"), vaultRow),
-	))
+	// saveSettings refuses this exact combination server-side (spec 3.5.0.1)
+	// - a configured remote is actively backing up whatever Vault this
+	// device currently points at, so changing it here without removing the
+	// remote first would eventually mis-target that remote's next sync.
+	// Disabling both input widgets surfaces that constraint up front rather
+	// than letting the user fill in a new path and only finding out it's
+	// rejected after tapping Save Settings.
+	vaultChangeDisabled := data.VaultPath != "" && data.RcloneConfigured
+	vaultFormItems := []*widget.FormItem{widget.NewFormItem(lang.L("Vault Folder Location"), vaultRow)}
+	if vaultChangeDisabled {
+		vaultEntry.Disable()
+		selectFolderBtn.Disable()
+		hint := widget.NewLabel(lang.L("Remove the Google Drive remote first (rclone section below) to change the Vault folder."))
+		hint.Wrapping = fyne.TextWrapWord
+		vaultFormItems = append(vaultFormItems, widget.NewFormItem("", hint))
+	}
+
+	vaultCard := widget.NewCard(lang.L("Obsidian Vault"), "", widget.NewForm(vaultFormItems...))
 
 	intervalEntry := widget.NewEntry()
 	intervalEntry.SetText(fmt.Sprintf("%d", data.IntervalSeconds))
@@ -350,7 +376,14 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		// arrives pre-localized - it must not be wrapped in lang.L again.
 		statusRows = append(statusRows, statusLine(lang.L("Google Drive sync:"), data.DriveSyncStatus, "", nil))
 	}
-	statusRows = append(statusRows, statusLine(lang.L("Device role:"), lang.L(orDefault(data.DeviceRole, "N/A")), promoteToPrimaryLabel, promoteToPrimary))
+	deviceRoleValue := lang.L(orDefault(data.DeviceRole, "N/A"))
+	if data.MultiDeviceStatus != "" {
+		// MultiDeviceStatus is already localized (built via lang.L in
+		// main.go), so it must not be wrapped in lang.L again - only the
+		// surrounding template here needs its own localization.
+		deviceRoleValue = lang.L("{{.Role}} ({{.Status}})", map[string]string{"Role": deviceRoleValue, "Status": data.MultiDeviceStatus})
+	}
+	statusRows = append(statusRows, statusLine(lang.L("Device role:"), deviceRoleValue, promoteToPrimaryLabel, promoteToPrimary))
 	if data.PrimaryConflictActive {
 		// data.PrimaryConflictMessage is built in main.go via lang.L with
 		// template data (it embeds the other device's label/timestamp), so

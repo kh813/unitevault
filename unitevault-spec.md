@@ -127,11 +127,11 @@ Obsidian Vault（Markdownファイル群）を Mac / iPhone 間で安全に利�
 ※ `rename` の場合は `old_path` / `new_path` を追加で持たせる。
 
 #### 3.2.1 アプリケーションイベントログ
-3.2節のログはVault内容の差分（ファイル変更）を記録するものだが、それとは別に、**役割（Primary/Secondary）のライフサイクルに関する操作ログ**も必要になる（3.6.1.4節の多重Primary衝突検出・解決で使用）。データ量は小さく頻度も低いため、3.2節と同じ「各デバイスは自分のログにしか書き込まない」方式をそのまま踏襲する。
+3.2節のログはVault内容の差分（ファイル変更）を記録するものだが、それとは別に、**役割（Primary/Secondary）のライフサイクルに関する操作ログ**も必要になる（3.6.1.4節の多重Primary衝突検出・解決、3.6.1.5節のStandalone / Syncingステータス判定で使用）。データ量は小さく頻度も低いため、3.2節と同じ「各デバイスは自分のログにしか書き込まない」方式をそのまま踏襲する。
 
 - 配置：`Vault/_sync/events-<device-uuid>.jsonl`（3.2節のデバイスIDをそのまま使う）
 - 形式：1行1エントリのJSON Lines（追記のみ）
-- 記録するイベント：`initialized_as_primary` / `initialized_as_secondary` / `promoted_to_primary` / `conflict_detected` / `demoted_to_secondary` / `conflict_resolved`
+- 記録するイベント：`initialized_as_primary` / `initialized_as_secondary` / `promoted_to_primary` / `conflict_detected` / `demoted_to_secondary` / `conflict_resolved` / `device_decommissioned`（3.6.1.5節。Reset Configuration実行直前に、そのデバイス自身が記録する離脱シグナル）
 - 保持期間：デフォルト365日。各デバイスが自分のサイクルの中で、自分のログファイルのみを対象に古いエントリを間引く（他デバイスのログには一切書き込まない）。これは3.4節で将来タスクとしているログ圧縮の一部を、このイベントログに限り先行実装したもの（3.2節のコンテンツ差分ログ自体の圧縮は、マージの`base_hash`履歴と絡むため引き続きTodoとする）。
 
 ### 3.3 マージエンジン
@@ -195,6 +195,8 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
 
 加えて、Save Settings実行時に「保存済みのVaultパスと異なるVaultへ変更されているのに、Google Drive Target Folder Pathが前回保存時から変わっていない」場合は、上記の事故が起こり得る旨を警告し、確認を求める（3.5.2節）。
 
+さらに踏み込んで、**rcloneリモートが設定済みの状態でのVaultフォルダ変更そのものを禁止する**（3.5.3節）。リモートが設定済みということは、そのリモートが現在のVaultを実際にバックアップし得る状態にあるということであり、Vaultだけを変更してリモートをそのまま残すと、次回同期時に新しいVaultの内容が古いVaultのGoogle Drive保存先へ気づかないうちにバックアップされてしまう。この操作を行うには、先に「Remove Remote Configuration...」でリモート設定を削除し、Vaultフォルダを変更した後、改めてリモートを設定し直す必要がある。
+
 不要になった過去のバックアップは、Google Drive上で手動削除すればよい（アプリ側から自動削除は行わない）。
 
 #### 3.5.1 失敗時のリトライ・アラート方針
@@ -213,10 +215,10 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
     - rclone インストール状態 (`rclone status: Installed / Not Found`)
     - iCloud for Windows インストール状態（Windowsのみ表示。`Install iCloud...` ボタンで自動インストール、3.6.4節）
     - Google Driveの同期状況（`Last synced: <日時>` / `Last sync failed (<日時>): <エラー>` / 未実行なら `Never synced yet`。Secondary機では実行主体でないことを示す固定文言を表示。ボタンは無し、直近の`rclone sync`結果を表示するのみ）
-    - デバイス役割 (`Device Role: Primary / Secondary`)。Secondaryのとき、または多重Primary衝突が発生しているときは、この行に`Promote to Primary...`ボタンが表示される（3.6.1.2節・3.6.1.4節）
+    - デバイス役割 (`Device Role: Primary / Secondary`)。Secondaryのとき、または多重Primary衝突が発生しているときは、この行に`Promote to Primary...`ボタンが表示される（3.6.1.2節・3.6.1.4節）。役割が確定していれば常に、`Primary (Standalone)` / `Primary (Syncing)` / `Secondary (Syncing)`のようにStandalone / Syncingステータス（3.6.1.5節）が付記される
     - 多重Primary衝突が発生している場合のみ追加表示される警告行（`⚠ Primary conflict: ...`）: 相手デバイスのラベルと状況の説明（3.6.1.4節）
   - **[ Obsidian Vault セクション ]**:
-    - **Vault Folder Location**: テキスト入力 ＋ `[ Select Folder... ]` ボタン。ラベルや案内文には「Directory」「Path」等の専門用語を避け、一般ユーザーにもわかりやすい「Folder」表記に統一する。`[ Select Folder... ]` は実行中のOSが提供する標準のフォルダ選択ダイアログ（macOS: Cocoaのフォルダ選択パネル、Windows: `IFileDialog`）を表示する。SettingsウィンドウはFyne製だが、フォルダ選択だけはFyne独自のダイアログ（見た目がOS標準と異なり違和感を与える）ではなく、OS標準の見た目のダイアログを使う。iPhone/Windows間の同期はiCloudに委任するため（1.3節）、このセクションに同期間隔などの設定項目は置かない。
+    - **Vault Folder Location**: テキスト入力 ＋ `[ Select Folder... ]` ボタン。ラベルや案内文には「Directory」「Path」等の専門用語を避け、一般ユーザーにもわかりやすい「Folder」表記に統一する。`[ Select Folder... ]` は実行中のOSが提供する標準のフォルダ選択ダイアログ（macOS: Cocoaのフォルダ選択パネル、Windows: `IFileDialog`）を表示する。SettingsウィンドウはFyne製だが、フォルダ選択だけはFyne独自のダイアログ（見た目がOS標準と異なり違和感を与える）ではなく、OS標準の見た目のダイアログを使う。iPhone/Windows間の同期はiCloudに委任するため（1.3節）、このセクションに同期間隔などの設定項目は置かない。**既にVaultが設定済みで、かつrcloneリモートが設定済みの場合、テキスト入力・`[ Select Folder... ]`ボタンとも非活性化し**、「先にGoogle Driveリモートを削除してください」という案内文を添える（3.5.0.1節・3.5.3節・3.6.1.5節）。
   - **[ rclone セクション ]**: Google Driveへのバックアップに関する設定は、それが有効になる（rcloneの設定が完了する）までは意味を持たないため、すべてこのセクションにまとめる。
     - **Remote Status**: rcloneリモートの設定状態 (`Configured` / `Not Configured` )
     - **Executable**: 検出・利用中の `rclone` バイナリの実行パス
@@ -254,7 +256,7 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
   - **Promote to Primary...**（役割・`PRIMARY_MARKER.json`・`PRIMARY_CONFLICT.json`の書き換えを伴う。3.6.1.2節・3.6.1.4節）
   - ロック取得に失敗した場合（＝いずれかの同期サイクルまたは他の破壊的操作が進行中）は、操作を中断し「Sync In Progress」ダイアログで、完了を待って再試行するよう案内する。待機キューに入れて自動的に後から実行する、という挙動はあえて採らない（ユーザーが気づかないタイミングで意図しない変更が走ることを避けるため）。
 
-セカンダリのrclone設定を先に、プライマリのrclone設定を後に削除するといった**複数デバイスをまたぐ**順序（本節が扱うのは単一デバイス内の排他制御のみ）については、3.6.1.4節のマルチPrimary衝突検知・解決の仕組み（`PRIMARY_MARKER.json` / `PRIMARY_CONFLICT.json`）が実質的にカバーする。
+セカンダリのrclone設定を先に、プライマリのrclone設定を後に削除するといった**複数デバイスをまたぐ**順序（本節が扱うのは単一デバイス内の排他制御のみ）については、3.6.1.4節のマルチPrimary衝突検知・解決の仕組み（`PRIMARY_MARKER.json` / `PRIMARY_CONFLICT.json`）が実質的にカバーする。PrimaryでのVaultフォルダ変更・Reset Configurationについては3.6.1.5節を参照。
 
 ### 3.6 マルチOS・複数台対応
 
@@ -329,6 +331,33 @@ Macが故障・引退する等でプライマリを他デバイスに引き継�
 **アプリケーションイベントログとの関係：** 上記の`conflict_detected` / `demoted_to_secondary` / `conflict_resolved` / `promoted_to_primary`は、3.2.1節のアプリケーションイベントログに記録され、後から経緯を追跡できる。
 
 **設計判断の要点：** 降格するかどうかの安全性に関わる判定は、常に`PRIMARY_MARKER.json`の内容のみを根拠とし、イベントログの有無では判定しない。Google Drive同期の反映には遅延があり得るため、「イベントログが見つかったら初めて降格する」という設計にすると、ログの反映が遅れている間は旧Primaryが誤って同期を継続してしまう可能性がある。イベントログはあくまで人間向けの説明・監査証跡としてのみ用いる。
+
+##### 3.6.1.5 Standalone / Syncingステータスと、Vault変更・Reset Configurationの複数デバイス間での安全性
+
+**背景・課題：** Vaultフォルダは「複数デバイスがiCloud経由で同期する、同一の実体」であることが前提になっている（1.3節）。この前提はデバイスをまたいで共有されているにもかかわらず、Vaultフォルダの変更自体は**各デバイスがそれぞれ単独で、ローカルの設定として行う**操作である。したがって、あるデバイス（特にPrimary）がVaultフォルダを変更しても、他のデバイスには一切伝わらない。他のデバイスは何も知らずに元のフォルダを同期し続け、変更した側だけが別のVaultを見るようになる。Primaryがこれを行うと、共有Vaultへの Google Drive バックアップも同時に止まる（Primaryは変更後の別Vaultをバックアップするようになるため）。同様に、Primaryが Reset Configuration を行うと、他のデバイスが残っていても Google Drive バックアップは即座に停止する（3.6.1.4節の Promote to Primary で復旧は可能）。
+
+これらは「本来あるべき操作順序」の話であり、3.5.3節（同一デバイス内の排他制御）とは性質が異なる：3.5.3節は「同期処理中に設定変更をしてよいか」という**単一デバイス内**の話、本節は「他のデバイスの状況を踏まえてこの操作をしてよいか」という**複数デバイスをまたぐ**話である。
+
+**「他のデバイス」に数えるのはPCのみ：** ここで問題になる「他のデバイス」とは、**このアプリ自身を実行しているPC（Mac／Windows）**を指し、iPhone/iPadは含まない。iPhoneは「編集端末のみ（iCloud同期以外の処理は行わない、追加インストール不要）」（1.4節）であり、このアプリを一切実行しない＝イベントログ・コンテンツ差分ログのいずれも書き込まない。したがって、iPhone/iPadは以下の検知の対象に構造上決して現れない。逆に言えば、**PC 1台のみ＋iPhone/iPad任意台数という構成は「Standalone」であり、PCが2台以上（Primary＋Secondaryが最低1台）揃って初めて「Syncing」になる**。Syncingとは、複数のPCがGoogle Drive同期でエラーを起こさないよう互いに協調し合っている状態を指す（3.6.1.1節・3.6.1.4節の固定ハブ方式・多重Primary衝突検出の対象そのもの）。iPhone/iPad間の同期はiCloudが担うため、このアプリの協調機構には一切関与しない。
+
+**検知手段とその限界：** このアプリには、他のPCが「今も現役で使われているか」を確実に知る手段がない。分かるのは、Vaultの `_sync/` に他デバイスのイベントログ（`events-<uuid>.jsonl`、3.2.1節）が存在するかどうかだけであり、これは一度でも参加したデバイスがあれば残り続ける（自動的には消えない）。この限界を補うため、**明示的な離脱シグナル**を導入する：
+
+- **Reset Configuration を実行する直前**に、そのデバイス自身のイベントログへ新しいイベント種別 `device_decommissioned`（`EventDeviceDecommissioned`）を記録してから、ローカルの設定・役割をクリアする。これにより、「単に長期間オフラインなだけ」と「意図的にこのVaultから離脱した」を区別できるようになる。
+- 各デバイスについて「最後に記録されたイベント」を見て、それが `device_decommissioned` であれば、そのデバイスはもう参加していないものとして扱う（`eventlog.Manager.LatestEventForEachDevice`）。同じデバイスIDが後日また初期化されれば、新しいイベントがそれを上書きする。
+- この判定はあくまでヒューリスティックである。デバイスが壊れた・紛失した等でReset Configurationを一度も実行できなかった場合は、そのデバイスは離脱後も「現役」として扱われ続ける。誤検知（実際にはもう使われていないPCを「まだ使われている」と判定する）はあり得る前提で、次の通り**警告に留め、操作を強制的にブロックはしない**。
+
+**Standalone / Syncingステータス：** 上記の判定により、Primaryが「他に現役のPCが1台もない」と判断できる状態を **Standalone** と呼ぶ（一度も他PCと組んだことがない場合と、過去にいたSecondaryが全てReset Configuration経由で明示的に離脱した場合の両方を含む）。他に現役のPCが1台以上ある状態を **Syncing** と呼ぶ。Settings画面のStatusセクションで、Device roleの表示に `Primary (Standalone)` / `Primary (Syncing)` のように付記される（8.3節）。Standaloneの間は、以下の警告は表示されない（他に影響を受けるPCがいないため）。Secondaryは常に「どこかにPrimaryがいる」ことを前提とするため、常に`Secondary (Syncing)`となり、Standaloneにはなり得ない。
+
+**警告を表示する2つの操作（いずれもPrimaryかつ他に現役のPCがある＝Syncing状態の場合のみ）：**
+
+1. **Save Settingsでの Vault フォルダ変更**：確認ダイアログで、他のデバイスには影響しないこと・このデバイスがGoogle Driveバックアップを行わなくなることを説明し、続行するか確認する。
+2. **Reset Configuration**：確認ダイアログで、他のデバイスが引き継ぐまでGoogle Driveバックアップが止まることを説明し、続行するか確認する。
+
+いずれも `gui.ConfirmDanger` による確認ダイアログであり、ハードブロックはしない（検知がヒューリスティックであるため）。
+
+**GUI上でのボタンの非活性化：** 3.5.0.1節・3.5.3節の「rcloneリモートが設定済みの間はVaultフォルダを変更できない」制約は、こちらとは異なり**確実に判定できる**（rclone側の状態を直接問い合わせられるため）。そのため、この制約についてはSave Settingsを押してから警告を出すのではなく、Settings画面の「Vault Folder Location」欄と「Select Folder...」ボタン自体をあらかじめ非活性化し、「先にリモートを削除してください」という案内を添える（8.3節）。一方、本節のSyncingステータスに基づく警告はヒューリスティックであるため、同様にボタンを非活性化することはしない（誤検知時にユーザーが正当な操作すらできなくなってしまうため）。**判定を確実に行えるかどうかが、事前のボタン非活性化と事後の確認ダイアログのどちらを選ぶかの基準になる。**
+
+**複数デバイスをまたぐ推奨ワークフロー：** 設定を作り直す・デバイス構成を変更する場合は、**Secondary側から先にReset Configurationを行い、最後にPrimaryを片付ける**ことを推奨する。この順序を守れば、Primary側がReset Configurationを行う頃には全SecondaryのPCが離脱済みとなり、Standaloneとして警告なく実行できる。逆の順序（Primaryを先に片付ける）でも、3.6.1.4節のPromote to Primaryにより復旧は可能だが、いずれかのSecondaryが一時的にGoogle Driveバックアップの空白期間を経験することになる。この推奨順序は、1台のアプリだけでは強制できない（他デバイスの状態を直接観測できないため）ため、運用上のガイドラインとして明文化するに留める。
 
 #### 3.6.2 改行コード（CRLF/LF）の正規化
 Windows環境のエディタや `core.autocrlf` 設定により、内容が同じでも改行コードだけが変わることがある。これを放置すると、実際には変更していないファイルが「変更あり」と誤検知され、偽の競合が多発する。

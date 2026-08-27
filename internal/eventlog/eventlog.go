@@ -44,6 +44,15 @@ const (
 	// EventConflictResolved is recorded by whichever device's
 	// PromoteToPrimary call cleared an active PRIMARY_CONFLICT.json.
 	EventConflictResolved EventType = "conflict_resolved"
+	// EventDeviceDecommissioned is recorded by a device, just before Reset
+	// Configuration clears its local role/config, to tell every other
+	// device it's deliberately leaving this Vault for good - as opposed to
+	// simply going quiet (e.g. powered off, uninstalled without resetting
+	// first), which leaves no such signal. LatestEventForEachDevice treats
+	// this as a device's terminal state unless a later event supersedes it
+	// (e.g. the same device ID re-initializing after being reset and set
+	// up again).
+	EventDeviceDecommissioned EventType = "device_decommissioned"
 )
 
 // EventEntry represents a single line in events-<device-uuid>.jsonl.
@@ -143,6 +152,37 @@ func (m *Manager) ReadDeviceLog(deviceID string) ([]EventEntry, error) {
 	}
 
 	return entries, nil
+}
+
+// LatestEventForEachDevice returns, for every device that has ever written
+// to this Vault's event log, its single most recent entry - the label
+// (hostname), event type, and timestamp of the last thing it reported
+// doing (initializing, promoting, decommissioning, ...). Callers use this
+// to answer "which other devices does this Vault know about, and does any
+// of them still look active" (spec 3.6.1.5): a device whose latest entry
+// is EventDeviceDecommissioned is treated as having explicitly left,
+// distinct from one that's merely offline (which keeps whatever its last
+// real event was). A device that has never written an event at all isn't
+// included - there's nothing to read.
+func (m *Manager) LatestEventForEachDevice() (map[string]EventEntry, error) {
+	matches, err := filepath.Glob(filepath.Join(m.SyncDir(), "events-*.jsonl"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list event log files: %w", err)
+	}
+
+	result := make(map[string]EventEntry, len(matches))
+	for _, path := range matches {
+		deviceID := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), "events-"), ".jsonl")
+		entries, err := m.ReadDeviceLog(deviceID)
+		if err != nil {
+			return nil, err
+		}
+		if len(entries) == 0 {
+			continue
+		}
+		result[deviceID] = entries[len(entries)-1]
+	}
+	return result, nil
 }
 
 // PruneOwnEvents rewrites deviceID's own event log, discarding entries

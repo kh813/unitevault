@@ -58,10 +58,20 @@ const createNoWindow = 0x08000000
 // specifically errors out ("Input redirection is not supported") when
 // stdin isn't a real console - `ping` doesn't care and blocks for the same
 // ~1s regardless. It never actually touches the network (127.0.0.1 is the
-// loopback address) - it's purely a delay with no real ping behind it. A
-// visible cmd.exe window briefly flashing ping's output is a separate,
-// unrelated bug in how Apply launches this whole script (see createNoWindow
-// below) - swapping ping for something else here wouldn't have fixed that.
+// loopback address) - it's purely a delay with no real ping behind it.
+//
+// `ping` and `taskkill` are the only two lines here that spawn a separate
+// *.exe (everything else - move/del/start/goto/exit/if - is a cmd.exe
+// built-in running inside cmd.exe's own process, needing no console of its
+// own). Both are given `<nul` alongside the existing `>nul 2>&1`: with
+// cmd.exe itself started headless (createNoWindow below), a console-
+// subsystem child that's handed no explicit stdin can still make Windows
+// allocate it a fresh (briefly visible) console to satisfy the read it
+// might attempt - redirecting all three standard handles removes that
+// ambiguity. A visible cmd.exe window still briefly flashing despite this
+// is a separate, unrelated bug in how Apply launches this whole script
+// (see createNoWindow below) - swapping ping for something else here
+// wouldn't have fixed that.
 //
 // The backup at OLDEXE is deliberately deleted only once, *before* the
 // retry loop starts, and again only after the swap has actually succeeded -
@@ -85,9 +95,9 @@ set "NEWEXE=%~2"
 set "OLDEXE=%~3"
 set "PID=%~4"
 
-ping -n 2 127.0.0.1 >nul
-taskkill /F /PID %PID% >nul 2>&1
-ping -n 2 127.0.0.1 >nul
+ping -n 2 127.0.0.1 <nul >nul 2>&1
+taskkill /F /PID %PID% <nul >nul 2>&1
+ping -n 2 127.0.0.1 <nul >nul 2>&1
 
 if exist "%OLDEXE%" del /f /q "%OLDEXE%" >nul 2>&1
 
@@ -95,7 +105,7 @@ for /L %%i in (1,1,10) do (
     if exist "%EXE%" move /y "%EXE%" "%OLDEXE%" >nul 2>&1
     if exist "%NEWEXE%" move /y "%NEWEXE%" "%EXE%" >nul 2>&1
     if not exist "%NEWEXE%" goto swapped
-    ping -n 2 127.0.0.1 >nul
+    ping -n 2 127.0.0.1 <nul >nul 2>&1
 )
 
 if exist "%OLDEXE%" move /y "%OLDEXE%" "%EXE%" >nul 2>&1

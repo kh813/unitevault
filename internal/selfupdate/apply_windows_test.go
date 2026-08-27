@@ -125,6 +125,22 @@ func TestUpdateHelperScript_RestoresBackupOnTotalFailure(t *testing.T) {
 // numbers copied from the Windows API (mirrored by hand rather than
 // pulling in golang.org/x/sys/windows), so a typo here would silently
 // reintroduce the flash without any compiler error to catch it.
+// TestUpdateHelperScript_RedirectsStdinForConsoleCommands guards the
+// user-reported cmd.exe window flash: ping and taskkill are the only two
+// lines in the script that spawn a separate console-subsystem .exe, and
+// each needs `<nul` (in addition to the existing `>nul 2>&1`) so a headless
+// cmd.exe (createNoWindow) never has a reason to allocate a fresh, briefly
+// visible console for either of them.
+func TestUpdateHelperScript_RedirectsStdinForConsoleCommands(t *testing.T) {
+	for _, line := range strings.Split(updateHelperScript, "\n") {
+		trimmed := strings.TrimSpace(line)
+		isConsoleCommand := strings.HasPrefix(trimmed, "ping ") || strings.HasPrefix(trimmed, "taskkill ")
+		if isConsoleCommand && !strings.Contains(trimmed, "<nul") {
+			t.Errorf("expected %q to redirect stdin with `<nul` to avoid a fresh console being allocated for it", trimmed)
+		}
+	}
+}
+
 func TestCreateNoWindowFlag(t *testing.T) {
 	if detachedProcess != 0x00000008 {
 		t.Errorf("detachedProcess must mirror windows.DETACHED_PROCESS (0x8), got %#x", detachedProcess)

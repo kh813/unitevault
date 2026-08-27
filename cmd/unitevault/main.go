@@ -22,6 +22,7 @@ import (
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/drive"
 	"github.com/kh813/unitevault/internal/engine"
+	"github.com/kh813/unitevault/internal/eventlog"
 	"github.com/kh813/unitevault/internal/gui"
 	"github.com/kh813/unitevault/internal/selfupdate"
 )
@@ -430,12 +431,50 @@ func (t *trayApp) performSelfUpdate(info *selfupdate.ReleaseInfo) {
 // is already gated by its own confirm dialog (buildSettingsContent) - Reset
 // is deliberately not exposed anywhere in the tray menu itself.
 func (t *trayApp) performReset() {
+	// Same reasoning as saveSettings' multi-device warning: if this device
+	// is Primary and other devices appear to share this Vault, resetting it
+	// stops Google Drive backups for the shared Vault until one of them
+	// takes over (spec 3.6.1.5).
+	if role, _ := t.cfgMgr.LoadRole(); role == "primary" {
+		if cfg, err := t.cfgMgr.LoadConfig(); err == nil && cfg != nil && cfg.VaultPath != "" {
+			deviceID, idErr := t.cfgMgr.GetDeviceID()
+			others, othersErr := knownActiveOtherDevices(cfg.VaultPath, deviceID)
+			if idErr == nil && othersErr == nil && len(others) > 0 {
+				gui.ConfirmDanger(
+					lang.L("Other Devices Use This Vault"),
+					lang.L("This device is Primary, and at least one other device appears to share this Vault via iCloud.\n\nResetting this device stops it backing up the shared Vault to Google Drive until another device takes over via \"Promote to Primary...\".\n\nContinue resetting anyway?"),
+					func(confirmed bool) {
+						if confirmed {
+							t.performResetConfirmed()
+						}
+					},
+				)
+				return
+			}
+		}
+	}
+	t.performResetConfirmed()
+}
+
+// performResetConfirmed does the actual work of performReset, once any
+// multi-device warning has been confirmed (or didn't apply).
+func (t *trayApp) performResetConfirmed() {
 	release, ok := t.tryBeginExclusiveOp()
 	if !ok {
 		gui.Info(lang.L("Sync In Progress"), lang.L("A sync is currently running. Please wait for it to finish, then try again."))
 		return
 	}
 	defer release()
+
+	// Tell every other device this one is deliberately leaving, before the
+	// local role/config that identifies it as ever having participated gets
+	// cleared below - otherwise there'd be no way to tell "left on purpose"
+	// apart from "just went quiet" (see EventDeviceDecommissioned,
+	// knownActiveOtherDevices).
+	if cfg, err := t.cfgMgr.LoadConfig(); err == nil && cfg != nil && cfg.VaultPath != "" {
+		hostname, _ := os.Hostname()
+		decommissionSelf(t.cfgMgr, cfg.VaultPath, hostname)
+	}
 
 	t.stopDaemonLoop()
 	_ = t.cfgMgr.ResetConfig()
@@ -551,6 +590,26 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 	}
 
 	applyPrimaryConflictStatus(t.cfgMgr, &data)
+
+	// MultiDeviceStatus (spec 3.6.1.5): a Secondary always implies a Primary
+	// exists somewhere, even if currently unreachable, so it's always
+	// "Syncing" - only a Primary can ever be "Standalone".
+	switch role {
+	case "primary":
+		if cfg != nil && cfg.VaultPath != "" {
+			if deviceID, err := t.cfgMgr.GetDeviceID(); err == nil {
+				if others, err := knownActiveOtherDevices(cfg.VaultPath, deviceID); err == nil {
+					if len(others) == 0 {
+						data.MultiDeviceStatus = lang.L("Standalone")
+					} else {
+						data.MultiDeviceStatus = lang.L("Syncing")
+					}
+				}
+			}
+		}
+	case "secondary":
+		data.MultiDeviceStatus = lang.L("Syncing")
+	}
 
 	return data
 }
@@ -906,32 +965,86 @@ func (t *trayApp) saveSettings(data gui.SettingsFormData) {
 		return
 	}
 
-	// rclone sync mirrors its destination exactly, deleting anything not
-	// present in the source. If the Vault changed since the last save but
-	// the Google Drive Target Folder Path didn't, the next sync would wipe
-	// out the previous Vault's backed-up files. The Settings window already
-	// defaults the target path to the Vault's own folder name and keeps it
-	// following Vault changes (buildSettingsContent), so this only fires
-	// when the user has kept (or retyped) the same target path on purpose.
-	if prevCfg, err := t.cfgMgr.LoadConfig(); err == nil && vaultChangedWithSameTarget(prevCfg, data) {
-		gui.ConfirmDanger(
-			lang.L("Vault Changed - Same Backup Target"),
-			lang.L(
-				"You're changing the Vault from:\n{{.OldVault}}\nto:\n{{.NewVault}}\n\nbut the Google Drive Target Folder Path is still '{{.Target}}'.\n\n"+
-					"Google Drive backup mirrors the Vault exactly, so the next sync will delete the previous Vault's files there and replace them with the new Vault's.\n\n"+
-					"Continue with this target folder anyway?",
-				map[string]string{"OldVault": prevCfg.VaultPath, "NewVault": data.VaultPath, "Target": data.RclonePath},
-			),
-			func(confirmed bool) {
-				if confirmed {
-					t.saveSettingsConfirmed(data)
-				}
-			},
-		)
-		return
+	prevCfg, prevErr := t.cfgMgr.LoadConfig()
+
+	// A configured rclone remote actively backs up whatever Vault this
+	// device currently points at. Letting a Vault change through while it's
+	// still configured would silently redirect that remote's next sync onto
+	// an entirely different folder's contents - remote removal must happen
+	// first (an explicit, deliberate step) so there's never a moment where
+	// the remote is configured but pointed at a stale/wrong Vault.
+	if prevErr == nil && vaultChangeNeedsRemoteRemoval(prevCfg, data) {
+		remote := strings.TrimSpace(prevCfg.RcloneRemote)
+		if drive.NewClient(engineLogPath()).IsRemoteConfigured(context.Background(), remote) {
+			gui.Info(
+				lang.L("Remove the Google Drive Remote First"),
+				lang.L(
+					"This device's Vault folder can't be changed while the Google Drive remote '{{.Remote}}' is still configured - the next sync would silently switch to backing up the new Vault's contents at the old one's Google Drive location.\n\nRemove the remote first (Remove Remote Configuration... button), change the Vault folder, then set the remote up again.",
+					map[string]string{"Remote": remote},
+				),
+			)
+			return
+		}
 	}
 
-	t.saveSettingsConfirmed(data)
+	proceedPastMultiDeviceCheck := func() {
+		// rclone sync mirrors its destination exactly, deleting anything not
+		// present in the source. If the Vault changed since the last save but
+		// the Google Drive Target Folder Path didn't, the next sync would wipe
+		// out the previous Vault's backed-up files. The Settings window already
+		// defaults the target path to the Vault's own folder name and keeps it
+		// following Vault changes (buildSettingsContent), so this only fires
+		// when the user has kept (or retyped) the same target path on purpose.
+		if prevErr == nil && vaultChangedWithSameTarget(prevCfg, data) {
+			gui.ConfirmDanger(
+				lang.L("Vault Changed - Same Backup Target"),
+				lang.L(
+					"You're changing the Vault from:\n{{.OldVault}}\nto:\n{{.NewVault}}\n\nbut the Google Drive Target Folder Path is still '{{.Target}}'.\n\n"+
+						"Google Drive backup mirrors the Vault exactly, so the next sync will delete the previous Vault's files there and replace them with the new Vault's.\n\n"+
+						"Continue with this target folder anyway?",
+					map[string]string{"OldVault": prevCfg.VaultPath, "NewVault": data.VaultPath, "Target": data.RclonePath},
+				),
+				func(confirmed bool) {
+					if confirmed {
+						t.saveSettingsConfirmed(data)
+					}
+				},
+			)
+			return
+		}
+
+		t.saveSettingsConfirmed(data)
+	}
+
+	// Changing this device's Vault folder only ever affects this device -
+	// any other device sharing this Vault via iCloud keeps syncing the old
+	// folder regardless. If this device is Primary, changing away also
+	// means it stops backing up the *shared* Vault to Google Drive (another
+	// device can take over via "Promote to Primary..."). Warn (rather than
+	// block outright) since knownActiveOtherDevices is a heuristic, not a
+	// liveness check - it can't tell "another device is actively editing
+	// this Vault right now" from "one was, a long time ago, and nobody ever
+	// ran Reset Configuration on it" (spec 3.6.1.5).
+	if prevErr == nil && vaultPathChanging(prevCfg, data) {
+		if role, _ := t.cfgMgr.LoadRole(); role == "primary" {
+			deviceID, idErr := t.cfgMgr.GetDeviceID()
+			others, othersErr := knownActiveOtherDevices(prevCfg.VaultPath, deviceID)
+			if idErr == nil && othersErr == nil && len(others) > 0 {
+				gui.ConfirmDanger(
+					lang.L("Other Devices Use This Vault"),
+					lang.L("This device is Primary, and at least one other device appears to share this Vault via iCloud.\n\nChanging the Vault folder here only affects this device - other devices will keep syncing the current folder, and this device will stop backing up the shared Vault to Google Drive (another device can take over via \"Promote to Primary...\").\n\nContinue changing the Vault folder anyway?"),
+					func(confirmed bool) {
+						if confirmed {
+							proceedPastMultiDeviceCheck()
+						}
+					},
+				)
+				return
+			}
+		}
+	}
+
+	proceedPastMultiDeviceCheck()
 }
 
 // vaultChangedWithSameTarget reports whether saving data would point a
@@ -943,6 +1056,61 @@ func vaultChangedWithSameTarget(prevCfg *config.Config, data gui.SettingsFormDat
 		return false
 	}
 	return prevCfg.VaultPath != data.VaultPath && prevCfg.RclonePath == data.RclonePath
+}
+
+// vaultPathChanging reports whether data would change this device's Vault
+// path away from prevCfg's - the shared precondition behind
+// vaultChangeNeedsRemoteRemoval and saveSettings' multi-device warning. A
+// first-ever save (no prevCfg, or one that never had a Vault set) is never
+// considered a change.
+func vaultPathChanging(prevCfg *config.Config, data gui.SettingsFormData) bool {
+	return prevCfg != nil && prevCfg.VaultPath != "" && prevCfg.VaultPath != data.VaultPath
+}
+
+// vaultChangeNeedsRemoteRemoval reports whether data would change this
+// device's Vault path away from prevCfg's while prevCfg still names an
+// rclone remote - the precondition for saveSettings to require removing
+// that remote first (see its call site). Doesn't itself check whether the
+// remote is actually configured in rclone - the caller does that, since it
+// requires shelling out.
+func vaultChangeNeedsRemoteRemoval(prevCfg *config.Config, data gui.SettingsFormData) bool {
+	return vaultPathChanging(prevCfg, data) && strings.TrimSpace(prevCfg.RcloneRemote) != ""
+}
+
+// knownActiveOtherDevices returns every device (other than selfDeviceID)
+// that this Vault's event log has ever heard from and that hasn't since
+// explicitly decommissioned itself (spec 3.6.1.5) - the signal behind both
+// MultiDeviceStatus and the Primary-only warnings on changing the Vault
+// folder or running Reset Configuration. It's a heuristic, not a liveness
+// check: a device that's simply offline (powered off, never reset) still
+// counts as "active" here, since there's no way to tell that apart from one
+// still in daily use. Only ever reports PCs (Mac/Windows) - iPhone/iPad
+// never run this app at all (spec 1.4), so they never write an event log
+// and can never appear here.
+func knownActiveOtherDevices(vaultPath, selfDeviceID string) (map[string]eventlog.EventEntry, error) {
+	latest, err := eventlog.NewManager(vaultPath).LatestEventForEachDevice()
+	if err != nil {
+		return nil, err
+	}
+	for id, entry := range latest {
+		if id == selfDeviceID || entry.Event == eventlog.EventDeviceDecommissioned {
+			delete(latest, id)
+		}
+	}
+	return latest, nil
+}
+
+// decommissionSelf tells every other device that this one is deliberately
+// leaving vaultPath, by appending EventDeviceDecommissioned to its own
+// event log (see EventDeviceDecommissioned, knownActiveOtherDevices).
+// Errors are deliberately swallowed by the caller - a failed decommission
+// write must never block Reset Configuration itself from proceeding.
+func decommissionSelf(cfgMgr *config.ConfigManager, vaultPath, label string) {
+	deviceID, err := cfgMgr.GetDeviceID()
+	if err != nil {
+		return
+	}
+	_ = eventlog.NewManager(vaultPath).Append(deviceID, label, eventlog.EventDeviceDecommissioned, nil)
 }
 
 // saveSettingsConfirmed does the actual work of saveSettings, once any

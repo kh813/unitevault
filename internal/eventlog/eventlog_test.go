@@ -108,6 +108,55 @@ func TestManager_PruneOwnEvents_NeverTouchesOtherDevicesLogs(t *testing.T) {
 	}
 }
 
+// TestManager_LatestEventForEachDevice guards the multi-device summary used
+// to decide whether other devices still look active (spec 3.6.1.5): one
+// entry per device, always the most recent, and devices that never wrote
+// anything are simply absent rather than zero-valued.
+func TestManager_LatestEventForEachDevice(t *testing.T) {
+	vaultPath := filepath.Join(t.TempDir(), "Vault")
+	m := eventlog.NewManager(vaultPath)
+
+	if err := m.Append("dev-a", "mac-mini", eventlog.EventInitializedAsPrimary, nil); err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+	if err := m.Append("dev-a", "mac-mini", eventlog.EventDeviceDecommissioned, nil); err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+	if err := m.Append("dev-b", "iphone", eventlog.EventInitializedAsSecondary, nil); err != nil {
+		t.Fatalf("Append failed: %v", err)
+	}
+
+	got, err := m.LatestEventForEachDevice()
+	if err != nil {
+		t.Fatalf("LatestEventForEachDevice failed: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected exactly 2 known devices, got %d: %+v", len(got), got)
+	}
+	if got["dev-a"].Event != eventlog.EventDeviceDecommissioned {
+		t.Errorf("expected dev-a's latest event to be the decommission, got %+v", got["dev-a"])
+	}
+	if got["dev-b"].Event != eventlog.EventInitializedAsSecondary || got["dev-b"].Label != "iphone" {
+		t.Errorf("expected dev-b's single entry to come back as-is, got %+v", got["dev-b"])
+	}
+	if _, ok := got["never-written"]; ok {
+		t.Error("expected a device that never wrote an event to be absent from the result")
+	}
+}
+
+func TestManager_LatestEventForEachDevice_NoEventsAtAll(t *testing.T) {
+	vaultPath := filepath.Join(t.TempDir(), "Vault")
+	m := eventlog.NewManager(vaultPath)
+
+	got, err := m.LatestEventForEachDevice()
+	if err != nil {
+		t.Fatalf("expected no error when _sync doesn't exist yet, got %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected an empty result, got %+v", got)
+	}
+}
+
 func writeRawEntries(t *testing.T, m *eventlog.Manager, deviceID string, entries ...eventlog.EventEntry) {
 	t.Helper()
 	for _, e := range entries {

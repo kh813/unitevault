@@ -12,6 +12,7 @@ import (
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/drive"
 	"github.com/kh813/unitevault/internal/engine"
+	"github.com/kh813/unitevault/internal/eventlog"
 	"github.com/kh813/unitevault/internal/gui"
 )
 
@@ -321,6 +322,188 @@ func TestVaultChangedWithSameTarget(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestVaultChangeNeedsRemoteRemoval guards the block on changing this
+// device's Vault folder while it still names an rclone remote: doing so
+// would let a configured remote silently start backing up an entirely
+// different Vault at its old target (saveSettings requires removing the
+// remote first instead - see vaultChangeNeedsRemoteRemoval's doc comment).
+func TestVaultChangeNeedsRemoteRemoval(t *testing.T) {
+	cases := []struct {
+		name    string
+		prevCfg *config.Config
+		data    gui.SettingsFormData
+		want    bool
+	}{
+		{
+			name:    "no previous config at all",
+			prevCfg: nil,
+			data:    gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault"},
+			want:    false,
+		},
+		{
+			name:    "previous config never had a Vault set (first save)",
+			prevCfg: &config.Config{RcloneRemote: "ObsidianVault"},
+			data:    gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault"},
+			want:    false,
+		},
+		{
+			name:    "same Vault - an ordinary re-save",
+			prevCfg: &config.Config{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault"},
+			data:    gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault"},
+			want:    false,
+		},
+		{
+			name:    "Vault changed, no remote named in the previous config",
+			prevCfg: &config.Config{VaultPath: "/vaults/A", RcloneRemote: ""},
+			data:    gui.SettingsFormData{VaultPath: "/vaults/B", RcloneRemote: "ObsidianVault"},
+			want:    false,
+		},
+		{
+			name:    "Vault changed while a remote was named - the dangerous case",
+			prevCfg: &config.Config{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault"},
+			data:    gui.SettingsFormData{VaultPath: "/vaults/B", RcloneRemote: "ObsidianVault"},
+			want:    true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := vaultChangeNeedsRemoteRemoval(c.prevCfg, c.data); got != c.want {
+				t.Errorf("vaultChangeNeedsRemoteRemoval(%+v, %+v) = %v, want %v", c.prevCfg, c.data, got, c.want)
+			}
+		})
+	}
+}
+
+// TestKnownActiveOtherDevices guards the heuristic behind both
+// MultiDeviceStatus and the Primary-only multi-device warnings (spec
+// 3.6.1.5): a device that never wrote an event doesn't count, the caller's
+// own device ID is always excluded, and a device whose *latest* event is
+// EventDeviceDecommissioned drops out even though it once participated.
+// (iPhone/iPad never appear here at all in practice - they never run this
+// app, so they never write an event log in the first place; spec 1.4.)
+func TestKnownActiveOtherDevices(t *testing.T) {
+	t.Run("no devices at all", func(t *testing.T) {
+		vaultPath := filepath.Join(t.TempDir(), "Vault")
+		got, err := knownActiveOtherDevices(vaultPath, "self")
+		if err != nil {
+			t.Fatalf("knownActiveOtherDevices failed: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("expected no known devices, got %+v", got)
+		}
+	})
+
+	t.Run("excludes self and decommissioned devices, keeps active ones", func(t *testing.T) {
+		vaultPath := filepath.Join(t.TempDir(), "Vault")
+		m := eventlog.NewManager(vaultPath)
+		if err := m.Append("self", "this-mac", eventlog.EventInitializedAsPrimary, nil); err != nil {
+			t.Fatalf("seed Append failed: %v", err)
+		}
+		if err := m.Append("dev-active", "windows-pc", eventlog.EventInitializedAsSecondary, nil); err != nil {
+			t.Fatalf("seed Append failed: %v", err)
+		}
+		if err := m.Append("dev-gone", "old-windows-pc", eventlog.EventInitializedAsSecondary, nil); err != nil {
+			t.Fatalf("seed Append failed: %v", err)
+		}
+		if err := m.Append("dev-gone", "old-windows-pc", eventlog.EventDeviceDecommissioned, nil); err != nil {
+			t.Fatalf("seed Append failed: %v", err)
+		}
+
+		got, err := knownActiveOtherDevices(vaultPath, "self")
+		if err != nil {
+			t.Fatalf("knownActiveOtherDevices failed: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("expected exactly 1 active other device, got %d: %+v", len(got), got)
+		}
+		if _, ok := got["dev-active"]; !ok {
+			t.Errorf("expected dev-active to be present, got %+v", got)
+		}
+	})
+}
+
+// TestDecommissionSelf guards the Reset Configuration decommission trail
+// (spec 3.6.1.5): it must append EventDeviceDecommissioned, under this
+// device's own ID/label, to the given Vault's event log.
+func TestDecommissionSelf(t *testing.T) {
+	tr := newTestTrayApp(t)
+	vaultPath := filepath.Join(t.TempDir(), "Vault")
+	deviceID, err := tr.cfgMgr.GetDeviceID()
+	if err != nil {
+		t.Fatalf("GetDeviceID failed: %v", err)
+	}
+
+	decommissionSelf(tr.cfgMgr, vaultPath, "my-mac")
+
+	entries, err := eventlog.NewManager(vaultPath).ReadDeviceLog(deviceID)
+	if err != nil {
+		t.Fatalf("ReadDeviceLog failed: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected exactly 1 event, got %d: %+v", len(entries), entries)
+	}
+	if entries[0].Event != eventlog.EventDeviceDecommissioned {
+		t.Errorf("expected EventDeviceDecommissioned, got %+v", entries[0])
+	}
+	if entries[0].Label != "my-mac" {
+		t.Errorf("expected label %q, got %q", "my-mac", entries[0].Label)
+	}
+}
+
+// TestBuildFormData_MultiDeviceStatus guards how buildFormData surfaces
+// MultiDeviceStatus (spec 3.6.1.5): "Standalone" for a Primary with no
+// other PC's event log showing up as active, "Syncing" as soon as one
+// does, and always "Syncing" for a Secondary (which always implies a
+// Primary exists somewhere, even if unreachable).
+func TestBuildFormData_MultiDeviceStatus(t *testing.T) {
+	standalone := lang.L("Standalone")
+	syncing := lang.L("Syncing")
+
+	t.Run("Primary with no other devices at all", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		vaultPath := filepath.Join(t.TempDir(), "Vault")
+		_ = tr.cfgMgr.SaveConfig(&config.Config{VaultPath: vaultPath})
+		_ = tr.cfgMgr.SaveRole("primary")
+
+		if got := tr.buildFormData().MultiDeviceStatus; got != standalone {
+			t.Errorf("expected MultiDeviceStatus %q when no other device has ever written an event, got %q", standalone, got)
+		}
+	})
+
+	t.Run("Primary with an active other device", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		vaultPath := filepath.Join(t.TempDir(), "Vault")
+		_ = tr.cfgMgr.SaveConfig(&config.Config{VaultPath: vaultPath})
+		_ = tr.cfgMgr.SaveRole("primary")
+		if err := eventlog.NewManager(vaultPath).Append("dev-b", "windows-pc", eventlog.EventInitializedAsSecondary, nil); err != nil {
+			t.Fatalf("seed Append failed: %v", err)
+		}
+
+		if got := tr.buildFormData().MultiDeviceStatus; got != syncing {
+			t.Errorf("expected MultiDeviceStatus %q while another device's event log shows it active, got %q", syncing, got)
+		}
+	})
+
+	t.Run("Secondary is always Syncing", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		vaultPath := filepath.Join(t.TempDir(), "Vault")
+		_ = tr.cfgMgr.SaveConfig(&config.Config{VaultPath: vaultPath})
+		_ = tr.cfgMgr.SaveRole("secondary")
+
+		if got := tr.buildFormData().MultiDeviceStatus; got != syncing {
+			t.Errorf("expected MultiDeviceStatus %q for a Secondary device, got %q", syncing, got)
+		}
+	})
+
+	t.Run("unconfigured role shows no status", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+
+		if got := tr.buildFormData().MultiDeviceStatus; got != "" {
+			t.Errorf("expected empty MultiDeviceStatus before any role is set, got %q", got)
+		}
+	})
 }
 
 func TestBuildFormData_DriveSyncStatusAndRoleVariations(t *testing.T) {
