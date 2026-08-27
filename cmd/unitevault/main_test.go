@@ -406,6 +406,93 @@ func TestPathIsUnder(t *testing.T) {
 	}
 }
 
+// TestBuildSaveConfig guards a real, previously-shipped bug: an ordinary
+// Save Settings (which has no ICloudBridgePath field on its form at all)
+// used to silently wipe out a Bridge path Vault Migration had set up,
+// because the config it built didn't carry ICloudBridgePath forward from
+// what was already saved.
+func TestBuildSaveConfig(t *testing.T) {
+	cases := []struct {
+		name       string
+		prevCfg    *config.Config
+		data       gui.SettingsFormData
+		wantBridge string
+	}{
+		{
+			name:       "no previous config at all (first-ever save)",
+			prevCfg:    nil,
+			data:       gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60},
+			wantBridge: "",
+		},
+		{
+			name:       "previous config never had a Bridge path",
+			prevCfg:    &config.Config{VaultPath: "/vaults/A"},
+			data:       gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60},
+			wantBridge: "",
+		},
+		{
+			name:       "an ordinary re-save carries the Bridge path forward",
+			prevCfg:    &config.Config{VaultPath: "/vaults/A", ICloudBridgePath: "/icloud/Obsidian/A"},
+			data:       gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60},
+			wantBridge: "/icloud/Obsidian/A",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := buildSaveConfig(c.prevCfg, c.data)
+			if got.ICloudBridgePath != c.wantBridge {
+				t.Errorf("ICloudBridgePath = %q, want %q", got.ICloudBridgePath, c.wantBridge)
+			}
+			if got.VaultPath != c.data.VaultPath || got.RcloneRemote != c.data.RcloneRemote ||
+				got.RclonePath != c.data.RclonePath || got.IntervalSeconds != c.data.IntervalSeconds {
+				t.Errorf("expected the form's own fields to round-trip untouched, got %+v from data %+v", got, c.data)
+			}
+		})
+	}
+}
+
+// TestClearRemoteConfig guards a real, previously-shipped bug: "Remove
+// Remote Configuration..." removed the rclone-level remote but left its
+// now-stale name in config.json, so every following sync cycle kept
+// retrying (and failing) against a remote that no longer existed, instead
+// of cleanly falling back to "no remote configured" - a state RunCycle
+// already tolerates gracefully for both roles (spec 1.6.4).
+func TestClearRemoteConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgMgr := config.NewConfigManagerWithDir(tempDir)
+	if err := cfgMgr.SaveConfig(&config.Config{
+		VaultPath:        "/vaults/A",
+		RcloneRemote:     "ObsidianVault",
+		RclonePath:       "VaultBackup",
+		IntervalSeconds:  60,
+		ICloudBridgePath: "/icloud/Obsidian/A",
+	}); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	clearRemoteConfig(cfgMgr)
+
+	got, err := cfgMgr.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if got.RcloneRemote != "" {
+		t.Errorf("expected RcloneRemote to be cleared, got %q", got.RcloneRemote)
+	}
+	if got.RclonePath != "" {
+		t.Errorf("expected RclonePath to be cleared, got %q", got.RclonePath)
+	}
+	if got.VaultPath != "/vaults/A" {
+		t.Errorf("expected VaultPath to survive untouched, got %q", got.VaultPath)
+	}
+	if got.IntervalSeconds != 60 {
+		t.Errorf("expected IntervalSeconds to survive untouched, got %d", got.IntervalSeconds)
+	}
+	if got.ICloudBridgePath != "/icloud/Obsidian/A" {
+		t.Errorf("expected ICloudBridgePath to survive untouched, got %q", got.ICloudBridgePath)
+	}
+}
+
 // TestKnownActiveOtherDevices guards the heuristic behind both
 // MultiDeviceStatus and the Primary-only multi-device warnings (spec
 // 3.6.1.5): a device that never wrote an event doesn't count, the caller's

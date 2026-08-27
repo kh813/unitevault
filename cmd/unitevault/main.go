@@ -1004,17 +1004,7 @@ func (t *trayApp) removeRemote(current gui.SettingsFormData) {
 					return
 				}
 
-				// Also clear the now-stale remote name out of config.json -
-				// otherwise every sync cycle keeps trying (and failing) to
-				// use a remote that no longer exists, instead of cleanly
-				// treating this as "no remote configured" (the same state
-				// RunCycle already tolerates gracefully for both roles,
-				// spec 1.6.4).
-				if cfg, err := t.cfgMgr.LoadConfig(); err == nil && cfg != nil {
-					cfg.RcloneRemote = ""
-					cfg.RclonePath = ""
-					_ = t.cfgMgr.SaveConfig(cfg)
-				}
+				clearRemoteConfig(t.cfgMgr)
 				gui.Info(lang.L("Remote Removed"), lang.L("Removed rclone remote '{{.Remote}}'.", map[string]string{"Remote": remoteName}))
 
 				reopenData := current
@@ -1374,6 +1364,44 @@ func vaultChangeNeedsRemoteRemoval(prevCfg *config.Config, data gui.SettingsForm
 	return vaultPathChanging(prevCfg, data) && strings.TrimSpace(prevCfg.RcloneRemote) != ""
 }
 
+// buildSaveConfig constructs the config.Config that saveSettingsConfirmed
+// persists from the Settings form data, carrying ICloudBridgePath forward
+// from prevCfg (spec 1.6.3) - it's not a field on the form itself (only
+// Vault Migration ever sets it), so an ordinary Save Settings must never
+// silently wipe it back to "". A real, previously-shipped bug came from
+// building this config inline without doing so.
+func buildSaveConfig(prevCfg *config.Config, data gui.SettingsFormData) *config.Config {
+	var icloudBridgePath string
+	if prevCfg != nil {
+		icloudBridgePath = prevCfg.ICloudBridgePath
+	}
+	return &config.Config{
+		VaultPath:        data.VaultPath,
+		RcloneRemote:     data.RcloneRemote,
+		RclonePath:       data.RclonePath,
+		IntervalSeconds:  data.IntervalSeconds,
+		ICloudBridgePath: icloudBridgePath,
+	}
+}
+
+// clearRemoteConfig removes the (now possibly stale) rclone remote name
+// and target path from config.json, without touching any other field -
+// called after successfully removing an rclone remote itself, so the app
+// falls into the well-defined "no remote configured" state (spec 1.6.4)
+// instead of every following sync cycle retrying, and failing, against a
+// remote that no longer exists. A real, previously-shipped bug came from
+// "Remove Remote Configuration..." only removing the rclone-level remote
+// and never this.
+func clearRemoteConfig(cfgMgr *config.ConfigManager) {
+	cfg, err := cfgMgr.LoadConfig()
+	if err != nil || cfg == nil {
+		return
+	}
+	cfg.RcloneRemote = ""
+	cfg.RclonePath = ""
+	_ = cfgMgr.SaveConfig(cfg)
+}
+
 // pathIsUnder reports whether path is root itself or somewhere inside it -
 // the precondition behind maybeShowICloudMigrationReminder's "is the Vault
 // inside iCloud Drive" check (spec 1.6.1/1.6.7). filepath.Rel returns a
@@ -1468,22 +1496,8 @@ func (t *trayApp) saveSettingsConfirmed(data gui.SettingsFormData) {
 			}
 		}
 
-		// Carry the iCloud Bridge path (spec 1.6.3) forward from whatever was
-		// already saved - it's not a field on the form itself (Vault
-		// Migration is the only thing that sets it), so an ordinary Save
-		// Settings must never silently wipe it back to "".
-		var icloudBridgePath string
-		if prevCfg, err := t.cfgMgr.LoadConfig(); err == nil && prevCfg != nil {
-			icloudBridgePath = prevCfg.ICloudBridgePath
-		}
-
-		newCfg := &config.Config{
-			VaultPath:        data.VaultPath,
-			RcloneRemote:     data.RcloneRemote,
-			RclonePath:       data.RclonePath,
-			IntervalSeconds:  data.IntervalSeconds,
-			ICloudBridgePath: icloudBridgePath,
-		}
+		prevCfg, _ := t.cfgMgr.LoadConfig()
+		newCfg := buildSaveConfig(prevCfg, data)
 		if err := t.cfgMgr.SaveConfig(newCfg); err != nil {
 			gui.Info(lang.L("Save Failed"), lang.L("Failed to save configuration: {{.Err}}", map[string]string{"Err": err.Error()}))
 			return
