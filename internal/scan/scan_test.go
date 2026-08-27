@@ -325,3 +325,86 @@ func TestScanner_MultiCycleIntegration_ModifyIsCorrectlyDetected(t *testing.T) {
 		t.Errorf("expected the edit to be logged as ActionModify, got %s", modifyChanges[0].Action)
 	}
 }
+
+func TestScanPaths_CarriesBaselineForwardAndUpdatesGivenPaths(t *testing.T) {
+	vault := t.TempDir()
+	if err := os.WriteFile(filepath.Join(vault, "unchanged.md"), []byte("stays the same\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vault, "note.md"), []byte("version 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	scanner := scan.NewScanner(vault)
+	baseline, err := scanner.ScanVault()
+	if err != nil {
+		t.Fatalf("ScanVault failed: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(vault, "note.md"), []byte("version 2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := scanner.ScanPaths(baseline, []string{"note.md"})
+	if err != nil {
+		t.Fatalf("ScanPaths failed: %v", err)
+	}
+
+	full, err := scanner.ScanVault()
+	if err != nil {
+		t.Fatalf("ScanVault failed: %v", err)
+	}
+
+	if got.Files["note.md"] != full.Files["note.md"] {
+		t.Errorf("expected note.md's hash to match a full scan, got %+v vs %+v", got.Files["note.md"], full.Files["note.md"])
+	}
+	if got.Files["unchanged.md"] != baseline.Files["unchanged.md"] {
+		t.Errorf("expected unchanged.md to be carried forward from baseline untouched, got %+v vs %+v", got.Files["unchanged.md"], baseline.Files["unchanged.md"])
+	}
+	if len(got.Files) != len(full.Files) {
+		t.Errorf("expected ScanPaths result to match a full scan's file set, got %+v vs %+v", got.Files, full.Files)
+	}
+}
+
+func TestScanPaths_RemovesDeletedPath(t *testing.T) {
+	vault := t.TempDir()
+	notePath := filepath.Join(vault, "note.md")
+	if err := os.WriteFile(notePath, []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	scanner := scan.NewScanner(vault)
+	baseline, err := scanner.ScanVault()
+	if err != nil {
+		t.Fatalf("ScanVault failed: %v", err)
+	}
+	if _, ok := baseline.Files["note.md"]; !ok {
+		t.Fatal("expected note.md in baseline")
+	}
+
+	if err := os.Remove(notePath); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := scanner.ScanPaths(baseline, []string{"note.md"})
+	if err != nil {
+		t.Fatalf("ScanPaths failed: %v", err)
+	}
+	if _, ok := got.Files["note.md"]; ok {
+		t.Errorf("expected note.md to be removed from the result, got %+v", got.Files)
+	}
+}
+
+func TestScanPaths_IgnoresSyncPaths(t *testing.T) {
+	vault := t.TempDir()
+	scanner := scan.NewScanner(vault)
+	baseline := &scan.ScanState{Files: map[string]scan.FileState{}}
+
+	got, err := scanner.ScanPaths(baseline, []string{"_sync/state/last_scan.json", "_sync"})
+	if err != nil {
+		t.Fatalf("ScanPaths failed: %v", err)
+	}
+	if len(got.Files) != 0 {
+		t.Errorf("expected _sync/ paths to be ignored, got %+v", got.Files)
+	}
+}

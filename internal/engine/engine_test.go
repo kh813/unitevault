@@ -9,12 +9,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/engine"
 	"github.com/kh813/unitevault/internal/scan"
 	"github.com/kh813/unitevault/internal/syncedlog"
+	"github.com/kh813/unitevault/internal/watch"
 )
 
 // mockDriveRunner is an in-memory drive.RcloneRunner: FileExists/
@@ -643,5 +645,160 @@ func TestResolvePendingConflict_UnknownDevice(t *testing.T) {
 	}
 	if err := engine.ResolvePendingConflict(cfgMgr, vaultPath, conflict, "dev-does-not-exist", "primary-device", "mac-test"); err == nil {
 		t.Error("expected an error when the chosen device isn't one of the conflict's recorded versions")
+	}
+}
+
+// TestSyncEngine_RunCycle_WithWatcher_DetectsEditsAcrossCycles guards spec
+// 1.6.5: attaching a real watch.Watcher via SetWatcher must not break
+// change detection - an edit must still eventually get logged, now via a
+// targeted ScanPaths rescan of the watcher's drained paths rather than a
+// full ScanVault(), exactly like the watcher-less multi-cycle scan pipeline
+// test in internal/scan already guards for the no-watcher case.
+func TestSyncEngine_RunCycle_WithWatcher_DetectsEditsAcrossCycles(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:    vaultPath,
+		RcloneRemote: "ObsidianVault",
+		RclonePath:   "MyVault",
+	})
+	deviceID, _ := cfgMgr.GetDeviceID()
+
+	if err := os.MkdirAll(vaultPath, 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	notePath := filepath.Join(vaultPath, "note.md")
+	if err := os.WriteFile(notePath, []byte("version 1\n"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	w, err := watch.New(vaultPath)
+	if err != nil {
+		t.Fatalf("watch.New failed: %v", err)
+	}
+	defer w.Close()
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", deviceID, "mac-test")
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	eng.SetWatcher(w)
+	ctx := context.Background()
+
+	// Two cycles with stable content are needed before version 1 becomes
+	// the confirmed baseline, matching
+	// TestScanner_MultiCycleIntegration_ModifyIsCorrectlyDetected's own
+	// reasoning in internal/scan.
+	if err := eng.RunCycle(ctx); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+	if err := eng.RunCycle(ctx); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	if err := os.WriteFile(notePath, []byte("version 2\n"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	// Let the watcher actually observe the edit before the next cycle
+	// drains it - fsnotify delivery is asynchronous.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got, statErr := scan.CalculateNormalizedHash(notePath); statErr == nil && got != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	var modifyEntries []syncedlog.LogEntry
+	for i := 0; i < 5 && len(modifyEntries) == 0; i++ {
+		if err := eng.RunCycle(ctx); err != nil {
+			t.Fatalf("RunCycle failed: %v", err)
+		}
+		entries, err := syncedlog.NewLogManager(vaultPath).ReadDeviceLog(deviceID)
+		if err != nil {
+			t.Fatalf("ReadDeviceLog failed: %v", err)
+		}
+		for _, e := range entries {
+			if e.Path == "note.md" && e.Action == scan.ActionModify {
+				modifyEntries = append(modifyEntries, e)
+			}
+		}
+	}
+
+	if len(modifyEntries) != 1 {
+		t.Fatalf("expected exactly 1 modify entry for note.md across settling cycles with a watcher attached, got %d", len(modifyEntries))
+	}
+	if modifyEntries[0].Diff != "version 2\n" {
+		t.Errorf("expected the logged content to be the new version, got %q", modifyEntries[0].Diff)
+	}
+}
+
+// TestSyncEngine_RunCycle_WithWatcher_FirstCycleStillSeesPreexistingFile guards
+// against relying on a watcher's hints before it's had any chance to
+// observe anything - the very first cycle must behave exactly like the
+// no-watcher case (a full ScanVault()), so a file already present when the
+// engine starts is never missed just because it predates watcher
+// attachment.
+func TestSyncEngine_RunCycle_WithWatcher_FirstCycleStillSeesPreexistingFile(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:    vaultPath,
+		RcloneRemote: "ObsidianVault",
+		RclonePath:   "MyVault",
+	})
+	deviceID, _ := cfgMgr.GetDeviceID()
+
+	if err := os.MkdirAll(vaultPath, 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	// Written *before* the watcher exists, so the watcher itself can never
+	// have observed it - only a full first-cycle scan can.
+	if err := os.WriteFile(filepath.Join(vaultPath, "note.md"), []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	w, err := watch.New(vaultPath)
+	if err != nil {
+		t.Fatalf("watch.New failed: %v", err)
+	}
+	defer w.Close()
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", deviceID, "mac-test")
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	eng.SetWatcher(w)
+
+	// Two settling cycles for debounce+confirmation, matching the same
+	// pattern used elsewhere in this file.
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	entries, err := syncedlog.NewLogManager(vaultPath).ReadDeviceLog(deviceID)
+	if err != nil {
+		t.Fatalf("ReadDeviceLog failed: %v", err)
+	}
+	found := false
+	for _, e := range entries {
+		if e.Path == "note.md" && e.Action == scan.ActionCreate {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected note.md to be logged as a create despite predating the watcher, got entries %+v", entries)
 	}
 }

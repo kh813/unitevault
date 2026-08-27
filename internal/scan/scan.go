@@ -254,6 +254,44 @@ func ApplyChangesToState(prev *ScanState, changes []FileChange) *ScanState {
 	return next
 }
 
+// ScanPaths recomputes only the given Vault-relative paths against
+// baseline, carrying every other path in baseline forward unchanged. It
+// produces a result equivalent to ScanVault() when paths covers every path
+// that could actually have changed since baseline was captured - which is
+// exactly what a watch.Watcher's Drain() is meant to provide (spec 1.6.5) -
+// but without re-hashing the entire Vault. This is never a substitute for
+// ScanVault() on its own: callers remain responsible for periodically
+// falling back to a full scan, since a watch event the OS failed to
+// deliver would otherwise never be corrected.
+func (s *Scanner) ScanPaths(baseline *ScanState, paths []string) (*ScanState, error) {
+	next := &ScanState{Files: make(map[string]FileState, len(baseline.Files))}
+	for path, f := range baseline.Files {
+		next.Files[path] = f
+	}
+
+	for _, rel := range paths {
+		slashRel := filepath.ToSlash(rel)
+		if slashRel == "_sync" || strings.HasPrefix(slashRel, "_sync/") {
+			continue
+		}
+
+		fullPath := filepath.Join(s.vaultPath, filepath.FromSlash(rel))
+		info, err := os.Stat(fullPath)
+		if err != nil || info.IsDir() {
+			delete(next.Files, slashRel)
+			continue
+		}
+
+		hash, err := CalculateNormalizedHash(fullPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to calculate hash for %s: %w", slashRel, err)
+		}
+		next.Files[slashRel] = FileState{Hash: hash}
+	}
+
+	return next, nil
+}
+
 // ScanVault walks the Vault directory and calculates hashes for all files excluding `_sync/`.
 func (s *Scanner) ScanVault() (*ScanState, error) {
 	state := &ScanState{Files: make(map[string]FileState)}

@@ -14,7 +14,15 @@ import (
 	"github.com/kh813/unitevault/internal/merge"
 	"github.com/kh813/unitevault/internal/scan"
 	"github.com/kh813/unitevault/internal/syncedlog"
+	"github.com/kh813/unitevault/internal/watch"
 )
+
+// watcherFullScanEvery bounds how long SyncEngine can go relying solely on
+// a Watcher's hints before falling back to a full ScanVault() (spec 1.6.5)
+// - a periodic reconciliation safety net against any watch event the OS
+// failed to deliver (dropped, coalesced, or simply unsupported for a given
+// filesystem).
+const watcherFullScanEvery = 30
 
 type SyncEngine struct {
 	cfgMgr    *config.ConfigManager
@@ -23,6 +31,41 @@ type SyncEngine struct {
 	drive     drive.RcloneRunner
 	vaultPath string
 	label     string
+
+	watcher    *watch.Watcher
+	cycleCount int
+}
+
+// SetWatcher attaches an OS-level file watcher (spec 1.6.5) that RunCycle
+// will use, when present, to scan only the paths it reports changed rather
+// than the whole Vault - purely a performance optimization; a nil watcher
+// (the default) makes RunCycle behave exactly as before, always scanning
+// the whole Vault. A setter rather than a NewSyncEngine parameter so every
+// existing construction call site (tests included) keeps working
+// unchanged.
+func (e *SyncEngine) SetWatcher(w *watch.Watcher) {
+	e.watcher = w
+}
+
+// scanStep produces this cycle's raw scan state, preferring a targeted
+// rescan of the attached Watcher's drained paths over a full ScanVault()
+// when possible (spec 1.6.5). Falls back to a full scan when: no watcher is
+// attached, this is the first cycle (cycleCount == 1, so there's no prior
+// watcher activity to have accumulated anything meaningful yet), or the
+// periodic reconciliation point (watcherFullScanEvery) has come around.
+func (e *SyncEngine) scanStep(lastRawState *scan.ScanState) (*scan.ScanState, error) {
+	if e.watcher == nil || e.cycleCount <= 1 || e.cycleCount%watcherFullScanEvery == 0 {
+		return e.scanner.ScanVault()
+	}
+
+	paths := e.watcher.Drain()
+	if paths == nil {
+		// The watcher observed nothing since the last cycle - carry the
+		// previous raw scan forward untouched rather than re-hashing
+		// everything for no reason.
+		return lastRawState, nil
+	}
+	return e.scanner.ScanPaths(lastRawState, paths)
 }
 
 func NewSyncEngine(cfgMgr *config.ConfigManager, vaultPath string, label string, driveRunner drive.RcloneRunner) *SyncEngine {
@@ -70,18 +113,24 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		return fmt.Errorf("failed to create vault dir: %w", err)
 	}
 
-	// 1. Scan Vault
-	currState, err := e.scanner.ScanVault()
-	if err != nil {
-		return fmt.Errorf("vault scan failed: %w", err)
-	}
-
 	// lastRawState is purely the debounce comparison baseline (was this
 	// file's hash the same the last time we looked, regardless of whether
 	// that was ever confirmed/logged) - never used to decide what changed.
+	// It also doubles as ScanPaths' starting point below, since a targeted
+	// rescan needs a baseline to carry every unchanged path forward from.
 	lastRawState, err := e.scanner.LoadLastScan()
 	if err != nil {
 		return fmt.Errorf("failed to load last scan: %w", err)
+	}
+
+	// 1. Scan Vault - via the OS-level watcher's hints when one's attached
+	// and due, otherwise a full scan (spec 1.6.5). See watcherFullScanEvery
+	// and Watcher's own doc comment for why a full scan is still forced
+	// periodically even with a watcher attached.
+	e.cycleCount++
+	currState, err := e.scanStep(lastRawState)
+	if err != nil {
+		return fmt.Errorf("vault scan failed: %w", err)
 	}
 	stableState := scan.DebounceFilter(lastRawState, currState)
 

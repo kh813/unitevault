@@ -26,6 +26,7 @@ import (
 	"github.com/kh813/unitevault/internal/gui"
 	"github.com/kh813/unitevault/internal/obsidianconfig"
 	"github.com/kh813/unitevault/internal/selfupdate"
+	"github.com/kh813/unitevault/internal/watch"
 )
 
 func main() {
@@ -287,6 +288,19 @@ func (t *trayApp) maybeShowInstallReminder() {
 func (t *trayApp) runDaemonLoop(ctx context.Context, cfg *config.Config) {
 	hostname, _ := os.Hostname()
 	eng := engine.NewSyncEngine(t.cfgMgr, cfg.VaultPath, hostname, nil)
+
+	// Attach an OS-level file watcher (spec 1.6.5) as a best-effort scan
+	// optimization - RunCycle already tolerates a nil watcher (it just
+	// always scans the whole Vault), so a failure to start one here just
+	// means slightly more work per cycle, never a correctness problem.
+	// MkdirAll first (matching RunCycle's own call) since the Vault folder
+	// may not exist yet on a brand new device - watching a nonexistent
+	// root silently watches nothing at all, forever, rather than erroring.
+	_ = os.MkdirAll(cfg.VaultPath, 0755)
+	if w, err := watch.New(cfg.VaultPath); err == nil {
+		eng.SetWatcher(w)
+		defer w.Close()
+	}
 
 	interval := cfg.IntervalSeconds
 	if interval <= 0 {
@@ -1507,6 +1521,14 @@ func handleRun(args []string) {
 		}
 		fmt.Println("Single sync cycle completed successfully.")
 		return
+	}
+
+	// See runDaemonLoop's identical MkdirAll+watch.New comment - the same
+	// reasoning applies to this CLI daemon mode.
+	_ = os.MkdirAll(cfg.VaultPath, 0755)
+	if w, err := watch.New(cfg.VaultPath); err == nil {
+		eng.SetWatcher(w)
+		defer w.Close()
 	}
 
 	if err := eng.RunDaemon(ctx, cfg.IntervalSeconds); err != nil && err != context.Canceled {

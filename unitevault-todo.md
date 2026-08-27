@@ -241,6 +241,14 @@
 - [ ] Settings画面の「Sync Interval」表示・設定項目を新モデルに合わせて更新（表記・デフォルト値の見直し）
 - [ ] **コンパイル確認**
 
+**OS標準のファイル監視（実装済み。上記の交互スケジューリング本体とは別の依頼として先行実装）：** 常時起動のトレイ/メニューバー・プロセスに変わったことを踏まえ（元々cronベースだった頃はOS監視を採用しない理由になっていた前提が変わった、3.3.0節参照）、`internal/watch`パッケージを新設。`fsnotify`（Fyne経由で既に間接依存として存在、v1.9.0）をラップし、Vaultフォルダ（`_sync/`は除外）を再帰的に監視、新規サブディレクトリも動的に監視対象へ追加する。あくまで「フルスキャンを置き換えない、ベストエフォートのヒント」という位置付け（クラウド同期フォルダ、特にiCloud Bridgeでは監視イベントの取りこぼしが起こり得るため、Bridge側は引き続きポーリング/フルスキャン方式のまま、`Watcher`には接続していない）。
+
+- `internal/watch/watch.go`：`Watcher`型。`New(root)`で監視開始、`Drain()`で前回`Drain`以降に変化のあった相対パス一覧を取得・クリア、`Close()`で終了。
+- `internal/scan/scan.go`：`Scanner.ScanPaths(baseline, paths)`を追加。baselineを引き継ぎつつ、指定パスだけ再スキャンする軽量版`ScanVault()`。
+- `internal/engine/engine.go`：`SyncEngine.SetWatcher(w)`（オプションのセッター。`RunCycle`のシグネチャ自体は変更せず、既存の呼び出し箇所・テストへの影響を回避）。`scanStep`内部メソッドで、Watcher未接続時・1サイクル目・30サイクルに1回の定期フルスキャン（`watcherFullScanEvery`定数）の場合はフルスキャン、それ以外はWatcherがdrainしたパスのみを`ScanPaths`で再スキャン、という方針。
+- `cmd/unitevault/main.go`：トレイアプリの`runDaemonLoop`、およびCLIの`unitevault run`（`--once`指定時を除く）の両方でWatcherを生成・アタッチし、ループ終了時にクローズ。
+- テストは`internal/watch/watch_test.go`（実ファイルシステムに対する非同期イベント検証、ポーリング待ち）、`internal/scan/scan_test.go`（`ScanPaths`単体）、`internal/engine/engine_test.go`（Watcher接続下でも複数サイクルを通した変更検出が正しく動くこと、1サイクル目はWatcher作成前から存在するファイルも見逃さないこと）。
+
 ### Phase 18：既存ユーザーの移行
 
 - [ ] 起動時、現在のVaultパスがiCloud Drive配下にあると検出した場合の案内ダイアログ（新方式への移行を推奨する旨、手動での移行手順、または自動移行オプション）
