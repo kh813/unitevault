@@ -229,7 +229,9 @@
 - [x] 単体テスト（`internal/engine/engine_test.go`：Secondaryのpush/pull呼び出し内容、リモート未設定時は何もしないこと、Primaryが`_sync/`のみpullしてから既存のpublishを行うこと）
 - [x] **コンパイル確認・フルテスト**
 
-**既知の制約（v1）：** SecondaryのpullはPrimaryが削除したファイルを自動的にはローカルから削除しない（`copy`は追加・更新のみで削除を伝播しない）。また、直近の未確定（デバウンス未安定）なローカル編集が、稀にpullによって上書きされる可能性がある（Obsidianが実際に編集中のVaultフォルダに対して破壊的な`sync`は使わない、という安全側の判断による）。複数Secondaryが同時にpushした場合の競合解消は、Primary側の固定ハブ方式によるマージで扱われる想定だが、実機での検証はまだ行っていない。
+**追記：削除の伝播（マニフェスト方式）を実装済み。** `internal/engine/manifest.go`に`PublishManifest`（Primaryがpublish直前に自分のVaultをスキャンし`_sync/vault_manifest.json`として公開）・`LoadManifest`・`ApplyManifestDeletions`（Secondaryがpull後、自分の確定済みスキャン状態とマニフェストを突き合わせ、確定済みなのにマニフェストに無いファイルだけを安全に削除）を実装。単体テストは`internal/engine/manifest_test.go`。
+
+**残る既知の制約（v1）：** 直近の未確定（デバウンス未安定）なローカル編集が、稀にpullによって上書きされる可能性がある（Obsidianが実際に編集中のVaultフォルダに対して破壊的な`sync`は使わない、という安全側の判断による）。マニフェスト方式も、極端に速い削除と極端に遅い往復が重なるような稀なケースまでは保証しない（ヒューリスティック）。複数Secondaryが同時にpushした場合の競合解消は、Primary側の固定ハブ方式によるマージで扱われる想定だが、実機での検証はまだ行っていない。
 
 ### Phase 17：交互スケジューリングの実装
 

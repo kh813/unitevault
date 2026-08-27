@@ -97,7 +97,9 @@ iCloud Bridgeフォルダを、**通常のデバイスと同列の「仮想デ�
 - **Primary → Google Drive（publish）**：マージ後のVault全体を`rclone sync`でGoogle Driveへミラーする（Primaryのみがこの権限を持つ、という固定ハブ方式の既存方針を維持。変更なし）。
 - **Secondary → Google Drive（pull）**：Primaryが公開した最新のマージ結果（Vault全体）を`rclone copy`でローカルへ反映する。
 
-**既知の制約（v1）：** Secondaryのpullは`copy`（追加・更新のみ）であるため、Primaryが削除したファイルは自動的にはローカルから削除されない。また、直近の未確定（デバウンス未安定）なローカル編集が、稀にこのpullによって上書きされる可能性がある。Obsidianが実際に編集中のVaultフォルダに対して破壊的な`rclone sync`は使わない、という安全側の判断による受け入れ済みの制約とする（`unitevault-todo.md`のPhase 16参照。削除の伝播については同Phaseの追記も参照）。
+**削除の伝播（マニフェスト方式・実装済み）：** Secondaryのpullは`copy`（追加・更新のみ）であるため、それだけではPrimaryが削除したファイルが自動的にローカルから消えない。これを補うため、Primaryはマージ・publish直前に自分のVaultを改めてスキャンし、その時点で「存在すべきファイル一覧」を`_sync/vault_manifest.json`として書き出し、通常のpublishと一緒にGoogle Driveへ公開する（`_sync/state/`とは別の、共有目的の新しいファイル）。Secondaryはpull後、このマニフェストと自分の確定済みスキャン状態（3.4.2節の`last_confirmed_scan.json`）を突き合わせ、「確定済みなのにマニフェストに無いファイル」だけをローカルから削除する。**確定済みでない（このデバイスがまだ自分のスキャンで存在を確認していない）ファイルは、たとえマニフェストに無くても削除しない**——直近にこのデバイス自身が作成し、まだPrimaryのマージに反映されていない可能性があるため。この安全弁により、極端に速い削除と極端に遅い往復が重なるような稀なケースを除き、実用上問題なく削除が伝播する。
+
+なお、直近の未確定（デバウンス未安定）なローカル編集が、稀にこのpullによって上書きされる可能性がある点は残る。Obsidianが実際に編集中のVaultフォルダに対して破壊的な`rclone sync`は使わない、という安全側の判断による受け入れ済みの制約とする（`unitevault-todo.md`のPhase 16参照）。
 
 **重要な補足：`_sync/state/`（3.4.2節、各デバイス専有のスキャナ内部状態）は、どのSync/Copy呼び出しからも`--exclude`で常に除外する。** これを怠ると、あるデバイスがpushした`_sync/state/`が他デバイスのpull時にそのデバイス自身の内部状態を上書きしてしまい、3.4.2節で修正したのと同種の不具合（デバウンス・変更確定の基準が壊れる）を再発させる。
 
@@ -638,6 +640,7 @@ Vault/                              ← Obsidianが直接扱うVaultルート（
     ├── events-<device-uuid-A>.jsonl   ← Mac のアプリケーションイベントログ（3.2.1節）
     ├── events-<device-uuid-B>.jsonl   ← 同様に台数分増える
     ├── PRIMARY_MARKER.json            ← プライマリノードの判定情報（3.6.1.1節。詳細は6.3節の注意点を参照）
+    ├── vault_manifest.json            ← Primaryが公開する「存在すべきファイル一覧」（1.6.4節。Secondaryの削除伝播に使用）
     └── state/
         ├── last_scan.json          ← 前回の生スキャン結果（デバウンス比較専用。3.3.0節・3.4.1節）
         └── last_confirmed_scan.json ← 変更検出（ログ記録）の比較基準となる確定済み状態（3.4.2節）。last_scan.jsonとは別に保持する

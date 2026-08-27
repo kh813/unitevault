@@ -170,6 +170,14 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 			if err := e.drive.Copy(ctx, remoteTarget, e.vaultPath, "/_sync/state/**"); err != nil {
 				return fmt.Errorf("failed to pull latest changes from Google Drive: %w", err)
 			}
+
+			// `rclone copy` above is additive-only, so a file Primary has
+			// since deleted wouldn't otherwise ever be removed here -
+			// reconcile against Primary's published manifest instead
+			// (spec 1.6.4), best-effort (never fails the cycle over it).
+			if manifest, err := LoadManifest(e.vaultPath); err == nil {
+				_, _ = ApplyManifestDeletions(e.vaultPath, manifest)
+			}
 		}
 		return nil
 	}
@@ -242,6 +250,13 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	}
 
 	if cfg.RcloneRemote != "" && cfg.RclonePath != "" {
+		// Publish "what should exist" (spec 1.6.4) before the mirror below,
+		// so Secondaries can tell a genuine deletion apart from their own
+		// not-yet-merged local creations despite pulling non-destructively.
+		// Best-effort - a failed manifest write must never block the
+		// actual Drive sync that follows.
+		_ = PublishManifest(e.vaultPath)
+
 		remoteTarget := fmt.Sprintf("%s:%s", cfg.RcloneRemote, cfg.RclonePath)
 		// /_sync/state/** excluded so Primary's own private scanner
 		// bookkeeping is never published to Drive at all - keeping it
