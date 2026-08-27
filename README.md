@@ -1,27 +1,32 @@
 # UniteVault
 
-Obsidian Vault（Markdownファイル群）を Mac / iPhone / Windows 間で安全に利用しつつ、最終的なバックアップ先として Google Drive を用いる同期・バックアップツールです。
+Obsidian Vault（Markdownファイル群）を Mac / Windows（複数台可）/ iPhone・iPad 間で安全に利用するための同期・バックアップツールです。PC間（Mac⇔Windows等）の同期・共有ハブはGoogle Driveが担い、iPhone/iPadとの橋渡しのみ既存のiCloudに依存します。
 
-> **前提: VaultフォルダはiCloud Drive上に置いてください。**
-> Obsidian無料版には公式の複数端末間同期機能がありません。UniteVaultはあくまで「iCloudで既に同期されたVaultファイルの競合解消」と「Google Driveへのバックアップ」を行うツールであり、**端末間でのVaultファイルそのものの複製・転送（Mac⇔Windows⇔iPhone/iPadの同期）はiCloud Driveに委ねています**（特徴の項参照）。そのため、Windows / Mac / iPhone・iPadの複数端末で同じVaultを更新し続けたい場合は、事前にVaultフォルダ自体をiCloud Drive配下に作成・移動しておく必要があります（Windowsでは「iCloud for Windows」の追加インストールが必要。手順4参照）。**Windows 1台だけでObsidianを使い、Google Driveにバックアップするだけ**であれば、この前提は不要です（ローカルフォルダのままで構いません）。
+> **VaultフォルダはPC上のローカル専用フォルダに置きます（推奨: `~/ObsidianVault`）。** iCloud Drive上に直接置く必要はありません（むしろ非推奨です。下記「なぜVaultをiCloudの外に置くのか」参照）。既にVaultをiCloud Drive上で使っている場合は、初回起動時に案内ダイアログが表示されるか、Settings画面の **[ Migrate Vault to Local Folder... ]** ボタンから、ローカルフォルダへの移行（Obsidianの設定更新込み）を自動で行えます（手順4参照）。
 
 ## 特徴
 
-- **iCloud同期との協調**: ファイル実体の端末間同期は既存のiCloud Driveを利用（このアプリは端末を跨いだファイルコピーは行いません）
+- **Google Driveを共有ハブに**: PC間（Mac⇔Windows等）の同期はGoogle Drive（rclone）経由で行い、このアプリ自身のログ・3-way mergeエンジンが内容統合を担います
+- **iPhone/iPadとの橋渡し**: iCloudには依存しますが、影響範囲を専用の「iCloud Bridge」ステージング領域に限定し、Vault本体をiCloudの内部同期処理から切り離します
 - **独自ログと3-way merge**: 複数端末が同じファイルを編集した場合の競合を、`git merge-file`を使って自動検出・マージ
-- **Google Driveへ一方向バックアップ**: `rclone sync` によるミラー転送
 - **単一ウィンドウの設定画面**: メニューバー（Mac）／タスクトレイ（Windows）に常駐し、Settings画面から設定・状態確認・Google Drive接続をすべて行えます
+- **OS標準のファイル監視 + 定期フルスキャン**: 常駐プロセスとして、変更検出を軽量化しつつ、監視の取りこぼしも定期フルスキャンで補います
 - **Git / rclone 自動インストール**: 未インストールでもSettings画面のボタンから自動取得できます（いつ・どちらが必要かは後述）
 - **単一バイナリ / .app バンドル動作**: Go言語で実装されており追加ランタイム不要
 
 ## 動作環境
 
 - **macOS**（Apple Silicon）または **Windows 10/11**
-- すでに iCloud Drive 上で使っている（または使う予定の）Obsidian Vault
-- Google アカウント（Google Driveへのバックアップに使用）
+- Obsidian Vault（新規でも、既存のものでも可）
+- Google アカウント（PC間の同期・バックアップに使用）
+- iPhone/iPadとも同期したい場合のみ、iCloud（WindowsではiCloud for Windows）が必要です
 - Git・rcloneは事前インストール不要です（後述の手順内でアプリが自動的にインストールを案内します）
 
-iPhone/iPad側は追加インストール不要です。iCloud同期のみで完結します。
+iPhone/iPad側は追加インストール不要です。iCloud Bridge経由の同期のみで完結します。
+
+### なぜVaultをiCloudの外に置くのか
+
+ObsidianがVaultファイルへ直接書き込むのと、iCloudの内部デーモンによる同期・独自コンフリクト処理が、同じファイルに対して同時に働き得ることが分かっています。データが失われることはありませんが（iCloud側はオフライン分岐時に両方のバージョンを「ファイル名 2.md」のような別名で保持します）、このアプリの3-way mergeとは別に、意図しない重複ファイルが残る可能性があります。詳しい経緯は [unitevault-spec.md](unitevault-spec.md) の1.6.1節・3.6.1.6節を参照してください。
 
 ---
 
@@ -59,9 +64,21 @@ iPhone/iPad側は追加インストール不要です。iCloud同期のみで完
 
 ### 4. Obsidian Vaultを指定
 
-「Obsidian Vault」セクションの **[ Select Folder... ]** ボタンから、iCloud Drive上のObsidian Vaultフォルダを選択します（OS標準のフォルダ選択ダイアログが開きます）。
+**新規にVaultを作る場合、または既にローカルフォルダでVaultを使っている場合：**
 
-> Windowsで、Vaultをこの端末とMac/iPhone/iPad間でも共有したい場合は、事前に「iCloud for Windows」をインストールし、Vaultフォルダを iCloud Drive 配下に置いてください。「Status」セクションの **[ Install iCloud... ]** ボタンから自動インストールできます（インストール後にiCloudアプリが自動起動するので、Apple IDでサインインし、iCloud Driveを有効にしてください。サインイン自体は自動化できません）。
+「Obsidian Vault」セクションの **[ Select Folder... ]** ボタンから、Vaultフォルダを選択します（OS標準のフォルダ選択ダイアログが開きます）。特にこだわりがなければ `~/ObsidianVault`（Windowsは `%USERPROFILE%\ObsidianVault`）を新規作成して選ぶのがおすすめです。
+
+**既存のVaultをiCloud Drive上で使っている場合：**
+
+「Obsidian Vault」セクションの **[ Migrate Vault to Local Folder... ]** ボタンを押します。既存のVaultフォルダを選ぶと、以下を自動で行います。
+
+1. Vaultフォルダをローカル専用フォルダ（`~/<選択したフォルダ名>`）へ移動
+2. Obsidian自身のVault一覧（`obsidian.json`）をベストエフォートで更新（次回Obsidianを開くと新しい場所が自動的に開きます。失敗した場合はObsidianから手動で開き直すよう案内が出ます）
+3. iCloud Driveが検出できれば、`<iCloud Drive>/Obsidian/<フォルダ名>` へ内容をシードコピーし、以降iPhone/iPadとの橋渡し（iCloud Bridge）として継続的に同期される状態にする
+
+既に設定済みの端末を起動した際、Vaultパスが今もiCloud Drive配下にあると検出された場合は、この移行を提案するダイアログが自動的に表示されます（「Don't Show This Again」でいつでも非表示にできます）。
+
+> iPhone/iPadを使わない場合は、上記3の手順は自動的にスキップされます（iCloud Driveが検出できない、またはVaultが元々ローカルフォルダの場合）。
 
 ### 5. Google Driveへの接続
 
@@ -80,33 +97,38 @@ Remote Name・Sync Interval はデフォルト値のままで問題ありませ�
 **[ Save Settings ]** を押します。自動的に以下が行われます。
 
 - 設定の保存
-- **Primary / Secondary の自動判定**: Google Drive上に他端末の初期化情報（`PRIMARY_MARKER.json`）が無ければこの端末が Primary（同期エンジン実行・Google Drive転送を担当）、既にあれば Secondary（編集のみ）になります。手動で選ぶ必要はありません。
+- **Primary / Secondary の自動判定**: Google Drive上に他端末の初期化情報（`PRIMARY_MARKER.json`）が無ければこの端末が Primary（マージ処理・Google Drive/iCloud Bridge同期を担当）、既にあれば Secondary（編集＋Google Driveへの変更のpush/pullのみ）になります。手動で選ぶ必要はありません。
 
-保存が完了すると要約ダイアログが表示され、Settingsウィンドウは閉じます。以降はバックグラウンドで自動的に同期サイクル（デフォルト120秒間隔）が実行されます。
+保存が完了すると要約ダイアログが表示され、Settingsウィンドウは閉じます。以降はバックグラウンドで自動的に同期サイクル（デフォルト60秒間隔の共通ティック）が実行されます。Primaryの場合、Google Drive同期とiCloud Bridge同期は同じティックで両方実行されるのではなく、両方設定されていればティックごとに交互に1つずつ実行されます（実効間隔はおよそこの値の2倍）。片方だけ設定されていれば毎ティック実行されます。
 
 ### 7. 日常的な使い方
 
 メニューバー／タスクトレイのメニュー項目：
 
-- **Status: ...**: 現在の状態（`Not Initialized` / `Active (primary)` / `Syncing...` / `Error (...)`）
+- **Status: ...**: 現在の状態（`Not Initialized` / `Active (primary)` / `Syncing...` / `Conflict` / `Error (...)`）
 - **Sync Now**: 次の定期実行を待たずに即座に同期を1回実行
 - **Settings...**: 設定の確認・変更
 - **Check for Update...**: 新しいバージョンがGitHub Releasesに公開されていないか確認し、あればダウンロード・自動適用・再起動まで行う（下記参照）
 - **Quit UniteVault**: 終了
 
-Primary端末（基本的にMac、または最初にセットアップした端末）は、他端末の変更をマージしてGoogle Driveへ反映する役割を担うため、**定期的に起動しておく**ことを推奨します（起動していない間の他端末の変更は、Primaryが次に起動するまで反映されません）。
+Primary端末（最初にセットアップした端末がなりますが、Settingsから他の端末へ手動で引き継ぐこともできます）は、他端末の変更をマージしてGoogle Drive・iCloud Bridgeへ反映する役割を担うため、**定期的に起動しておく**ことを推奨します（起動していない間の他端末の変更は、Primaryが次に起動するまで反映されません）。
 
-### 8. 2台目以降の端末を追加する
+### 8. 2台目以降のPCを追加する
 
-同じObsidian VaultをiCloud経由で使っている別のMac／Windows機にもUniteVaultをインストールし、手順3〜6を同様に行ってください。Google Drive上に既に `PRIMARY_MARKER.json` が存在するため、自動的に **Secondary** として初期化されます（Vault本体は既にiCloud経由でその端末にも取得済みのものをそのまま使うため、Google Driveから改めてダウンロードすることはありません）。
+追加するPCにもUniteVaultをインストールし、手順3〜6を同様に行ってください。ポイントは以下の通りです。
 
-iPhone/iPadは追加インストール不要（iCloud同期のみ）です。
+- **手順4のVaultフォルダは、新規に空のローカルフォルダを選んでください**（1台目のVault内容をあらかじめ手動でコピーしておく必要はありません）。
+- **手順5では、1台目と同じGoogleアカウント・同じリモート名を使ってください。**
+- 保存すると、Google Drive上に既に `PRIMARY_MARKER.json` が存在するため、自動的に **Secondary** として初期化されます。
+- **Vaultの中身は、最初の同期サイクル（デフォルト最大60秒後、または手動で「Sync Now」を実行）で、Google Driveから自動的に取り込まれます。** 保存直後は空のままなので、少し待つか「Sync Now」を実行してください。
+
+iPhone/iPadは追加インストール不要です。Primary機のiCloud Bridgeフォルダ（`<iCloud Drive>/Obsidian/<フォルダ名>`）が、通常のiCloud同期でiPhone/iPadにも配布されます。
 
 ### 9. Vaultを変更する場合の注意
 
-Google Driveへのバックアップは`rclone sync`（同期先を同期元と完全一致させるミラー転送）で行われます。そのため、**同期するVaultを別のフォルダに切り替える際、Google Drive Target Folder Pathを前と同じにしたままにすると、次回の同期で以前のVaultのバックアップファイルが削除され、新しいVaultの内容で上書きされます**。
+Google Driveへのバックアップ公開は`rclone sync`（同期先を同期元と完全一致させるミラー転送）で行われます。そのため、**同期するVaultを別のフォルダに切り替える際、Google Drive Target Folder Pathを前と同じにしたままにすると、次回の同期で以前のVaultのバックアップファイルが削除され、新しいVaultの内容で上書きされます**。
 
-これを防ぐため、Google Drive Target Folder Pathは選択したVaultフォルダ名を自動的に提案し、Vaultを選び直すたびに追従します（手動で変更した値は上書きされません）。基本的には何もしなくても安全ですが、意図的に同じ保存先を使い続けたい場合を除き、Target Folder Pathがちゃんと新しいVault名になっていることを保存前に確認してください。もし前回保存時と同じVaultパス・同じTarget Folder Pathの組み合わせのままVaultだけ変更して保存しようとすると、警告ダイアログが表示されます。
+これを防ぐため、Google Drive Target Folder Pathは選択したVaultフォルダ名を自動的に提案し、Vaultを選び直すたびに追従します（手動で変更した値は上書きされません）。加えて、**rcloneリモートが設定済みの間はVaultフォルダの変更自体ができません**（Vault Folder Location欄が非アクティブ化され、先にリモートを削除するよう案内が表示されます）。Vaultを変更したい場合は、先に「rclone」セクションの **[ Remove Remote Configuration... ]** でリモートを削除し、Vaultを変更した後、改めてリモートを設定してください。
 
 不要になった過去のバックアップフォルダは、Google Drive上で手動削除してください（アプリからは自動削除しません）。
 
@@ -117,7 +139,7 @@ Google Driveへのバックアップは`rclone sync`（同期先を同期元と�
 Settingsウィンドウの「Status」セクションから、それぞれ未インストールの場合はワンクリックでインストールできます（自動インストールに失敗した場合は公式ダウンロードページへの案内が表示されます）。ただし、実際に必要となる条件は異なります。
 
 - **Git**: 編集端末が **2台以上** あり、同じファイルが競合編集された場合の自動マージにのみ使われます。**Windows/Mac 1台だけでObsidianを使い、Google Driveへバックアップするだけ**であれば、Gitは一度も使われません。ただし将来的に端末を追加する可能性に備え、初回セットアップ時にインストールしておくことを推奨します（未インストールのままでも動作は継続できます）。
-- **rclone**: Google Driveへのバックアップに必須です。加えて、複数端末構成では上記の Primary/Secondary 判定にも使われるため、**バックアップ機能を使わない「同期のみ」構成は現状サポートしていません**。
+- **rclone**: Google Driveへのバックアップ・PC間同期の両方に必須です。加えて、複数端末構成では上記の Primary/Secondary 判定にも使われるため、**バックアップ機能を使わない「同期のみ」構成は現状サポートしていません**。SecondaryにとってGoogle Driveは他端末の変更を受け取る唯一の経路であるため、未設定のままだとSettings画面に **⚠ Google Drive not configured** という警告が表示されます。
 
 詳細な設計根拠は [unitevault-spec.md](unitevault-spec.md) の3.6.3.1節を参照してください。
 
@@ -136,19 +158,21 @@ Settingsウィンドウの「Status」セクションから、それぞれ未イ
 ## トラブルシューティング
 
 - **Git/rcloneのインストールを促すダイアログが毎回出る**: 未初期化のままGit/rcloneが未検出の場合、起動のたびに案内ダイアログが表示されます。表示不要な場合は「Don't show this again」にチェックを入れてください。
+- **「Move Your Vault Out of iCloud Drive?」ダイアログが出る**: 現在のVaultパスがiCloud Drive配下にあると検出されました。「Migrate Now」で自動移行するか、「Don't Show This Again」で今後表示しないようにできます（手順4参照）。
+- **Secondaryとして追加した端末でVaultが空のまま**: 最初の同期サイクル（デフォルト最大60秒）を待つか、メニューの「Sync Now」を実行してください（手順8参照）。
 - **設定をやり直したい**: Settingsウィンドウ内の **[ Reset Configuration ]** ボタンから、ローカルの設定・端末役割情報をクリアして初期状態に戻せます（誤操作防止のため、タスクトレイメニューには配置していません）。
 - **Google Driveの接続をやり直したい（別のGoogleアカウントに変更したい等）**: rcloneセクションの **[ Remove Remote Configuration... ]** ボタン（リモートが設定済みの場合のみ表示）から、確認の上でrclone側の認証情報を削除できます。Google Drive上のバックアップファイル自体は削除されません。削除後、改めて **[ Configure Google Drive Remote... ]** から設定し直せます。
 - **タスクトレイ／メニューバーが「Status: Conflict」と表示される**: 複数端末が同じファイルの同じ箇所を編集した（自動マージできない、真の競合）か、複数端末が同時にPrimaryだと判断している状態です。Settingsウィンドウの **Status** セクションに表示される **[ Resolve Conflicts... ]** または **[ Promote to Primary... ]** ボタンから解決できます。ファイル競合は、Obsidian上で該当ファイルを直接開いて手動でコンフリクトマーカー（`<<<<<<<`等）を編集・削除しても解決できます。
 - **ローカルの設定・ログの保存場所**:
-  - Mac: `~/.unitevault/`（`config.json`, `device_id`, `role`, `engine.log`）
+  - Mac: `~/.unitevault/`（`config.json`, `device_id`, `role`, `engine.log` 等）
   - Windows: `%APPDATA%\unitevault\`
-- 同期の詳しい仕組み（変更検出・競合解決ルール・Primary/Secondary判定など）は [unitevault-spec.md](unitevault-spec.md) を参照してください。
+- 同期の詳しい仕組み（変更検出・競合解決ルール・Primary/Secondary判定・アーキテクチャ全体など）は [unitevault-spec.md](unitevault-spec.md) を参照してください。
 
 ---
 
 ## 上級者向け：CLIでの利用
 
-GUIを使わず、`cron` やタスクスケジューラなど自動化された環境で動かしたい場合は、CLIサブコマンドも利用できます（GUIと同じローカル設定ファイルを共有します）。
+GUIを使わず、常駐デーモンとして手動で動かしたい場合は、CLIサブコマンドも利用できます（GUIと同じローカル設定ファイルを共有します）。
 
 ```bash
 # 初期化（Vaultパス・Google Driveリモートを指定して初期化）
@@ -157,7 +181,7 @@ GUIを使わず、`cron` やタスクスケジューラなど自動化された�
 # 同期サイクルを1回だけ実行
 ./unitevault run --once
 
-# 常駐デーモンとして定期実行（デフォルトの動作）
+# 常駐デーモンとして定期実行（デフォルトの動作。OS標準のファイル監視も有効）
 ./unitevault run
 
 # 現在の端末ID・役割・設定を確認
