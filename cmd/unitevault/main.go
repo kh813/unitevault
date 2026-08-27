@@ -166,6 +166,7 @@ func runTrayMode() {
 	mSyncNow := fyne.NewMenuItem(lang.L("Sync Now"), nil)
 	mSettings := fyne.NewMenuItem(lang.L("Settings..."), nil)
 	mCheckUpdate := fyne.NewMenuItem(lang.L("Check for Update..."), nil)
+	mAbout := fyne.NewMenuItem(lang.L("About UniteVault..."), nil)
 	mQuit := fyne.NewMenuItem(lang.L("Quit UniteVault"), nil)
 	mQuit.IsQuit = true
 
@@ -179,6 +180,7 @@ func runTrayMode() {
 		mSyncNow,
 		mSettings,
 		mCheckUpdate,
+		mAbout,
 		fyne.NewMenuItemSeparator(),
 		mQuit,
 	)
@@ -188,6 +190,9 @@ func runTrayMode() {
 	mSyncNow.Action = func() { go t.syncNow() }
 	mSettings.Action = func() { t.openSettingsGUI() }
 	mCheckUpdate.Action = func() { go t.checkForUpdate() }
+	mAbout.Action = func() {
+		gui.Info(lang.L("About UniteVault"), lang.L("UniteVault v{{.Version}}", map[string]string{"Version": bootstrap.AppVersion}))
+	}
 	mQuit.Action = func() {
 		cancel()
 		gui.Quit()
@@ -550,7 +555,7 @@ func (t *trayApp) performReset() {
 			if idErr == nil && othersErr == nil && len(others) > 0 {
 				gui.ConfirmDanger(
 					lang.L("Other Devices Use This Vault"),
-					lang.L("This device is Primary, and at least one other device appears to share this Vault via iCloud.\n\nResetting this device stops it backing up the shared Vault to Google Drive until another device takes over via \"Promote to Primary...\".\n\nContinue resetting anyway?"),
+					lang.L("This device is Primary, and at least one other device appears to share this Vault.\n\nResetting this device stops it syncing the shared Vault via Google Drive until another device takes over via \"Promote to Primary...\".\n\nContinue resetting anyway?"),
 					func(confirmed bool) {
 						if confirmed {
 							t.performResetConfirmed()
@@ -979,6 +984,35 @@ func (t *trayApp) removeRemote(current gui.SettingsFormData) {
 		return
 	}
 
+	// Same reasoning as performReset's multi-device warning (spec 3.6.1.5):
+	// removing the remote on a Primary stops Google Drive sync for the
+	// shared Vault - both this device's own publish and every Secondary's
+	// push/pull (spec 1.6.4) - until it's reconfigured or another device
+	// takes over via "Promote to Primary...".
+	if role, _ := t.cfgMgr.LoadRole(); role == "primary" {
+		if cfg, err := t.cfgMgr.LoadConfig(); err == nil && cfg != nil && cfg.VaultPath != "" {
+			deviceID, idErr := t.cfgMgr.GetDeviceID()
+			others, othersErr := knownActiveOtherDevices(cfg.VaultPath, deviceID)
+			if idErr == nil && othersErr == nil && len(others) > 0 {
+				gui.ConfirmDanger(
+					lang.L("Other Devices Use This Vault"),
+					lang.L("This device is Primary, and at least one other device appears to share this Vault.\n\nRemoving the Google Drive remote stops this device syncing the shared Vault (publishing merged changes, and receiving other devices' changes) until it's reconfigured.\n\nContinue removing the remote anyway?"),
+					func(confirmed bool) {
+						if confirmed {
+							t.removeRemoteConfirmed(current, remoteName)
+						}
+					},
+				)
+				return
+			}
+		}
+	}
+	t.removeRemoteConfirmed(current, remoteName)
+}
+
+// removeRemoteConfirmed does the actual work of removeRemote, once any
+// multi-device warning has been confirmed (or didn't apply).
+func (t *trayApp) removeRemoteConfirmed(current gui.SettingsFormData, remoteName string) {
 	gui.ConfirmDanger(
 		lang.L("Remove rclone Remote"),
 		lang.L(
@@ -1304,10 +1338,10 @@ func (t *trayApp) saveSettings(data gui.SettingsFormData) {
 	}
 
 	// Changing this device's Vault folder only ever affects this device -
-	// any other device sharing this Vault via iCloud keeps syncing the old
-	// folder regardless. If this device is Primary, changing away also
-	// means it stops backing up the *shared* Vault to Google Drive (another
-	// device can take over via "Promote to Primary..."). Warn (rather than
+	// any other device sharing this Vault keeps syncing the old folder
+	// regardless. If this device is Primary, changing away also means it
+	// stops syncing the *shared* Vault via Google Drive (another device
+	// can take over via "Promote to Primary..."). Warn (rather than
 	// block outright) since knownActiveOtherDevices is a heuristic, not a
 	// liveness check - it can't tell "another device is actively editing
 	// this Vault right now" from "one was, a long time ago, and nobody ever
@@ -1319,7 +1353,7 @@ func (t *trayApp) saveSettings(data gui.SettingsFormData) {
 			if idErr == nil && othersErr == nil && len(others) > 0 {
 				gui.ConfirmDanger(
 					lang.L("Other Devices Use This Vault"),
-					lang.L("This device is Primary, and at least one other device appears to share this Vault via iCloud.\n\nChanging the Vault folder here only affects this device - other devices will keep syncing the current folder, and this device will stop backing up the shared Vault to Google Drive (another device can take over via \"Promote to Primary...\").\n\nContinue changing the Vault folder anyway?"),
+					lang.L("This device is Primary, and at least one other device appears to share this Vault.\n\nChanging the Vault folder here only affects this device - other devices will keep syncing the current folder, and this device will stop syncing the shared Vault via Google Drive (another device can take over via \"Promote to Primary...\").\n\nContinue changing the Vault folder anyway?"),
 					func(confirmed bool) {
 						if confirmed {
 							proceedPastMultiDeviceCheck()

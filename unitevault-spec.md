@@ -522,10 +522,11 @@ Macが故障・引退する等でプライマリを他デバイスに引き継�
 
 **Standalone / Syncingステータス：** 上記の判定により、Primaryが「他に現役のPCが1台もない」と判断できる状態を **Standalone** と呼ぶ（一度も他PCと組んだことがない場合と、過去にいたSecondaryが全てReset Configuration経由で明示的に離脱した場合の両方を含む）。他に現役のPCが1台以上ある状態を **Syncing** と呼ぶ。Settings画面のStatusセクションで、Device roleの表示に `Primary (Standalone)` / `Primary (Syncing)` のように付記される（8.3節）。Standaloneの間は、以下の警告は表示されない（他に影響を受けるPCがいないため）。Secondaryは常に「どこかにPrimaryがいる」ことを前提とするため、常に`Secondary (Syncing)`となり、Standaloneにはなり得ない。
 
-**警告を表示する2つの操作（いずれもPrimaryかつ他に現役のPCがある＝Syncing状態の場合のみ）：**
+**警告を表示する3つの操作（いずれもPrimaryかつ他に現役のPCがある＝Syncing状態の場合のみ）：**
 
-1. **Save Settingsでの Vault フォルダ変更**：確認ダイアログで、他のデバイスには影響しないこと・このデバイスがGoogle Driveバックアップを行わなくなることを説明し、続行するか確認する。
-2. **Reset Configuration**：確認ダイアログで、他のデバイスが引き継ぐまでGoogle Driveバックアップが止まることを説明し、続行するか確認する。
+1. **Save Settingsでの Vault フォルダ変更**：確認ダイアログで、他のデバイスには影響しないこと・このデバイスがGoogle Drive経由の同期を行わなくなることを説明し、続行するか確認する。
+2. **Reset Configuration**：確認ダイアログで、他のデバイスが引き継ぐまでGoogle Drive経由の同期が止まることを説明し、続行するか確認する。
+3. **Remove Remote Configuration...**：確認ダイアログで、再設定するまでこのデバイスが共有Vaultの同期（マージ結果の公開・他デバイスの変更の受信）を停止することを説明し、続行するか確認する。v0.0.48時点まではこの操作にだけ警告が無く、Primary機で他デバイスの存在に気づかないままリモート設定を削除できてしまう抜けがあった。
 
 いずれも `gui.ConfirmDanger` による確認ダイアログであり、ハードブロックはしない（検知がヒューリスティックであるため）。
 
@@ -814,6 +815,10 @@ unitevault/                         ← ソースコードリポジトリ（GitH
   2. **rclone リモート名設定と検証**: テキスト入力ダイアログ（デフォルト: `ObsidianVault`）。入力されたリモート名が `rclone listremotes` に存在しない場合、ダイアログで「新規Rclone設定（デフォルト、GUIのみで完結）」と「既存/カスタムRclone設定（Terminal/PowerShell）」をユーザーに選択させる。「新規Rclone設定」選択時は `rclone config create <remote> drive` を非対話実行して自動的にブラウザでのGoogle認証ページを開き、コマンド操作不要で設定を完了する。「既存/カスタムRclone設定」選択時は Terminal (macOS) や PowerShell (Windows) で `rclone config` を対話起動する。
   3. **Google Drive バックアップ先パス設定**: rclone セクション内のテキスト入力（デフォルト: `VaultBackup`）。
   4. **設定保存とノード初期化**: `config.json` への保存およびノード役割判定（`PRIMARY_MARKER.json`の検証）を自動実行し、完了ダイアログを表示する。
+
+### 8.3.1 バージョン確認（About UniteVault...）
+
+メニューバー／タスクトレイの「About UniteVault...」を選択すると、現在インストールされているバージョン（`bootstrap.AppVersion`）を表示するダイアログが即座に開く（ネットワークアクセスなし）。「Check for Update...」（8.4節）でも最新版と同一の場合にのみ間接的にバージョンが分かるが、ネットワーク接続なしにいつでも現在のバージョンを確認したいというニーズに応えるため、独立した項目として用意する。
 
 ### 8.4 自己アップデート機能
 メニューバー／タスクトレイの「Check for Update...」を選択すると、GitHub Releases（`GET /repos/kh813/unitevault/releases/latest`）から最新版を取得し、現在のバージョン（`bootstrap.AppVersion`）と比較する。バージョン比較はドット区切りの数値として行う（`0.0.9` < `0.0.10` を文字列比較ではなく正しく数値として判定する）。
