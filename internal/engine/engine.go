@@ -100,15 +100,6 @@ func (e *SyncEngine) scanStep(lastRawState *scan.ScanState) (*scan.ScanState, er
 }
 
 func NewSyncEngine(cfgMgr *config.ConfigManager, vaultPath string, label string, driveRunner drive.RcloneRunner) *SyncEngine {
-	// Best-effort, one-time upgrade for a device that ran an older version
-	// of this app before the bookkeeping directory was renamed to a
-	// dot-prefixed name (so Obsidian's file explorer hides it - it isn't
-	// meant to be user-visible or user-edited). Done here, at construction
-	// time, so it's complete before any of this engine's other fields
-	// (which all assume syncdir.Name already exists in its final form) are
-	// ever touched.
-	syncdir.Migrate(vaultPath)
-
 	if driveRunner == nil {
 		driveRunner = drive.NewClient(filepath.Join(vaultPath, syncdir.Name, "engine.log"))
 	}

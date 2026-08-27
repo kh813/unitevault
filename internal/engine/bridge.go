@@ -28,7 +28,6 @@ func bridgeExcluded(slashRel string) bool {
 // step, whenever a bridge path is configured. Returns how many changes
 // were logged (informational only).
 func ScanBridgeAndLog(mainVaultPath, bridgePath, bridgeDeviceID, bridgeLabel string) (int, error) {
-	syncdir.Migrate(bridgePath)
 	bridgeScanner := scan.NewScanner(bridgePath)
 
 	currState, err := bridgeScanner.ScanVault()
@@ -107,7 +106,6 @@ func ScanBridgeAndLog(mainVaultPath, bridgePath, bridgeDeviceID, bridgeLabel str
 // (since it wasn't in the Vault yet either), so it could never stabilize,
 // never get logged, and never actually reach the Vault at all.
 func MirrorVaultToBridge(vaultPath, bridgePath string) error {
-	syncdir.Migrate(bridgePath)
 	if err := os.MkdirAll(bridgePath, 0755); err != nil {
 		return fmt.Errorf("failed to create bridge folder: %w", err)
 	}

@@ -62,13 +62,6 @@ func NewBootstrapper(cfgMgr *config.ConfigManager, runner drive.RcloneRunner) *B
 
 // InitializeNode checks Google Drive for PRIMARY_MARKER.json and sets up primary or secondary role.
 func (b *Bootstrapper) InitializeNode(ctx context.Context, vaultPath, remoteTarget, label string) (string, error) {
-	// Best-effort, one-time upgrade for a device that ran an older version
-	// of this app before the bookkeeping directory was renamed to a
-	// dot-prefixed name (SyncEngine's own constructor does this too, but
-	// this can also be reached directly - e.g. Save Settings - without one
-	// ever having been constructed first).
-	syncdir.Migrate(vaultPath)
-
 	deviceID, err := b.cfgMgr.GetDeviceID()
 	if err != nil {
 		return "", fmt.Errorf("failed to get device ID: %w", err)
