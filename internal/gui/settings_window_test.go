@@ -114,9 +114,9 @@ func TestBuildSettingsContent_FillsDefaults(t *testing.T) {
 		t.Errorf("expected default target path to be the Vault folder name 'vault', got %q", targetEntry.Text)
 	}
 
-	intervalEntry := findEntry(t, content, "600")
-	if intervalEntry.Text != "600" {
-		t.Errorf("expected default interval '600', got %q", intervalEntry.Text)
+	intervalEntry := findEntry(t, content, "60")
+	if intervalEntry.Text != "60" {
+		t.Errorf("expected default interval '60', got %q", intervalEntry.Text)
 	}
 }
 
@@ -169,8 +169,8 @@ func TestBuildSettingsContent_SaveRoundTripsEditedValues(t *testing.T) {
 	if saved.RclonePath != "Backups/Vault" {
 		t.Errorf("expected RclonePath to round-trip, got %q", saved.RclonePath)
 	}
-	if saved.IntervalSeconds != 600 {
-		t.Errorf("expected default IntervalSeconds 600, got %d", saved.IntervalSeconds)
+	if saved.IntervalSeconds != 60 {
+		t.Errorf("expected default IntervalSeconds 60, got %d", saved.IntervalSeconds)
 	}
 }
 

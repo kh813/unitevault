@@ -287,6 +287,109 @@ func TestSyncEngine_RunCycle_Primary_PullsSyncFolderBeforePublishing(t *testing.
 	}
 }
 
+// TestSyncEngine_RunCycle_Primary_AlternatesExternalSyncTasks guards spec
+// 1.6.5: when both Google Drive and the iCloud Bridge are configured, a
+// Primary must round-robin between them one per tick - never both within
+// the same RunCycle - so the Drive sync publish and the Bridge mirror are
+// mutually exclusive across a sequence of cycles.
+func TestSyncEngine_RunCycle_Primary_AlternatesExternalSyncTasks(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	bridgePath := filepath.Join(tempDir, "Bridge")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:        vaultPath,
+		RcloneRemote:     "ObsidianVault",
+		RclonePath:       "MyVault",
+		ICloudBridgePath: bridgePath,
+	})
+	deviceID, _ := cfgMgr.GetDeviceID()
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", deviceID, "mac-test")
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	ctx := context.Background()
+
+	// Cycle 1: Drive gets the first turn.
+	if err := eng.RunCycle(ctx); err != nil {
+		t.Fatalf("RunCycle 1 failed: %v", err)
+	}
+	if !mock.syncCalled {
+		t.Error("expected cycle 1 (Drive's turn) to call the Drive sync publish")
+	}
+	if _, err := os.Stat(bridgePath); !os.IsNotExist(err) {
+		t.Errorf("expected the Bridge folder to not exist yet after cycle 1 (Drive's turn), stat err = %v", err)
+	}
+
+	// Cycle 2: Bridge gets the turn instead.
+	mock.syncCalled = false
+	if err := eng.RunCycle(ctx); err != nil {
+		t.Fatalf("RunCycle 2 failed: %v", err)
+	}
+	if mock.syncCalled {
+		t.Error("expected cycle 2 (Bridge's turn) to skip the Drive sync publish")
+	}
+	if _, err := os.Stat(bridgePath); err != nil {
+		t.Errorf("expected cycle 2 (Bridge's turn) to mirror the Vault into the Bridge folder, stat err = %v", err)
+	}
+
+	// Cycle 3: back to Drive - remove the Bridge folder first so a mirror
+	// happening again this cycle (a bug) would be unambiguous.
+	mock.syncCalled = false
+	if err := os.RemoveAll(bridgePath); err != nil {
+		t.Fatalf("RemoveAll failed: %v", err)
+	}
+	if err := eng.RunCycle(ctx); err != nil {
+		t.Fatalf("RunCycle 3 failed: %v", err)
+	}
+	if !mock.syncCalled {
+		t.Error("expected cycle 3 (Drive's turn again) to call the Drive sync publish")
+	}
+	if _, err := os.Stat(bridgePath); !os.IsNotExist(err) {
+		t.Errorf("expected cycle 3 (Drive's turn) to leave the just-removed Bridge folder untouched, stat err = %v", err)
+	}
+}
+
+// TestSyncEngine_RunCycle_Primary_SingleExternalTaskRunsEveryTick guards
+// against the alternation logic accidentally throttling the common case
+// where only one external destination is configured - spec 1.6.5 says that
+// destination should still get every tick, exactly like before alternation
+// existed.
+func TestSyncEngine_RunCycle_Primary_SingleExternalTaskRunsEveryTick(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:    vaultPath,
+		RcloneRemote: "ObsidianVault",
+		RclonePath:   "MyVault",
+	})
+	deviceID, _ := cfgMgr.GetDeviceID()
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", deviceID, "mac-test")
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		mock.syncCalled = false
+		if err := eng.RunCycle(ctx); err != nil {
+			t.Fatalf("RunCycle %d failed: %v", i+1, err)
+		}
+		if !mock.syncCalled {
+			t.Errorf("expected cycle %d to call the Drive sync publish (the only configured destination)", i+1)
+		}
+	}
+}
+
 // TestSyncEngine_RunCycle_Secondary_PushesAndPullsViaCopy guards spec
 // 1.6.4: a Secondary must push its own _sync/ (never the whole Vault) via
 // additive `rclone copy`, then pull down whatever Primary already

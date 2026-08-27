@@ -233,13 +233,13 @@
 
 **残る既知の制約（v1）：** 直近の未確定（デバウンス未安定）なローカル編集が、稀にpullによって上書きされる可能性がある（Obsidianが実際に編集中のVaultフォルダに対して破壊的な`sync`は使わない、という安全側の判断による）。マニフェスト方式も、極端に速い削除と極端に遅い往復が重なるような稀なケースまでは保証しない（ヒューリスティック）。複数Secondaryが同時にpushした場合の競合解消は、Primary側の固定ハブ方式によるマージで扱われる想定だが、実機での検証はまだ行っていない。
 
-### Phase 17：交互スケジューリングの実装
+### Phase 17：交互スケジューリングの実装（実装済み）
 
-- [ ] 60秒ティックの共通デーモンループ：毎ティックでローカルスキャン・ログ記録・（Primaryのみ）マージを実行
-- [ ] 外部同期タスク（Google Drive同期・iCloud Bridge同期）をリストとして持ち、ティックごとに順番に1つずつ実行するラウンドロビン方式（Google Driveが未設定 or iCloud Bridgeが未設定の場合はそのタスクをリストから除外する）
-- [ ] 各外部同期の失敗時リトライ方針を3.5.1節の指数バックオフ方針に合わせて見直す
-- [ ] Settings画面の「Sync Interval」表示・設定項目を新モデルに合わせて更新（表記・デフォルト値の見直し）
-- [ ] **コンパイル確認**
+- [x] 60秒ティックの共通デーモンループ：`config.DefaultIntervalSeconds`を600→60に変更。毎ティック、ローカルスキャン・ログ記録・（Primaryのみ）マージは常に実行する（変更なし、元から毎回実行）
+- [x] 外部同期タスク（Google Drive同期・iCloud Bridge同期）をリストとして持ち、ティックごとに順番に1つずつ実行するラウンドロビン方式（`internal/engine/engine.go`の`primaryExternalTasks`・`SyncEngine.tickIndex`）。Google Driveが未設定 or iCloud Bridgeが未設定の場合はそのタスクをリストから除外し、設定されているのが1つだけなら毎ティックそれが実行される（元の動作と同じ）。Secondary側はもともと外部同期先がGoogle Driveの1つだけ（Bridgeを持つのはPrimaryのみ）なので、変更なし。
+- [x] 各外部同期の失敗時リトライ方針：`internal/drive.Client.executeWithRetry`が既に3.5.1節の指数バックオフ（30秒→2分→10分）をGoogle Driveの`Sync`/`Copy`双方に適用済みであることを確認。iCloud Bridgeはローカルファイルシステム操作（ネットワークを介さない）のためリトライ対象外のままとする。
+- [x] Settings画面の「Sync Interval」表示・設定項目を新モデルに合わせて更新：デフォルト値を600→60に変更（`internal/gui/settings_window.go`の2箇所のフォールバック値）。両方設定時は交互実行のため実効間隔がおよそ2倍になる旨のヒント文言を追加（`internal/gui/translations/ja.json`に日本語訳も追加）。
+- [x] **コンパイル確認・フルテスト**：`go build ./...` → `go vet ./...` → `go test ./...`、Windowsクロスコンパイル確認、いずれも成功。単体テストは`internal/engine/engine_test.go`の`TestSyncEngine_RunCycle_Primary_AlternatesExternalSyncTasks`（3サイクル通してDrive→Bridge→Driveと交互に実行されること）・`TestSyncEngine_RunCycle_Primary_SingleExternalTaskRunsEveryTick`（1つしか設定されていない場合は毎ティック実行されること）を追加。
 
 **OS標準のファイル監視（実装済み。上記の交互スケジューリング本体とは別の依頼として先行実装）：** 常時起動のトレイ/メニューバー・プロセスに変わったことを踏まえ（元々cronベースだった頃はOS監視を採用しない理由になっていた前提が変わった、3.3.0節参照）、`internal/watch`パッケージを新設。`fsnotify`（Fyne経由で既に間接依存として存在、v1.9.0）をラップし、Vaultフォルダ（`_sync/`は除外）を再帰的に監視、新規サブディレクトリも動的に監視対象へ追加する。あくまで「フルスキャンを置き換えない、ベストエフォートのヒント」という位置付け（クラウド同期フォルダ、特にiCloud Bridgeでは監視イベントの取りこぼしが起こり得るため、Bridge側は引き続きポーリング/フルスキャン方式のまま、`Watcher`には接続していない）。
 

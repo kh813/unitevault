@@ -34,6 +34,36 @@ type SyncEngine struct {
 
 	watcher    *watch.Watcher
 	cycleCount int
+	tickIndex  int
+}
+
+// externalSyncTask identifies one of the external sync destinations a
+// Primary device round-robins across, one per tick (spec 1.6.5). Google
+// Drive and the iCloud Bridge are deliberately never both synced within the
+// same RunCycle when both are configured - each instead gets roughly every
+// other tick, while whichever one is the *only* one configured gets every
+// tick (see primaryExternalTasks).
+type externalSyncTask int
+
+const (
+	taskDrive externalSyncTask = iota
+	taskBridge
+)
+
+// primaryExternalTasks returns, in a stable order, the external sync tasks
+// a Primary device currently has enough configuration to actually run -
+// only these ever get a turn in RunCycle's round robin, so an unconfigured
+// destination is never selected and simply never runs (matching the old,
+// pre-alternation behavior for the single-destination case).
+func primaryExternalTasks(cfg *config.Config) []externalSyncTask {
+	var tasks []externalSyncTask
+	if cfg.RcloneRemote != "" && cfg.RclonePath != "" {
+		tasks = append(tasks, taskDrive)
+	}
+	if cfg.ICloudBridgePath != "" {
+		tasks = append(tasks, taskBridge)
+	}
+	return tasks
 }
 
 // SetWatcher attaches an OS-level file watcher (spec 1.6.5) that RunCycle
@@ -252,13 +282,29 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		return nil
 	}
 
+	// Primary node: alternate which external sync destination (Google
+	// Drive, iCloud Bridge) gets a turn this tick, round-robin across
+	// whichever are actually configured (spec 1.6.5) - the local
+	// scan/log/merge above and below always runs every tick regardless.
+	// Whichever destination is the *only* one configured still gets every
+	// tick, exactly like the pre-alternation behavior.
+	tasks := primaryExternalTasks(primaryCfg)
+	var task externalSyncTask
+	runningExternalTask := len(tasks) > 0
+	if runningExternalTask {
+		task = tasks[e.tickIndex%len(tasks)]
+		e.tickIndex++
+	}
+	runDrive := runningExternalTask && task == taskDrive
+	runBridge := runningExternalTask && task == taskBridge
+
 	// Primary node: pull every other device's pushed _sync/ (their logs -
 	// spec 1.6.4) from Google Drive before merging, so
 	// mergeAndTrackConflicts can see Secondaries' contributions. Scoped to
 	// _sync/ only, via `rclone copy` (additive), so this can never
 	// overwrite this device's own just-edited Vault content with a stale
 	// Drive copy - only the log entries flow in, not raw files.
-	if primaryCfg.RcloneRemote != "" && primaryCfg.RclonePath != "" {
+	if runDrive {
 		// state/** excluded so this pull can never overwrite Primary's own
 		// scanner bookkeeping with whichever other device pushed last.
 		if err := e.drive.Copy(ctx, remoteTarget+"/_sync", filepath.Join(e.vaultPath, "_sync"), "state/**"); err != nil {
@@ -267,17 +313,20 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	}
 
 	// Primary node: pull in changes from the iCloud Bridge folder (spec
-	// 1.6.3), if one is configured, before merging - best-effort: a
-	// problem with the (optional) Bridge must never block the Google
-	// Drive sync that follows.
-	if primaryCfg.ICloudBridgePath != "" {
+	// 1.6.3), on this destination's turn - best-effort: a problem with the
+	// (optional) Bridge must never block the Google Drive sync that runs
+	// on its own turn.
+	if runBridge {
 		bridgeDeviceID, err := e.cfgMgr.GetOrCreateBridgeDeviceID()
 		if err == nil {
 			_, _ = ScanBridgeAndLog(e.vaultPath, primaryCfg.ICloudBridgePath, bridgeDeviceID, "iCloud Bridge")
 		}
 	}
 
-	// Primary node: Perform 3-way/N-way merges across device logs
+	// Primary node: Perform 3-way/N-way merges across device logs - always
+	// runs every tick, regardless of which (if any) external destination
+	// got a turn, using whatever's currently in _sync/ (freshly pulled
+	// this tick, or carried over from a previous one).
 	latestByPath, err := e.logMgr.LatestEntryByPath()
 	if err != nil {
 		return fmt.Errorf("failed to get latest log entries: %w", err)
@@ -287,18 +336,15 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	}
 
 	// Mirror the merged result back out to the iCloud Bridge folder, so
-	// the next iCloud sync carries it to iPhone/iPad - again best-effort.
-	if primaryCfg.ICloudBridgePath != "" {
+	// the next iCloud sync carries it to iPhone/iPad - again best-effort,
+	// and only on this destination's turn.
+	if runBridge {
 		_ = MirrorVaultToBridge(e.vaultPath, primaryCfg.ICloudBridgePath)
 	}
 
-	// 3. Mirror to Google Drive via rclone sync
-	cfg, err := e.cfgMgr.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config for drive sync: %w", err)
-	}
-
-	if cfg.RcloneRemote != "" && cfg.RclonePath != "" {
+	// 3. Mirror to Google Drive via rclone sync, only on this
+	// destination's turn.
+	if runDrive {
 		// Publish "what should exist" (spec 1.6.4) before the mirror below,
 		// so Secondaries can tell a genuine deletion apart from their own
 		// not-yet-merged local creations despite pulling non-destructively.
@@ -306,7 +352,6 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		// actual Drive sync that follows.
 		_ = PublishManifest(e.vaultPath)
 
-		remoteTarget := fmt.Sprintf("%s:%s", cfg.RcloneRemote, cfg.RclonePath)
 		// /_sync/state/** excluded so Primary's own private scanner
 		// bookkeeping is never published to Drive at all - keeping it
 		// local-only is what lets every other device's pull safely

@@ -103,14 +103,16 @@ iCloud Bridgeフォルダを、**通常のデバイスと同列の「仮想デ�
 
 **重要な補足：`_sync/state/`（3.4.2節、各デバイス専有のスキャナ内部状態）は、どのSync/Copy呼び出しからも`--exclude`で常に除外する。** これを怠ると、あるデバイスがpushした`_sync/state/`が他デバイスのpull時にそのデバイス自身の内部状態を上書きしてしまい、3.4.2節で修正したのと同種の不具合（デバウンス・変更確定の基準が壊れる）を再発させる。
 
-#### 1.6.5 同期スケジューリング（交互実行方式）
+#### 1.6.5 同期スケジューリング（交互実行方式・実装済み）
 
 外部同期（Google Drive同期・iCloud Bridge同期）は、同時に両方実行するのではなく、**60秒間隔の共通ティックで交互に1つずつ実行する**。
 
-- 毎ティック（60秒ごと）：ローカルスキャン・ログ記録・（Primaryのみ）3-way mergeは常に実行する。
-- 外部同期タスク（Google Drive同期・iCloud Bridge同期）はリストとして持ち、ティックごとに順番に1つずつ実行するラウンドロビン方式にする。設定されていない同期先（iCloud Bridge未設定等）はリストから除外する。
+- 毎ティック（デフォルト60秒ごと、`config.DefaultIntervalSeconds`）：ローカルスキャン・ログ記録・（Primaryのみ）3-way mergeは常に実行する。
+- 外部同期タスク（Google Drive同期・iCloud Bridge同期）はリストとして持ち（`internal/engine.primaryExternalTasks`）、ティックごとに順番に1つずつ実行するラウンドロビン方式にする（`SyncEngine.tickIndex`）。設定されていない同期先（iCloud Bridge未設定等）はリストから除外する。Secondary機はもともとGoogle Driveの1タスクのみ（iCloud Bridgeを持つのはPrimaryのみ）のため、この交互実行の対象外で毎ティック実行される。
 - 結果として、有効な同期先が2つ（Google Drive・iCloud Bridge）ある場合、**それぞれの実効同期間隔は約120秒**になる。Vault内は基本的にMarkdownファイルでデータ量が小さいため、60秒以内に各同期処理が完了する前提は現実的と判断する。
 - 同期先が1つのみ（例：iPhoneを使わずGoogle Driveのみ）の場合は、毎ティック（60秒間隔）でその同期が実行される。
+- 失敗時のリトライは既存の指数バックオフ（3.5.1節、`drive.Client.executeWithRetry`）がGoogle Driveの`Sync`/`Copy`双方に適用済み。iCloud Bridgeはローカルファイルシステム操作のみのため対象外。
+- Settings画面の「Sync Interval (seconds)」は、この共通ティックの間隔を表す（デフォルト60）。両方の外部同期先が設定されている場合は実効間隔がおよそ2倍になる旨のヒントを表示する。
 - **将来のTodo**：Vaultのデータ量・ファイル数に応じて、この間隔を自動調整、またはユーザーへ変更を提案する機能（`unitevault-todo.md`参照）。
 
 #### 1.6.6 変わらない部分

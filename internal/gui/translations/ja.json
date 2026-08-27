@@ -28,6 +28,7 @@
   "Remote Name": "リモート名",
   "Google Drive Target Folder Path": "Google Drive転送先フォルダパス",
   "Sync Interval (seconds)": "同期間隔（秒）",
+  "Local changes are scanned and merged every tick. When both Google Drive and an iCloud Bridge are configured, each one gets a turn on alternating ticks, so its effective interval is roughly double this value.": "ローカルの変更検出・マージは毎ティック実行されます。Google DriveとiCloud Bridgeの両方が設定されている場合、それぞれが交互のティックで実行されるため、実効的な間隔はこの値のおよそ2倍になります。",
   "Advanced Options": "詳細オプション",
   "Configure Google Drive Remote...": "Google Driveリモートを設定...",
   "Remove Remote Configuration...": "リモート設定を削除...",

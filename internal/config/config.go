@@ -311,16 +311,14 @@ func (cm *ConfigManager) SetInstallReminderDismissed() error {
 	return os.WriteFile(cm.InstallReminderDismissedPath(), []byte("1"), 0644)
 }
 
-// DefaultIntervalSeconds is the Google Drive sync interval used whenever
-// nothing else has been configured (spec section 3.4.1). Google Drive
-// backup is a background safety net, not the channel that keeps devices in
-// sync with each other (iCloud handles device-to-device propagation on its
-// own schedule, independent of this interval - spec section 1.3), so a
-// wider default cadence than the original 120s trades a little backup
-// freshness for meaningfully less background rclone/API traffic - which
-// also includes the per-cycle Primary-conflict check added alongside this
-// (see bootstrap.Bootstrapper.VerifyPrimaryStatus).
-const DefaultIntervalSeconds = 600
+// DefaultIntervalSeconds is the RunCycle tick interval used whenever
+// nothing else has been configured (spec 1.6.5). Every tick always runs a
+// local scan/log/(Primary-only) merge, and Primary additionally runs one
+// external sync task (Google Drive, iCloud Bridge) per tick, round-robin
+// across whichever of those are actually configured - so with both
+// configured each individually still effectively syncs roughly every
+// 2*DefaultIntervalSeconds, not every tick.
+const DefaultIntervalSeconds = 60
 
 // LoadConfig reads config.json if present, or returns default values
 func (cm *ConfigManager) LoadConfig() (*Config, error) {

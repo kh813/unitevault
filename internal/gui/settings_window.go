@@ -167,7 +167,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	if data.IntervalSeconds <= 0 {
 		// Mirrors config.DefaultIntervalSeconds - not imported directly to
 		// keep this package independent of internal/config.
-		data.IntervalSeconds = 600
+		data.IntervalSeconds = 60
 	}
 	if data.RcloneRemote == "" {
 		data.RcloneRemote = "ObsidianVault"
@@ -286,13 +286,16 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 
 	// Remote Name / Target Folder Path / Sync Interval all have sensible
 	// defaults that just work (ObsidianVault / the Vault's own folder name /
-	// 600s) - collapsed by default as "Advanced Options" so the common case
+	// 60s) - collapsed by default as "Advanced Options" so the common case
 	// isn't cluttered with fields nobody needs to touch, while still being
 	// one click away for anyone who does want to customize them.
+	intervalHint := widget.NewLabel(lang.L("Local changes are scanned and merged every tick. When both Google Drive and an iCloud Bridge are configured, each one gets a turn on alternating ticks, so its effective interval is roughly double this value."))
+	intervalHint.Wrapping = fyne.TextWrapWord
 	rcloneAdvancedForm := widget.NewForm(
 		widget.NewFormItem(lang.L("Remote Name"), remoteEntry),
 		widget.NewFormItem(lang.L("Google Drive Target Folder Path"), targetPathEntry),
 		widget.NewFormItem(lang.L("Sync Interval (seconds)"), intervalEntry),
+		widget.NewFormItem("", intervalHint),
 	)
 	rcloneAdvanced := widget.NewAccordion(widget.NewAccordionItem(lang.L("Advanced Options"), rcloneAdvancedForm))
 
@@ -303,7 +306,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	currentSnapshot := func() SettingsFormData {
 		sec, err := strconv.Atoi(strings.TrimSpace(intervalEntry.Text))
 		if err != nil || sec <= 0 {
-			sec = 600 // mirrors config.DefaultIntervalSeconds
+			sec = 60 // mirrors config.DefaultIntervalSeconds
 		}
 		return SettingsFormData{
 			GitStatus:              data.GitStatus,
