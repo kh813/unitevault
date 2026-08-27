@@ -90,13 +90,32 @@ func ScanBridgeAndLog(mainVaultPath, bridgePath, bridgeDeviceID, bridgeLabel str
 // (_sync/, on both sides - see bridgeExcluded) is never touched by this
 // mirror, since the Bridge folder's own _sync/ holds ScanBridgeAndLog's
 // independent scan state, not a copy of the Vault's.
+//
+// A deletion is only ever applied to a bridge-side path that
+// ScanBridgeAndLog's own confirmed scan state (Scanner.
+// ConfirmedStateFilePath, loaded fresh here) already knows about - never
+// merely "absent from the Vault". A real, previously-shipped bug came
+// from deleting on that weaker condition alone: a brand new file an
+// iPhone had just created lands in the Bridge folder before Primary's
+// Vault has ever heard of it, and ScanBridgeAndLog needs its own debounce
+// (spec 3.4.1) - normally another whole external-sync-task round-robin
+// turn (spec 1.6.5) - before it's confirmed and merged in. Without this
+// guard, MirrorVaultToBridge ran on that very same still-debouncing turn
+// and deleted the brand new file right back out of the Bridge folder
+// (since it wasn't in the Vault yet either), so it could never stabilize,
+// never get logged, and never actually reach the Vault at all.
 func MirrorVaultToBridge(vaultPath, bridgePath string) error {
 	if err := os.MkdirAll(bridgePath, 0755); err != nil {
 		return fmt.Errorf("failed to create bridge folder: %w", err)
 	}
 
+	bridgeConfirmed, err := scan.NewScanner(bridgePath).LoadConfirmedState()
+	if err != nil {
+		return fmt.Errorf("failed to load bridge confirmed scan state: %w", err)
+	}
+
 	present := make(map[string]bool)
-	err := filepath.Walk(vaultPath, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(vaultPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -149,16 +168,29 @@ func MirrorVaultToBridge(vaultPath, bridgePath string) error {
 		if present[slashRel] {
 			return nil
 		}
-		// No longer in the Vault - remove it from the bridge too (mirror
-		// semantics, matching how rclone sync treats the Vault as the
-		// source of truth for Google Drive).
 		if info.IsDir() {
-			err := os.RemoveAll(path)
-			if err == nil {
-				return filepath.SkipDir
-			}
-			return err
+			// Directories are never tracked in a ScanState (only files
+			// are - see scan.Scanner.ScanVault), so the confirmed-state
+			// guard below can't apply to them directly. Recursing into a
+			// not-yet-vault-known directory and letting the guard protect
+			// each individual file underneath is the safe option; an
+			// empty directory left behind afterward is harmless clutter,
+			// never lost data.
+			return nil
 		}
+		if _, confirmed := bridgeConfirmed.Files[slashRel]; !confirmed {
+			// The bridge's own scanner has never stably observed this
+			// path existing - it may be brand new content still mid-
+			// debounce (see this function's doc comment), so it must
+			// never be deleted on the strength of "absent from the
+			// Vault" alone. Once ScanBridgeAndLog does confirm it, this
+			// guard no longer applies.
+			return nil
+		}
+		// Confirmed as existing before, and no longer in the Vault -
+		// remove it from the bridge too (mirror semantics, matching how
+		// rclone sync treats the Vault as the source of truth for Google
+		// Drive).
 		return os.Remove(path)
 	})
 }

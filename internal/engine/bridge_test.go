@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kh813/unitevault/internal/engine"
+	"github.com/kh813/unitevault/internal/scan"
 	"github.com/kh813/unitevault/internal/syncedlog"
 )
 
@@ -105,6 +106,15 @@ func TestMirrorVaultToBridge_CopiesNewAndChangedFiles(t *testing.T) {
 	}
 }
 
+// TestMirrorVaultToBridge_RemovesFilesDeletedFromVault guards the
+// "propagate a Vault-side deletion out to the Bridge" case - but only once
+// the Bridge's own scanner has actually confirmed the file existed there
+// (matching production: ScanBridgeAndLog always runs before
+// MirrorVaultToBridge in a real cycle, so by the time a deletion would
+// legitimately propagate, the file has necessarily gone through a
+// confirmed scan on some earlier cycle). Confirmed directly here
+// (bypassing the debounce dance), matching the same pattern used by
+// ApplyManifestDeletions' own tests.
 func TestMirrorVaultToBridge_RemovesFilesDeletedFromVault(t *testing.T) {
 	tempDir := t.TempDir()
 	vaultPath := filepath.Join(tempDir, "Vault")
@@ -114,19 +124,60 @@ func TestMirrorVaultToBridge_RemovesFilesDeletedFromVault(t *testing.T) {
 	if err := engine.MirrorVaultToBridge(vaultPath, bridgePath); err != nil {
 		t.Fatalf("MirrorVaultToBridge (first pass) failed: %v", err)
 	}
-	writeFile(t, filepath.Join(bridgePath, "stale.md"), "should be removed")
-	// stale.md exists only in the bridge (imagine it was removed from the
-	// Vault after an earlier mirror) - the next mirror must remove it.
+
+	stalePath := filepath.Join(bridgePath, "stale.md")
+	writeFile(t, stalePath, "should be removed")
+	// stale.md exists only in the bridge (imagine it was mirrored there on
+	// an earlier cycle, then removed from the Vault by another device) -
+	// confirm it as the bridge scanner would have, then the next mirror
+	// must remove it.
+	bridgeScanner := scan.NewScanner(bridgePath)
+	confirmed, err := bridgeScanner.ScanVault()
+	if err != nil {
+		t.Fatalf("ScanVault failed: %v", err)
+	}
+	if err := bridgeScanner.SaveConfirmedState(confirmed); err != nil {
+		t.Fatalf("SaveConfirmedState failed: %v", err)
+	}
 
 	if err := engine.MirrorVaultToBridge(vaultPath, bridgePath); err != nil {
 		t.Fatalf("MirrorVaultToBridge (second pass) failed: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(bridgePath, "stale.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
 		t.Errorf("expected stale.md to be removed from the bridge, stat err = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(bridgePath, "keep.md")); err != nil {
 		t.Errorf("expected keep.md to still be present, got %v", err)
+	}
+}
+
+// TestMirrorVaultToBridge_NeverDeletesAnUnconfirmedNewBridgeFile guards a
+// real, previously-shipped bug: a brand new file appearing in the Bridge
+// folder (as if iCloud had just delivered an iPhone edit) that
+// ScanBridgeAndLog's own debounce hasn't confirmed yet must never be
+// deleted just because the Vault doesn't have it yet either - it hasn't
+// had a chance to be merged in. Deleting it here meant it could never
+// stabilize, never get logged, and never reach the Vault at all.
+func TestMirrorVaultToBridge_NeverDeletesAnUnconfirmedNewBridgeFile(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	bridgePath := filepath.Join(tempDir, "Bridge")
+	if err := os.MkdirAll(vaultPath, 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+
+	newPath := filepath.Join(bridgePath, "from-iphone.md")
+	writeFile(t, newPath, "brand new, not yet confirmed")
+	// Deliberately never confirm it (no ScanBridgeAndLog call) - this is
+	// the "just appeared this cycle, still debouncing" state.
+
+	if err := engine.MirrorVaultToBridge(vaultPath, bridgePath); err != nil {
+		t.Fatalf("MirrorVaultToBridge failed: %v", err)
+	}
+
+	if _, err := os.Stat(newPath); err != nil {
+		t.Errorf("expected the unconfirmed new file to survive untouched, got %v", err)
 	}
 }
 
