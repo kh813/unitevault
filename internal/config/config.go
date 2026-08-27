@@ -98,6 +98,29 @@ func (cm *ConfigManager) RolePath() string {
 	return filepath.Join(cm.configDir, "role")
 }
 
+// ICloudMigrationReminderDismissedPath returns the path to the marker file
+// recording that the user opted out of the "Vault is inside iCloud Drive"
+// migration reminder (spec 1.6.1/1.6.7, unitevault-todo.md Phase 18).
+func (cm *ConfigManager) ICloudMigrationReminderDismissedPath() string {
+	return filepath.Join(cm.configDir, "icloud_migration_reminder_dismissed")
+}
+
+// IsICloudMigrationReminderDismissed reports whether the user previously
+// chose "Don't Show This Again" on the iCloud-Vault migration reminder.
+func (cm *ConfigManager) IsICloudMigrationReminderDismissed() bool {
+	_, err := os.Stat(cm.ICloudMigrationReminderDismissedPath())
+	return err == nil
+}
+
+// SetICloudMigrationReminderDismissed persists that the iCloud-Vault
+// migration reminder should no longer be shown.
+func (cm *ConfigManager) SetICloudMigrationReminderDismissed() error {
+	if err := cm.EnsureDir(); err != nil {
+		return err
+	}
+	return os.WriteFile(cm.ICloudMigrationReminderDismissedPath(), []byte("1"), 0644)
+}
+
 // InstallReminderDismissedPath returns the path to the marker file recording
 // that the user opted out of the "Git/rclone missing" startup reminder.
 func (cm *ConfigManager) InstallReminderDismissedPath() string {
@@ -432,6 +455,7 @@ func (cm *ConfigManager) ResetConfig() error {
 	_ = os.Remove(cm.ConfigPath())
 	_ = os.Remove(cm.RolePath())
 	_ = os.Remove(cm.InstallReminderDismissedPath())
+	_ = os.Remove(cm.ICloudMigrationReminderDismissedPath())
 	_ = os.Remove(cm.DriveSyncStatusPath())
 	_ = os.Remove(cm.PrimaryConflictPath())
 	_ = os.Remove(cm.PendingConflictsPath())

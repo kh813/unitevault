@@ -249,12 +249,12 @@
 - `cmd/unitevault/main.go`：トレイアプリの`runDaemonLoop`、およびCLIの`unitevault run`（`--once`指定時を除く）の両方でWatcherを生成・アタッチし、ループ終了時にクローズ。
 - テストは`internal/watch/watch_test.go`（実ファイルシステムに対する非同期イベント検証、ポーリング待ち）、`internal/scan/scan_test.go`（`ScanPaths`単体）、`internal/engine/engine_test.go`（Watcher接続下でも複数サイクルを通した変更検出が正しく動くこと、1サイクル目はWatcher作成前から存在するファイルも見逃さないこと）。
 
-### Phase 18：既存ユーザーの移行
+### Phase 18：既存ユーザーの移行（実装済み）
 
-- [ ] 起動時、現在のVaultパスがiCloud Drive配下にあると検出した場合の案内ダイアログ（新方式への移行を推奨する旨、手動での移行手順、または自動移行オプション）
-- [ ] 自動移行オプション：新しいローカルVaultフォルダを作成し、既存内容をコピーし、旧iCloud上のVaultフォルダをiCloud Bridge用フォルダとして設定する一連の処理
-- [ ] 移行後、旧`_sync/`ログとの整合性確認（device_id・ログファイルの扱いを実装時に精査）
-- [ ] **コンパイル確認**
+- [x] 起動時、現在のVaultパスがiCloud Drive配下にあると検出した場合の案内ダイアログ（新方式への移行を推奨する旨、手動での移行手順、または自動移行オプション）。`cmd/unitevault/main.go`の`maybeShowICloudMigrationReminder`（`startup()`から、既に設定済みで役割が確定しているデバイスに対してのみ呼ばれる）。検出の中核ロジックは純粋関数`pathIsUnder(root, path)`に切り出し、単体テスト（`TestPathIsUnder`）を追加。「今すぐ移行」「今後表示しない」の2択＋ダイアログ自体のCancel（＝次回起動時にまた聞く）。「今後表示しない」の選択は`config.ConfigManager`の`ICloudMigrationReminderDismissedPath`／`IsICloudMigrationReminderDismissed`／`SetICloudMigrationReminderDismissed`（`IsInstallReminderDismissed`と全く同じパターン）で永続化し、`ResetConfig`でもクリアされる。
+- [x] 自動移行オプション：**Phase 14で実装済みの手動「Migrate Vault to Local Folder...」フロー（`runVaultMigration`）をそのまま再利用**する設計にした（フォルダ選択ダイアログだけをスキップし、`oldPath`は検出済みの現在のVaultパスを使う）。もとの計画にあった「旧iCloud上のVaultフォルダ自体をiCloud Bridge用フォルダとして設定する」という案は採用しなかった——手動フローと処理を分岐させると2つの移行経路が別々の挙動になり分かりにくくなるため、手動フローと同じく「新しいローカル場所へ移動し、iCloud Bridge用には`<iCloud Drive>/Obsidian/<フォルダ名>`へ新規シードコピーする」という一貫した挙動にした。
+- [x] 移行後、旧`_sync/`ログとの整合性確認：**精査の結果、対応不要と判明した。** `device_id`・`role`・`icloud_bridge_device_id`・保留中コンフリクト・Drive同期ステータス等はすべてVaultとは独立したアプリ設定ディレクトリ（`ConfigManager.configDir`、Vault配下ではない）に保存されている。Vault配下の`_sync/`（各デバイスのログ・スキャン状態・マニフェスト）は`bootstrap.MoveVaultFolder`がVaultフォルダ全体をまるごと移動（同一ボリューム内は`rename`、クロスボリュームは再帰コピー＋削除）するため、`_sync/`だけ取り残される・パスが古いままになる、といった不整合は構造上発生しない。ログエントリやスキャン状態はいずれもVaultルートからの相対パスのみを保持しており、絶対パスへの依存もない。
+- [x] **コンパイル確認・フルテスト**：`go build ./...` → `go vet ./...` → `go test ./...`、Windowsクロスコンパイル確認、いずれも成功。
 
 ### Phase 19：ドキュメント・テスト・仕上げ
 

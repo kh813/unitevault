@@ -380,6 +380,32 @@ func TestVaultChangeNeedsRemoteRemoval(t *testing.T) {
 	}
 }
 
+// TestPathIsUnder guards the detection logic behind
+// maybeShowICloudMigrationReminder (spec 1.6.1/1.6.7, Phase 18): whether a
+// configured Vault path sits inside iCloud Drive.
+func TestPathIsUnder(t *testing.T) {
+	cases := []struct {
+		name string
+		root string
+		path string
+		want bool
+	}{
+		{name: "direct child", root: "/Users/me/iCloud Drive", path: "/Users/me/iCloud Drive/Vault", want: true},
+		{name: "nested child", root: "/Users/me/iCloud Drive", path: "/Users/me/iCloud Drive/Obsidian/Vault", want: true},
+		{name: "exactly the root itself", root: "/Users/me/iCloud Drive", path: "/Users/me/iCloud Drive", want: true},
+		{name: "sibling folder, not under root", root: "/Users/me/iCloud Drive", path: "/Users/me/Documents/Vault", want: false},
+		{name: "a folder that merely shares the root's name as a prefix", root: "/Users/me/iCloud Drive", path: "/Users/me/iCloud Drive2/Vault", want: false},
+		{name: "root itself is a subpath of the candidate (reversed nesting)", root: "/Users/me/iCloud Drive/Vault", path: "/Users/me/iCloud Drive", want: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := pathIsUnder(c.root, c.path); got != c.want {
+				t.Errorf("pathIsUnder(%q, %q) = %v, want %v", c.root, c.path, got, c.want)
+			}
+		})
+	}
+}
+
 // TestKnownActiveOtherDevices guards the heuristic behind both
 // MultiDeviceStatus and the Primary-only multi-device warnings (spec
 // 3.6.1.5): a device that never wrote an event doesn't count, the caller's

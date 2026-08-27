@@ -127,6 +127,29 @@ func TestConfigManager_InstallReminderDismissed(t *testing.T) {
 	}
 }
 
+func TestConfigManager_ICloudMigrationReminderDismissed(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := config.NewConfigManagerWithDir(tempDir)
+
+	if cm.IsICloudMigrationReminderDismissed() {
+		t.Fatal("expected reminder to not be dismissed initially")
+	}
+
+	if err := cm.SetICloudMigrationReminderDismissed(); err != nil {
+		t.Fatalf("failed to set iCloud migration reminder dismissed: %v", err)
+	}
+	if !cm.IsICloudMigrationReminderDismissed() {
+		t.Fatal("expected reminder to be dismissed after SetICloudMigrationReminderDismissed")
+	}
+
+	if err := cm.ResetConfig(); err != nil {
+		t.Fatalf("ResetConfig failed: %v", err)
+	}
+	if cm.IsICloudMigrationReminderDismissed() {
+		t.Fatal("expected ResetConfig to clear the iCloud migration reminder dismissal")
+	}
+}
+
 func TestConfigManager_DriveSyncStatus(t *testing.T) {
 	tempDir := t.TempDir()
 	cm := config.NewConfigManagerWithDir(tempDir)

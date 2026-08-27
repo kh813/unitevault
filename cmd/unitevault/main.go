@@ -220,6 +220,7 @@ func (t *trayApp) startup() {
 		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Active"))
 	}
 	t.startDaemonLoop(cfg)
+	t.maybeShowICloudMigrationReminder(cfg)
 }
 
 // startDaemonLoop (re)starts the periodic sync cycle for cfg, first
@@ -280,6 +281,81 @@ func (t *trayApp) maybeShowInstallReminder() {
 			_ = t.cfgMgr.SetInstallReminderDismissed()
 		}
 	})
+}
+
+// maybeShowICloudMigrationReminder nags an already-configured user, once
+// per app launch, if their Vault still sits directly inside iCloud Drive -
+// the legacy pre-1.6 architecture (spec 1.6.1/1.6.7, unitevault-todo.md
+// Phase 18). Silently does nothing once the user has dismissed it, if
+// iCloud Drive can't be located at all, or once the Vault is no longer
+// under it (e.g. after a successful migration - no separate "already
+// migrated" flag is needed, since this check alone naturally stops firing).
+func (t *trayApp) maybeShowICloudMigrationReminder(cfg *config.Config) {
+	if t.cfgMgr.IsICloudMigrationReminderDismissed() {
+		return
+	}
+	icloudRoot, ok := bootstrap.ICloudDriveRoot()
+	if !ok {
+		return
+	}
+	if !pathIsUnder(icloudRoot, cfg.VaultPath) {
+		return
+	}
+
+	gui.ChoiceN(
+		lang.L("Move Your Vault Out of iCloud Drive?"),
+		lang.L(
+			"Your Obsidian Vault is currently stored directly inside iCloud Drive:\n{{.Vault}}\n\nUniteVault now recommends keeping the Vault in a plain local folder instead, with Google Drive as the sync hub between PCs and a separate iCloud Bridge folder just for iPhone/iPad. This avoids the Vault's own files being edited by both Obsidian and iCloud's sync daemon at the same time.\n\nUniteVault can move it for you now, or you can do this later from Settings > \"Migrate Vault to Local Folder...\".",
+			map[string]string{"Vault": cfg.VaultPath},
+		),
+		[]string{lang.L("Migrate Now (Recommended)"), lang.L("Don't Show This Again")},
+		func(choice int) {
+			switch choice {
+			case 1:
+				t.startICloudMigrationReminderMove(cfg.VaultPath)
+			case 2:
+				_ = t.cfgMgr.SetICloudMigrationReminderDismissed()
+			}
+			// choice == 0 (dialog's own Cancel) - ask again next launch.
+		},
+	)
+}
+
+// startICloudMigrationReminderMove confirms and kicks off the same move
+// runVaultMigration performs for the manual "Migrate Vault to Local
+// Folder..." button, but starting from the already-known oldPath (spec
+// 1.6.7) instead of a freshly OS-picked one.
+func (t *trayApp) startICloudMigrationReminderMove(oldPath string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		gui.Info(lang.L("Migration Failed"), lang.L("Could not determine your home folder: {{.Err}}", map[string]string{"Err": err.Error()}))
+		return
+	}
+	newPath := filepath.Join(home, filepath.Base(oldPath))
+
+	cfg, err := t.cfgMgr.LoadConfig()
+	if err != nil || cfg == nil {
+		cfg = &config.Config{}
+	}
+	current := gui.SettingsFormData{
+		VaultPath:       oldPath,
+		RcloneRemote:    cfg.RcloneRemote,
+		RclonePath:      cfg.RclonePath,
+		IntervalSeconds: cfg.IntervalSeconds,
+	}
+
+	gui.ConfirmDanger(
+		lang.L("Migrate Vault"),
+		lang.L(
+			"Move this Vault:\n{{.Old}}\n\nto:\n{{.New}}\n\nUniteVault, Obsidian, and Google Drive sync will all be updated to look for it in the new location. Continue?",
+			map[string]string{"Old": oldPath, "New": newPath},
+		),
+		func(confirmed bool) {
+			if confirmed {
+				t.runVaultMigration(oldPath, newPath, current)
+			}
+		},
+	)
 }
 
 // runDaemonLoop runs the periodic sync cycle until ctx is cancelled (either
@@ -1279,6 +1355,20 @@ func vaultPathChanging(prevCfg *config.Config, data gui.SettingsFormData) bool {
 // requires shelling out.
 func vaultChangeNeedsRemoteRemoval(prevCfg *config.Config, data gui.SettingsFormData) bool {
 	return vaultPathChanging(prevCfg, data) && strings.TrimSpace(prevCfg.RcloneRemote) != ""
+}
+
+// pathIsUnder reports whether path is root itself or somewhere inside it -
+// the precondition behind maybeShowICloudMigrationReminder's "is the Vault
+// inside iCloud Drive" check (spec 1.6.1/1.6.7). filepath.Rel returns a
+// ".."-prefixed (or exactly "..") result for anything outside root, and a
+// plain relative path (including "." for an exact match) for anything at
+// or under it.
+func pathIsUnder(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // knownActiveOtherDevices returns every device (other than selfDeviceID)

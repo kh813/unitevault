@@ -76,7 +76,7 @@ Primary機のみがiCloud Bridgeを持つ（iPhoneとの橋渡しは固定ハブ
 
 #### 1.6.3 iCloud Bridge機構
 
-> **実装状況：** 1.6.7節の「Vault Migration」機能により、iCloud Bridgeフォルダへの**初回シードコピー**（Vault移行時の1回限りのコピー）は実装済み。以下に記す**継続的な双方向同期・マージへの組み込み**は`unitevault-todo.md`のPhase 15として未実装。実装されるまでは、iPhone側でのその後の編集は自動的に本体Vaultへ取り込まれない（初回コピー後、明示的な再同期の手段がまだ無い）。
+> **実装状況：** 実装済み。1.6.7節の「Vault Migration」機能によるiCloud Bridgeフォルダへの初回シードコピーに加え、以下に記す継続的な双方向同期・マージへの組み込み（`unitevault-todo.md`のPhase 15）も実装済み。
 
 iCloud Bridgeフォルダを、**通常のデバイスと同列の「仮想デバイス」**として扱う。具体的には：
 
@@ -132,8 +132,12 @@ iCloud Bridgeフォルダを、**通常のデバイスと同列の「仮想デ�
 2. 移行先を`~/<選択したフォルダ名>`（Windowsは`%USERPROFILE%\<選択したフォルダ名>`）に決定し、確認ダイアログを表示する。
 3. 確認後、フォルダを移行先へ移動する（同一ボリューム内なら`rename`、iCloud Drive等クロスボリュームな場合は再帰コピー後に元フォルダを削除。コピーが失敗した場合は元フォルダを残したまま中断し、データを失わない）。移行先に既にフォルダが存在する場合は、上書き・マージせずエラーで中断する。
 4. Obsidian自身のVault一覧（`obsidian.json`）を、移行元パスに一致するエントリを見つけて移行先パスへ書き換える、ベストエフォート処理を行う（書き換え前に`obsidian.json.bak`としてバックアップを作成する）。該当エントリが見つからない・ファイル形式が想定と異なる等の場合はエラーとして扱い、移行処理自体は中断せず、Obsidian側は手動で開き直すよう案内する。
-5. iCloud Driveが検出できる場合（`~/Library/Mobile Documents/com~apple~CloudDocs`または`%USERPROFILE%\iCloud Drive`が存在する）、移行先の内容を`<iCloud Drive>/Obsidian/<フォルダ名>`へ再帰コピーし、`config.ICloudBridgePath`に記録する。このコピーは**移行時点の1回限りのシード**であり、1.6.3節の通り継続的な同期はまだ実装されていない。
+5. iCloud Driveが検出できる場合（`~/Library/Mobile Documents/com~apple~CloudDocs`または`%USERPROFILE%\iCloud Drive`が存在する）、移行先の内容を`<iCloud Drive>/Obsidian/<フォルダ名>`へ再帰コピーし、`config.ICloudBridgePath`に記録する。このコピー自体は移行時点の1回限りのシードだが、以降は1.6.3節の継続的な双方向同期（実装済み）に引き継がれる。
 6. 移行先パスをVaultパスとして`saveSettingsConfirmed`（既存のSave Settingsと全く同じ処理）へ引き継ぎ、Google Driveリモートが未設定なら設定を促し、初期化（Primary/Secondary判定、初回同期）を行い、常駐同期ループを開始する。
+
+**既存ユーザーへの案内（Phase 18・実装済み）：** 既に設定済みで役割が確定しているデバイスの起動時、`maybeShowICloudMigrationReminder`が現在のVaultパスがiCloud Drive配下（`bootstrap.ICloudDriveRoot()`）にあるかどうかを確認する（`pathIsUnder`。iCloud Driveのルートと単純な文字列prefix一致ではなく、`filepath.Rel`ベースで判定し、「iCloud Drive2」のような紛らわしい兄弟フォルダを誤検出しない）。該当する場合、「今すぐ移行」「今後表示しない」の2択ダイアログを表示する。「今すぐ移行」は上記の手動フローと全く同じ`runVaultMigration`をそのまま呼び出す（フォルダ選択ダイアログだけを、既に分かっている現在のVaultパスに置き換える）。「今後表示しない」は`config.ConfigManager`にマーカーファイルとして永続化し（`Reset Configuration`でクリアされる）、以後の起動では表示しない。ダイアログ自体をキャンセルした場合は永続化せず、次回起動時にまた案内する。移行が完了すればVaultパスがiCloud Drive配下でなくなるため、この検出は自然に発火しなくなる（別途「移行済みフラグ」は持たない）。
+
+**移行前後の`_sync/`整合性について：** `device_id`・役割・iCloud Bridge仮想デバイスID・保留中コンフリクト・Google Drive同期ステータス等は、いずれもVaultフォルダの外側（アプリ自身の設定ディレクトリ）に保存されており、Vaultパスの変更による影響を受けない。Vault配下の`_sync/`（各デバイスのログ・スキャン状態・マニフェスト）は、`MoveVaultFolder`がVaultフォルダ全体をまるごと移動するため、内容ごと新しい場所へそのまま引き継がれる。ログエントリ・スキャン状態はいずれもVaultルートからの相対パスのみを保持しているため、絶対パスの不整合も発生しない。
 
 **安全性：** フォルダの移動・Obsidian設定の書き換えは、いずれも同期サイクル進行中は実行できない（3.5.3節の排他制御を利用）。移動先が既に存在する場合や、移動中のエラーは、元のVaultフォルダを変更しないまま中断する。
 
