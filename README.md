@@ -172,3 +172,7 @@ CLIを使う場合もGitのインストールは事前に必須です（`init`/`
 
 - [unitevault-spec.md](unitevault-spec.md) - 詳細仕様書
 - [unitevault-todo.md](unitevault-todo.md) - 実装ToDoリスト
+
+## ライセンス
+
+[MIT License](LICENSE)です。コードのコピー・改変・再配布・フォークは自由ですが、本ソフトウェアは無保証で提供され、ファイル操作やデータの取り扱いに起因する不具合・損害について作者は一切の責任を負いません。
