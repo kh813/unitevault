@@ -88,14 +88,16 @@ iCloud Bridgeフォルダを、**通常のデバイスと同列の「仮想デ�
 
 この設計により、iPhoneとの橋渡しで新規に書く必要があるコードは「ブリッジフォルダの独立スキャン」と「ミラーの書き戻し」の2点のみで、3-way merge・コンフリクト解決GUI（3.3.2節）はそのまま流用できる。
 
-#### 1.6.4 Google Driveを全PC間の共有ハブとする変更
+#### 1.6.4 Google Driveを全PC間の共有ハブとする変更（実装済み）
 
 これまでGoogle Driveへの転送はPrimaryのみが行う一方向ミラー（3.5節）だったが、新方式ではSecondaryもGoogle Driveへ接続する：
 
-- **Secondary → Google Drive**：自分の`_sync/log-<own-id>.jsonl`と自分が変更したVaultファイルを`rclone copy`（`sync`ではない）でアップロードする。`copy`を使うことで、他デバイス分のファイルやPrimaryが公開した最新のマージ結果を誤って削除してしまうことを防ぐ。
-- **Primary → Google Drive（pull）**：全デバイスの`_sync/`ログを`rclone copy`でローカルへ取得し、3-way mergeを実行する（3.3節）。
-- **Primary → Google Drive（publish）**：マージ後のVault全体を`rclone sync`でGoogle Driveへミラーする（Primaryのみがこの権限を持つ、という固定ハブ方式の既存方針を維持）。
-- **Secondary → Google Drive（pull）**：Primaryが公開した最新のマージ結果を`rclone copy`でローカルへ反映する。
+- **Secondary → Google Drive（push）**：自分の`_sync/`（ログのみ）を`rclone copy`（`sync`ではない）でアップロードする。Vault現物ファイルはpushしない - ログエントリの`diff`フィールドに全文が保存されている（3.4節）ため、Primary側のマージにはログだけで十分であり、余計な現物転送を避けられる。`copy`を使うことで、他デバイス分のファイルやPrimaryが公開した最新のマージ結果を誤って削除してしまうことも防ぐ。
+- **Primary → Google Drive（pull）**：全デバイスの`_sync/`（ログのみ）を`rclone copy`でローカルへ取得してから、3-way mergeを実行する（3.3節）。`_sync/`のみに限定するのは、Vault現物ファイル全体をpullしてしまうと、Primary自身がこのサイクルで既に編集・確定させたVaultファイルを、Google Drive上の古い内容で誤って上書きしてしまうリスクがあるため。
+- **Primary → Google Drive（publish）**：マージ後のVault全体を`rclone sync`でGoogle Driveへミラーする（Primaryのみがこの権限を持つ、という固定ハブ方式の既存方針を維持。変更なし）。
+- **Secondary → Google Drive（pull）**：Primaryが公開した最新のマージ結果（Vault全体）を`rclone copy`でローカルへ反映する。
+
+**既知の制約（v1）：** Secondaryのpullは`copy`（追加・更新のみ）であるため、Primaryが削除したファイルは自動的にはローカルから削除されない。また、直近の未確定（デバウンス未安定）なローカル編集が、稀にこのpullによって上書きされる可能性がある。Obsidianが実際に編集中のVaultフォルダに対して破壊的な`rclone sync`は使わない、という安全側の判断による受け入れ済みの制約とする（`unitevault-todo.md`のPhase 16参照）。
 
 #### 1.6.5 同期スケジューリング（交互実行方式）
 
@@ -316,7 +318,7 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
 
 ### 3.5 Google Driveへのミラー転送
 
-> **注：本節は現行実装（移行前、Primaryのみ一方向ミラー）の内容を記す。** 1.6節の通りGoogle Drive中心アーキテクチャへ移行すると、全PCがGoogle Driveへ接続する双方向の仕組みに変わる（1.6.4節参照）。`unitevault-todo.md`のPhase 16が完了次第、本節を更新する。
+> **注：本節はPrimaryの一方向ミラー（publish）についてのみ記す、部分的に古い内容。** 1.6.4節の通りSecondaryもGoogle Driveへ接続するようになっており（実装済み）、全体像は1.6.4節を参照。本節はPrimaryのpublish部分の詳細（リトライ方針等）としては引き続き有効。
 
 - ツール：rclone（`rclone sync`）
 - 実行タイミング：マージエンジンの処理が完了し、Vault現物ファイルとログの整合性が取れた後

@@ -220,14 +220,16 @@
 
 **重要：この実装の過程で、`internal/scan`の変更検出パイプライン自体に、Phase 15固有ではない、より根本的なバグを発見・修正した（spec 3.4.2節）。** 既存ファイルの編集が、デバウンス方式と組み合わせると正しくログに記録されず（偽の削除が1回記録された後、本来のmodify/createが永久にログに残らない）、これは3-way merge（3.3節）が依存するログ自体の正しさを損なう、Phase 15より深刻な問題だった。`_sync/state/last_scan.json`（デバウンス比較専用）と`_sync/state/last_confirmed_scan.json`（変更検出の比較基準、新設）を分離し、さらに「デバウンス未確定」と「本当の削除」を区別する`ReconcileForDetection`を追加することで解決した。`internal/scan/scan_test.go`に、実際の複数サイクルを通しで検証する回帰テストを追加済み。
 
-### Phase 16：Google Drive同期をSecondaryにも拡張
+### Phase 16：Google Drive同期をSecondaryにも拡張（エンジン部分は実装済み）
 
-- [ ] Secondary機もGoogle Driveリモートの設定を必須にする（Settings画面の案内・バリデーションを更新）
-- [ ] Secondary: 自分の`_sync/log-<own-id>.jsonl`と変更されたVaultファイルをGoogle Driveへ`rclone copy`でアップロード（`sync`ではなく`copy`を使い、リモート側の削除・他デバイス分ファイルの巻き添え削除を防ぐ）
-- [ ] Primary: Google Driveから全デバイスの`_sync/`ログをpull（`rclone copy`でローカルへ）→ 既存のマージ処理 → マージ後のVault全体を`rclone sync`でGoogle Driveへpublish（Primaryのみがミラー転送の権限を持つ、という既存方針を維持）
-- [ ] Secondary側の`rclone copy` pull処理（Primaryが`sync`で公開した最新のマージ結果を取得し、ローカルVaultへ反映）
-- [ ] 複数Secondaryが同時にpushした場合の扱い（既存のPrimary/Secondary固定ハブ方式の範囲内で解決できるはずだが、実装時に再確認）
-- [ ] **コンパイル確認**
+- [ ] Secondary機もGoogle Driveリモートの設定を必須にする（Settings画面の案内・バリデーションを更新）- **未着手**。現状はリモート未設定のSecondaryはDrive関連処理を静かにスキップするだけ（エラーにはならないが、Google Drive経由の反映もされない）
+- [x] Secondary: 自分の`_sync/`（ログ）のみをGoogle Driveへ`rclone copy`でアップロード（`sync`ではなく`copy`を使い、リモート側の削除・他デバイス分ファイルの巻き添え削除を防ぐ）。Vault現物ファイルはpushしない - ログエントリの`diff`フィールドに全文が入っている（3.4節）ため、Primary側のマージにはログだけで十分
+- [x] Primary: Google Driveから全デバイスの`_sync/`（ログのみ、Vault現物は対象外）をpull（`rclone copy`）→ 既存のマージ処理 → マージ後のVault全体を`rclone sync`でGoogle Driveへpublish（Primaryのみがミラー転送の権限を持つ、という既存方針を維持）。`_sync/`のみに限定することで、Primary自身の編集中のVaultファイルがpullで上書きされるリスクを避けている
+- [x] Secondary側の`rclone copy` pull処理（Primaryが`sync`で公開した最新のマージ結果、Vault全体を取得しローカルVaultへ反映）
+- [x] 単体テスト（`internal/engine/engine_test.go`：Secondaryのpush/pull呼び出し内容、リモート未設定時は何もしないこと、Primaryが`_sync/`のみpullしてから既存のpublishを行うこと）
+- [x] **コンパイル確認・フルテスト**
+
+**既知の制約（v1）：** SecondaryのpullはPrimaryが削除したファイルを自動的にはローカルから削除しない（`copy`は追加・更新のみで削除を伝播しない）。また、直近の未確定（デバウンス未安定）なローカル編集が、稀にpullによって上書きされる可能性がある（Obsidianが実際に編集中のVaultフォルダに対して破壊的な`sync`は使わない、という安全側の判断による）。複数Secondaryが同時にpushした場合の競合解消は、Primary側の固定ハブ方式によるマージで扱われる想定だが、実機での検証はまだ行っていない。
 
 ### Phase 17：交互スケジューリングの実装
 

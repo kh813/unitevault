@@ -25,6 +25,11 @@ import (
 type mockDriveRunner struct {
 	remoteFiles map[string][]byte
 	syncCalled  bool
+	copyCalls   []copyCall
+}
+
+type copyCall struct {
+	Src, Dst string
 }
 
 func newMockDriveRunner() *mockDriveRunner {
@@ -36,6 +41,7 @@ func (m *mockDriveRunner) Sync(ctx context.Context, srcPath, remoteTarget string
 	return nil
 }
 func (m *mockDriveRunner) Copy(ctx context.Context, remoteSrc, dstPath string) error {
+	m.copyCalls = append(m.copyCalls, copyCall{Src: remoteSrc, Dst: dstPath})
 	return nil
 }
 func (m *mockDriveRunner) FileExists(ctx context.Context, remoteTargetFile string) (bool, error) {
@@ -225,6 +231,120 @@ func TestSyncEngine_RunCycle_SkipsSyncWhenSupersededByAnotherPrimary(t *testing.
 	}
 	if status != nil {
 		t.Errorf("expected no drive sync status to be recorded when the cycle was skipped, got %+v", status)
+	}
+}
+
+// TestSyncEngine_RunCycle_Primary_PullsSyncFolderBeforePublishing guards
+// spec 1.6.4: before merging, Primary must pull other devices' _sync/
+// (their pushed logs) from Google Drive via the additive `rclone copy` -
+// scoped to _sync/ only, never the whole Vault, so this can never
+// overwrite Primary's own just-edited content with a stale Drive copy.
+// The existing full-Vault `rclone sync` publish must still happen
+// afterward, unchanged.
+func TestSyncEngine_RunCycle_Primary_PullsSyncFolderBeforePublishing(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:       vaultPath,
+		RcloneRemote:    "ObsidianVault",
+		RclonePath:      "MyVault",
+		IntervalSeconds: 120,
+	})
+	deviceID, _ := cfgMgr.GetDeviceID()
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", deviceID, "mac-test")
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	wantPull := copyCall{Src: "ObsidianVault:MyVault/_sync", Dst: filepath.Join(vaultPath, "_sync")}
+	found := false
+	for _, c := range mock.copyCalls {
+		if c == wantPull {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a Copy pull of %+v, got calls %+v", wantPull, mock.copyCalls)
+	}
+	if !mock.syncCalled {
+		t.Error("expected the existing full-Vault rclone sync publish to still happen")
+	}
+}
+
+// TestSyncEngine_RunCycle_Secondary_PushesAndPullsViaCopy guards spec
+// 1.6.4: a Secondary must push its own _sync/ (never the whole Vault) via
+// additive `rclone copy`, then pull down whatever Primary already
+// published - and must never call the destructive `rclone sync` at all
+// (that publish step is Primary-only).
+func TestSyncEngine_RunCycle_Secondary_PushesAndPullsViaCopy(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("secondary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:       vaultPath,
+		RcloneRemote:    "ObsidianVault",
+		RclonePath:      "MyVault",
+		IntervalSeconds: 120,
+	})
+
+	mock := newMockDriveRunner()
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "windows-test", mock)
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	wantPush := copyCall{Src: filepath.Join(vaultPath, "_sync"), Dst: "ObsidianVault:MyVault/_sync"}
+	wantPull := copyCall{Src: "ObsidianVault:MyVault", Dst: vaultPath}
+	var gotPush, gotPull bool
+	for _, c := range mock.copyCalls {
+		if c == wantPush {
+			gotPush = true
+		}
+		if c == wantPull {
+			gotPull = true
+		}
+	}
+	if !gotPush {
+		t.Errorf("expected a Copy push of %+v, got calls %+v", wantPush, mock.copyCalls)
+	}
+	if !gotPull {
+		t.Errorf("expected a Copy pull of %+v, got calls %+v", wantPull, mock.copyCalls)
+	}
+	if mock.syncCalled {
+		t.Error("expected a Secondary to never call the destructive rclone sync publish")
+	}
+}
+
+// TestSyncEngine_RunCycle_Secondary_SkipsDriveWhenRemoteNotConfigured
+// guards against calling out to rclone at all before a remote is set up.
+func TestSyncEngine_RunCycle_Secondary_SkipsDriveWhenRemoteNotConfigured(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("secondary")
+	_ = cfgMgr.SaveConfig(&config.Config{VaultPath: vaultPath, IntervalSeconds: 120})
+
+	mock := newMockDriveRunner()
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "windows-test", mock)
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	if len(mock.copyCalls) != 0 {
+		t.Errorf("expected no Copy calls with no remote configured, got %+v", mock.copyCalls)
 	}
 }
 

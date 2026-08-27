@@ -133,8 +133,36 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		}
 	}
 
-	// Secondary node stops here (only records local log)
+	// Secondary node: push this device's own _sync/ (its log and nothing
+	// else - the log entries already carry full content, spec 3.4, so
+	// there's no need to push raw Vault files too) to Google Drive via
+	// `rclone copy` (additive only, never `sync` - must never delete
+	// anything else already there), then pull down whatever Primary has
+	// already merged and published (spec 1.6.4). Secondary never merges
+	// itself - that's Primary-only.
+	//
+	// Known limitations (v1, see unitevault-todo.md Phase 16): the pull
+	// uses `copy`, not `sync`, so a file Primary has since deleted
+	// upstream won't be removed locally here - and in the narrow window
+	// where a local edit hasn't stabilized/logged yet, this pull could in
+	// principle overwrite it before this device's own next scan ever
+	// captures it. Accepted for now in favor of never risking a
+	// destructive sync against a Vault folder Obsidian may be actively
+	// editing.
 	if role == "secondary" {
+		secondaryCfg, err := e.cfgMgr.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("failed to load config for secondary drive sync: %w", err)
+		}
+		if secondaryCfg.RcloneRemote != "" && secondaryCfg.RclonePath != "" {
+			remoteTarget := fmt.Sprintf("%s:%s", secondaryCfg.RcloneRemote, secondaryCfg.RclonePath)
+			if err := e.drive.Copy(ctx, filepath.Join(e.vaultPath, "_sync"), remoteTarget+"/_sync"); err != nil {
+				return fmt.Errorf("failed to push local changes to Google Drive: %w", err)
+			}
+			if err := e.drive.Copy(ctx, remoteTarget, e.vaultPath); err != nil {
+				return fmt.Errorf("failed to pull latest changes from Google Drive: %w", err)
+			}
+		}
 		return nil
 	}
 
@@ -157,6 +185,18 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	}
 	if !proceed {
 		return nil
+	}
+
+	// Primary node: pull every other device's pushed _sync/ (their logs -
+	// spec 1.6.4) from Google Drive before merging, so
+	// mergeAndTrackConflicts can see Secondaries' contributions. Scoped to
+	// _sync/ only, via `rclone copy` (additive), so this can never
+	// overwrite this device's own just-edited Vault content with a stale
+	// Drive copy - only the log entries flow in, not raw files.
+	if primaryCfg.RcloneRemote != "" && primaryCfg.RclonePath != "" {
+		if err := e.drive.Copy(ctx, remoteTarget+"/_sync", filepath.Join(e.vaultPath, "_sync")); err != nil {
+			return fmt.Errorf("failed to pull other devices' changes from Google Drive: %w", err)
+		}
 	}
 
 	// Primary node: pull in changes from the iCloud Bridge folder (spec
