@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/engine"
+	"github.com/kh813/unitevault/internal/scan"
+	"github.com/kh813/unitevault/internal/syncedlog"
 )
 
 // mockDriveRunner is an in-memory drive.RcloneRunner: FileExists/
@@ -222,5 +225,297 @@ func TestSyncEngine_RunCycle_SkipsSyncWhenSupersededByAnotherPrimary(t *testing.
 	}
 	if status != nil {
 		t.Errorf("expected no drive sync status to be recorded when the cycle was skipped, got %+v", status)
+	}
+}
+
+// TestSyncEngine_RunCycle_AutoMergesNonOverlappingEdits is the regression
+// test for the core merge bug (spec 3.3.1/3.4): without a real
+// reconstructed base, git merge-file reports a conflict for ANY divergent
+// content, even edits to completely different lines. Two devices editing
+// different lines of the same file, from the same base (e.g. one edited
+// offline before syncing - the everyday scenario this app exists for),
+// must auto-merge cleanly with no conflict and no pending conflict shown
+// to the user.
+func TestSyncEngine_RunCycle_AutoMergesNonOverlappingEdits(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:       vaultPath,
+		RcloneRemote:    "ObsidianVault",
+		RclonePath:      "MyVault",
+		IntervalSeconds: 120,
+	})
+	primaryID, _ := cfgMgr.GetDeviceID()
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", primaryID, "mac-test")
+
+	logMgr := syncedlog.NewLogManager(vaultPath)
+	base := "line1\nline2\nline3\nline4\nline5\n"
+	verA := "line1 CHANGED BY A\nline2\nline3\nline4\nline5\n"
+	verB := "line1\nline2\nline3\nline4\nline5 CHANGED BY B\n"
+
+	// Device A created the file, then later edited line 1.
+	if err := logMgr.AppendLogEntry(syncedlog.LogEntry{
+		Device: "dev-a", Label: "mac-a", Seq: 1, Path: "note.md",
+		BaseHash: "", ResultHash: "hash-base", Diff: base, Action: scan.ActionCreate,
+	}); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+	if err := logMgr.AppendLogEntry(syncedlog.LogEntry{
+		Device: "dev-a", Label: "mac-a", Seq: 2, Path: "note.md",
+		BaseHash: "hash-base", ResultHash: "hash-a", Diff: verA, Action: scan.ActionModify,
+	}); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+	// Device B independently edited line 5, from the same base, without
+	// having seen A's edit yet (the offline-editing scenario spec 3.3.1
+	// describes).
+	if err := logMgr.AppendLogEntry(syncedlog.LogEntry{
+		Device: "dev-b", Label: "iphone-b", Seq: 1, Path: "note.md",
+		BaseHash: "hash-base", ResultHash: "hash-b", Diff: verB, Action: scan.ActionModify,
+	}); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(vaultPath, "note.md"))
+	if err != nil {
+		t.Fatalf("failed to read merged file: %v", err)
+	}
+	want := "line1 CHANGED BY A\nline2\nline3\nline4\nline5 CHANGED BY B\n"
+	if string(got) != want {
+		t.Errorf("expected both non-overlapping edits auto-merged:\nwant: %q\ngot:  %q", want, string(got))
+	}
+
+	pending, err := cfgMgr.LoadPendingConflicts()
+	if err != nil {
+		t.Fatalf("LoadPendingConflicts failed: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("expected no pending conflicts for a clean auto-merge, got %+v", pending)
+	}
+}
+
+// TestSyncEngine_RunCycle_RecordsGenuineConflictAsPending is the
+// companion case: two devices editing the SAME line from the same base is
+// a real conflict. RunCycle must not silently record it as resolved (the
+// original bug) - it must show up in pending_conflicts.json with both
+// devices' actual content (never a placeholder string), and the Vault
+// file should still contain the conflict markers so opening it directly
+// in Obsidian shows something meaningful.
+func TestSyncEngine_RunCycle_RecordsGenuineConflictAsPending(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:       vaultPath,
+		RcloneRemote:    "ObsidianVault",
+		RclonePath:      "MyVault",
+		IntervalSeconds: 120,
+	})
+	primaryID, _ := cfgMgr.GetDeviceID()
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", primaryID, "mac-test")
+
+	logMgr := syncedlog.NewLogManager(vaultPath)
+	base := "line1\nline2\nline3\n"
+	verA := "line1 CHANGED BY A\nline2\nline3\n"
+	verB := "line1 CHANGED BY B\nline2\nline3\n"
+
+	if err := logMgr.AppendLogEntry(syncedlog.LogEntry{
+		Device: "dev-a", Label: "mac-a", Seq: 1, Path: "note.md",
+		BaseHash: "", ResultHash: "hash-base", Diff: base, Action: scan.ActionCreate,
+	}); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+	if err := logMgr.AppendLogEntry(syncedlog.LogEntry{
+		Device: "dev-a", Label: "mac-a", Seq: 2, Path: "note.md",
+		BaseHash: "hash-base", ResultHash: "hash-a", Diff: verA, Action: scan.ActionModify,
+	}); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+	if err := logMgr.AppendLogEntry(syncedlog.LogEntry{
+		Device: "dev-b", Label: "iphone-b", Seq: 1, Path: "note.md",
+		BaseHash: "hash-base", ResultHash: "hash-b", Diff: verB, Action: scan.ActionModify,
+	}); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(vaultPath, "note.md"))
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	if !strings.Contains(string(got), "<<<<<<<") {
+		t.Errorf("expected conflict markers left in the Vault file, got %q", string(got))
+	}
+
+	pending, err := cfgMgr.LoadPendingConflicts()
+	if err != nil {
+		t.Fatalf("LoadPendingConflicts failed: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected exactly 1 pending conflict, got %d: %+v", len(pending), pending)
+	}
+	pc := pending[0]
+	if pc.RelPath != "note.md" {
+		t.Errorf("expected pending conflict for note.md, got %q", pc.RelPath)
+	}
+	versionsByDevice := map[string]string{}
+	for _, v := range pc.Versions {
+		versionsByDevice[v.DeviceID] = v.Content
+	}
+	if versionsByDevice["dev-a"] != verA || versionsByDevice["dev-b"] != verB {
+		t.Errorf("expected both devices' real content recorded (no placeholder strings), got %+v", versionsByDevice)
+	}
+
+	// The critical safety property: neither device's log should have
+	// gained a new entry claiming this was resolved.
+	aEntries, _ := logMgr.ReadDeviceLog("dev-a")
+	bEntries, _ := logMgr.ReadDeviceLog("dev-b")
+	if len(aEntries) != 2 {
+		t.Errorf("expected dev-a's log to still have exactly 2 entries (no fake resolution appended), got %d", len(aEntries))
+	}
+	if len(bEntries) != 1 {
+		t.Errorf("expected dev-b's log to still have exactly 1 entry (no fake resolution appended), got %d", len(bEntries))
+	}
+}
+
+// TestSyncEngine_RunCycle_PrunesStalePendingConflict guards the
+// self-healing behavior (spec 3.3.2): a previously-recorded conflict whose
+// file no longer matches what was written when it was detected (e.g. the
+// user manually resolved it in Obsidian) must be dropped on the next
+// cycle rather than nagging about a conflict that's already gone.
+func TestSyncEngine_RunCycle_PrunesStalePendingConflict(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:       vaultPath,
+		RcloneRemote:    "ObsidianVault",
+		RclonePath:      "MyVault",
+		IntervalSeconds: 120,
+	})
+	primaryID, _ := cfgMgr.GetDeviceID()
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", primaryID, "mac-test")
+
+	if err := cfgMgr.SavePendingConflicts([]config.PendingConflict{
+		{
+			RelPath:     "already-resolved.md",
+			DetectedAt:  "2026-08-27T10:00:00+09:00",
+			WrittenHash: "stale-hash-that-wont-match-anything",
+			Versions: []config.PendingConflictVersion{
+				{DeviceID: "dev-a", Label: "mac-a", Content: "A"},
+				{DeviceID: "dev-b", Label: "iphone-b", Content: "B"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("failed to seed stale pending conflict: %v", err)
+	}
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	pending, err := cfgMgr.LoadPendingConflicts()
+	if err != nil {
+		t.Fatalf("LoadPendingConflicts failed: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("expected the stale pending conflict to be pruned, got %+v", pending)
+	}
+}
+
+// TestResolvePendingConflict guards conflict resolution via the GUI
+// device-picker (spec 3.3.2): the chosen device's real content (never a
+// placeholder string - the original bug) gets written to the Vault file
+// and recorded as a new log entry, and the conflict is removed from the
+// pending set.
+func TestResolvePendingConflict(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgMgr := config.NewConfigManagerWithDir(filepath.Join(tempDir, "config"))
+
+	conflict := config.PendingConflict{
+		RelPath:     "note.md",
+		DetectedAt:  "2026-08-27T10:00:00+09:00",
+		WrittenHash: "irrelevant-here",
+		Versions: []config.PendingConflictVersion{
+			{DeviceID: "dev-a", Label: "mac-a", Content: "A's content\n"},
+			{DeviceID: "dev-b", Label: "iphone-b", Content: "B's content\n"},
+		},
+	}
+	if err := cfgMgr.SavePendingConflicts([]config.PendingConflict{conflict}); err != nil {
+		t.Fatalf("failed to seed pending conflict: %v", err)
+	}
+
+	if err := engine.ResolvePendingConflict(cfgMgr, vaultPath, conflict, "dev-b", "primary-device", "mac-test"); err != nil {
+		t.Fatalf("ResolvePendingConflict failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(vaultPath, "note.md"))
+	if err != nil {
+		t.Fatalf("failed to read resolved file: %v", err)
+	}
+	if string(got) != "B's content\n" {
+		t.Errorf("expected the chosen device's real content written, got %q", string(got))
+	}
+
+	pending, err := cfgMgr.LoadPendingConflicts()
+	if err != nil {
+		t.Fatalf("LoadPendingConflicts failed: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("expected the resolved conflict to be removed from pending, got %+v", pending)
+	}
+
+	entries, err := syncedlog.NewLogManager(vaultPath).ReadDeviceLog("primary-device")
+	if err != nil {
+		t.Fatalf("ReadDeviceLog failed: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Diff != "B's content\n" {
+		t.Errorf("expected a new log entry recording the resolution with real content, got %+v", entries)
+	}
+}
+
+// TestResolvePendingConflict_UnknownDevice guards against silently
+// accepting a chosen device ID that isn't actually one of the conflict's
+// recorded versions (e.g. a stale/mismatched GUI selection).
+func TestResolvePendingConflict_UnknownDevice(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgMgr := config.NewConfigManagerWithDir(filepath.Join(tempDir, "config"))
+
+	conflict := config.PendingConflict{
+		RelPath: "note.md",
+		Versions: []config.PendingConflictVersion{
+			{DeviceID: "dev-a", Label: "mac-a", Content: "A"},
+		},
+	}
+	if err := engine.ResolvePendingConflict(cfgMgr, vaultPath, conflict, "dev-does-not-exist", "primary-device", "mac-test"); err == nil {
+		t.Error("expected an error when the chosen device isn't one of the conflict's recorded versions")
 	}
 }

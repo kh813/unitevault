@@ -506,6 +506,82 @@ func TestBuildFormData_MultiDeviceStatus(t *testing.T) {
 	})
 }
 
+// TestBuildFormData_PendingConflictCount guards how buildFormData surfaces
+// PendingConflictCount (spec 3.3.2): populated for a Primary, always zero
+// for a Secondary (merging - and therefore genuine content conflicts -
+// only ever happens on the Primary).
+func TestBuildFormData_PendingConflictCount(t *testing.T) {
+	t.Run("Primary with pending conflicts", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		_ = tr.cfgMgr.SaveRole("primary")
+		if err := tr.cfgMgr.SavePendingConflicts([]config.PendingConflict{
+			{RelPath: "a.md"}, {RelPath: "b.md"},
+		}); err != nil {
+			t.Fatalf("failed to seed pending conflicts: %v", err)
+		}
+
+		if got := tr.buildFormData().PendingConflictCount; got != 2 {
+			t.Errorf("expected PendingConflictCount 2, got %d", got)
+		}
+	})
+
+	t.Run("Primary with no pending conflicts", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		_ = tr.cfgMgr.SaveRole("primary")
+
+		if got := tr.buildFormData().PendingConflictCount; got != 0 {
+			t.Errorf("expected PendingConflictCount 0, got %d", got)
+		}
+	})
+
+	t.Run("Secondary never reports pending conflicts", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		_ = tr.cfgMgr.SaveRole("secondary")
+		if err := tr.cfgMgr.SavePendingConflicts([]config.PendingConflict{{RelPath: "a.md"}}); err != nil {
+			t.Fatalf("failed to seed pending conflicts: %v", err)
+		}
+
+		if got := tr.buildFormData().PendingConflictCount; got != 0 {
+			t.Errorf("expected PendingConflictCount 0 for a Secondary, got %d", got)
+		}
+	})
+}
+
+// TestHasUnresolvedConflict guards the tray/menu bar "Status: Conflict"
+// trigger (spec 3.5.2): true if either an active multi-Primary conflict or
+// any pending content conflict is recorded, false otherwise.
+func TestHasUnresolvedConflict(t *testing.T) {
+	t.Run("no conflicts", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		if tr.hasUnresolvedConflict() {
+			t.Error("expected false when nothing is recorded")
+		}
+	})
+
+	t.Run("active primary conflict", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		if err := tr.cfgMgr.SavePrimaryConflict(config.PrimaryConflict{
+			DetectedAt: "2026-08-27T10:00:00+09:00",
+			Role:       config.ConflictRoleSuperseded,
+		}); err != nil {
+			t.Fatalf("failed to seed primary conflict: %v", err)
+		}
+		if !tr.hasUnresolvedConflict() {
+			t.Error("expected true when a primary conflict is recorded")
+		}
+	})
+
+	t.Run("pending content conflict", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		if err := tr.cfgMgr.SavePendingConflicts([]config.PendingConflict{{RelPath: "a.md"}}); err != nil {
+			t.Fatalf("failed to seed pending conflict: %v", err)
+		}
+		if !tr.hasUnresolvedConflict() {
+			t.Error("expected true when a pending content conflict is recorded")
+		}
+	})
+}
+
 func TestBuildFormData_DriveSyncStatusAndRoleVariations(t *testing.T) {
 	t.Run("Secondary role shows N/A secondary explanation", func(t *testing.T) {
 		tr := newTestTrayApp(t)

@@ -163,6 +163,81 @@ func TestConfirm_UsesHighImportanceOnConfirmButton(t *testing.T) {
 	}
 }
 
+// TestChoiceN_InvokesOnChoiceWithSelectedIndex guards ChoiceN's core
+// contract: tapping the Nth labeled button reports that 1-based index,
+// regardless of how many options were given.
+func TestChoiceN_InvokesOnChoiceWithSelectedIndex(t *testing.T) {
+	newTestWindow()
+
+	var got int
+	called := false
+	ChoiceN("Resolve Conflict", "Pick a version.", []string{"mac-mini", "iphone", "windows-pc"}, func(result int) {
+		called = true
+		got = result
+	})
+
+	btn := findDialogButtonByLabel(t, "iphone")
+	test.Tap(btn)
+
+	if !called {
+		t.Fatal("expected onChoice to be invoked when an option is tapped")
+	}
+	if got != 2 {
+		t.Errorf("expected the 2nd option's 1-based index (2), got %d", got)
+	}
+}
+
+// TestChoiceN_CancelReportsZero guards the "dismissed without choosing"
+// case, matching Choice's own convention.
+func TestChoiceN_CancelReportsZero(t *testing.T) {
+	newTestWindow()
+
+	var got = -1
+	ChoiceN("Resolve Conflict", "Pick a version.", []string{"mac-mini", "iphone"}, func(result int) {
+		got = result
+	})
+
+	overlays := mainWindow.Canvas().Overlays().List()
+	if len(overlays) == 0 {
+		t.Fatal("expected the dialog to be shown as an overlay")
+	}
+	var cancelBtn *widget.Button
+	for _, o := range overlays {
+		for _, obj := range test.LaidOutObjects(o) {
+			if b, ok := obj.(*widget.Button); ok && b.Text != "mac-mini" && b.Text != "iphone" {
+				cancelBtn = b
+			}
+		}
+	}
+	if cancelBtn == nil {
+		t.Fatal("expected to find the dialog's Cancel button")
+	}
+	test.Tap(cancelBtn)
+
+	if got != 0 {
+		t.Errorf("expected onChoice(0) when cancelled, got %d", got)
+	}
+}
+
+// findDialogButtonByLabel locates a button in the overlay dialog by its
+// exact label text.
+func findDialogButtonByLabel(t *testing.T, label string) *widget.Button {
+	t.Helper()
+	overlays := mainWindow.Canvas().Overlays().List()
+	if len(overlays) == 0 {
+		t.Fatal("expected the dialog to be shown as an overlay")
+	}
+	for _, o := range overlays {
+		for _, obj := range test.LaidOutObjects(o) {
+			if b, ok := obj.(*widget.Button); ok && b.Text == label {
+				return b
+			}
+		}
+	}
+	t.Fatalf("expected to find a button labeled %q", label)
+	return nil
+}
+
 // findDialogConfirmButton locates the overlay dialog's confirm button by its
 // non-default Importance rather than its label text, since dialog.NewConfirm
 // localizes "Yes"/"No" (e.g. lang.L("Yes")) based on the environment's

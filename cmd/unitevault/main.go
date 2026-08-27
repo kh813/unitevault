@@ -324,11 +324,28 @@ func (t *trayApp) runCycleGuarded(ctx context.Context, eng *engine.SyncEngine, r
 	gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Syncing..."))
 	err := eng.RunCycle(ctx)
 	role, _ := t.cfgMgr.LoadRole()
-	if err != nil {
+	switch {
+	case err != nil:
 		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Error ({{.Err}})", map[string]string{"Err": err.Error()}))
-	} else {
+	case t.hasUnresolvedConflict():
+		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Conflict"))
+	default:
 		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Active ({{.Role}}) - {{.Time}}", map[string]string{"Role": role, "Time": time.Now().Format("15:04")}))
 	}
+}
+
+// hasUnresolvedConflict reports whether this device currently has an
+// unresolved multi-Primary conflict (spec 3.6.1.4) or genuine content
+// conflict (spec 3.3.2) - either shows as "Status: Conflict" in the tray/
+// menu bar instead of the ordinary "Active" status (spec 3.5.2).
+func (t *trayApp) hasUnresolvedConflict() bool {
+	if c, err := t.cfgMgr.LoadPrimaryConflict(); err == nil && c != nil {
+		return true
+	}
+	if pending, err := t.cfgMgr.LoadPendingConflicts(); err == nil && len(pending) > 0 {
+		return true
+	}
+	return false
 }
 
 // syncNow handles the "Sync Now" tray menu action.
@@ -611,6 +628,14 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 		data.MultiDeviceStatus = lang.L("Syncing")
 	}
 
+	// PendingConflictCount (spec 3.3.2): merging - and therefore genuine
+	// content conflicts - only ever happens on the Primary device.
+	if role == "primary" {
+		if pending, err := t.cfgMgr.LoadPendingConflicts(); err == nil {
+			data.PendingConflictCount = len(pending)
+		}
+	}
+
 	return data
 }
 
@@ -709,6 +734,7 @@ func (t *trayApp) showSettingsGUI(data gui.SettingsFormData) {
 		OnConfigureRemote:  t.configureRemote,
 		OnRemoveRemote:     t.removeRemote,
 		OnPromoteToPrimary: t.promoteToPrimary,
+		OnResolveConflicts: t.resolveConflicts,
 		OnSave:             t.saveSettings,
 		OnReset:            t.performReset,
 	})
@@ -952,6 +978,72 @@ func (t *trayApp) promoteToPrimary(current gui.SettingsFormData) {
 		}
 		t.reopenSettingsGUI(current)
 	}()
+}
+
+// resolveConflicts handles the Status section's "Resolve Conflicts..."
+// button (spec 3.3.2), shown whenever SettingsFormData.PendingConflictCount
+// is > 0 (Primary-only - merging, and therefore genuine content conflicts,
+// only ever happens there).
+func (t *trayApp) resolveConflicts(current gui.SettingsFormData) {
+	vaultPath := strings.TrimSpace(current.VaultPath)
+	if vaultPath == "" {
+		return
+	}
+
+	pending, err := t.cfgMgr.LoadPendingConflicts()
+	if err != nil || len(pending) == 0 {
+		gui.Info(lang.L("No Conflicts"), lang.L("There are no unresolved conflicts."))
+		t.reopenSettingsGUI(current)
+		return
+	}
+
+	deviceID, err := t.cfgMgr.GetDeviceID()
+	if err != nil {
+		gui.Info(lang.L("Resolve Conflicts Failed"), lang.L("Could not determine this device's ID: {{.Err}}", map[string]string{"Err": err.Error()}))
+		return
+	}
+	hostname, _ := os.Hostname()
+
+	t.resolveNextConflict(vaultPath, deviceID, hostname, pending, current)
+}
+
+// resolveNextConflict shows the resolution dialog for pending[0], then
+// recurses onto the remainder once the user responds - Fyne dialogs are
+// non-blocking, so a loop can't drive this sequentially. Once pending is
+// empty, reopens Settings so the resolved count refreshes.
+func (t *trayApp) resolveNextConflict(vaultPath, deviceID, label string, pending []config.PendingConflict, current gui.SettingsFormData) {
+	if len(pending) == 0 {
+		t.reopenSettingsGUI(current)
+		return
+	}
+	conflict := pending[0]
+
+	optionLabels := make([]string, len(conflict.Versions))
+	for i, v := range conflict.Versions {
+		optionLabels[i] = v.Label
+		if optionLabels[i] == "" {
+			optionLabels[i] = v.DeviceID
+		}
+	}
+
+	gui.ChoiceN(
+		lang.L("Resolve Conflict"),
+		lang.L("{{.Path}}\n\nMultiple devices edited the same part of this file. Pick which version to keep (or Cancel to leave it unresolved and edit it manually in Obsidian instead):", map[string]string{"Path": conflict.RelPath}),
+		optionLabels,
+		func(result int) {
+			if result >= 1 && result <= len(conflict.Versions) {
+				chosen := conflict.Versions[result-1]
+				if err := engine.ResolvePendingConflict(t.cfgMgr, vaultPath, conflict, chosen.DeviceID, deviceID, label); err != nil {
+					gui.Info(
+						lang.L("Resolve Conflicts Failed"),
+						lang.L("Could not resolve the conflict in {{.Path}}: {{.Err}}", map[string]string{"Path": conflict.RelPath, "Err": err.Error()}),
+					)
+				}
+			}
+			// Whether resolved or left pending (Cancel), move on to the next one.
+			t.resolveNextConflict(vaultPath, deviceID, label, pending[1:], current)
+		},
+	)
 }
 
 // saveSettings handles the "Save Settings" button: validates input, warns

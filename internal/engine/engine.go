@@ -17,12 +17,12 @@ import (
 )
 
 type SyncEngine struct {
-	cfgMgr   *config.ConfigManager
-	scanner  *scan.Scanner
-	logMgr   *syncedlog.LogManager
-	drive    drive.RcloneRunner
+	cfgMgr    *config.ConfigManager
+	scanner   *scan.Scanner
+	logMgr    *syncedlog.LogManager
+	drive     drive.RcloneRunner
 	vaultPath string
-	label    string
+	label     string
 }
 
 func NewSyncEngine(cfgMgr *config.ConfigManager, vaultPath string, label string, driveRunner drive.RcloneRunner) *SyncEngine {
@@ -30,12 +30,12 @@ func NewSyncEngine(cfgMgr *config.ConfigManager, vaultPath string, label string,
 		driveRunner = drive.NewClient(filepath.Join(vaultPath, "_sync", "engine.log"))
 	}
 	return &SyncEngine{
-		cfgMgr:   cfgMgr,
-		scanner:  scan.NewScanner(vaultPath),
-		logMgr:   syncedlog.NewLogManager(vaultPath),
-		drive:    driveRunner,
+		cfgMgr:    cfgMgr,
+		scanner:   scan.NewScanner(vaultPath),
+		logMgr:    syncedlog.NewLogManager(vaultPath),
+		drive:     driveRunner,
 		vaultPath: vaultPath,
-		label:    label,
+		label:     label,
 	}
 }
 
@@ -96,7 +96,24 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to get next seq: %w", err)
 		}
-		entry := syncedlog.CreateLogEntryFromChange(deviceID, e.label, seq, ch, "")
+
+		// Stash this change's resulting content (empty for a delete, which
+		// has none) in the log entry itself (spec 3.4) - a later merge
+		// needs to look up "what did the content look like at hash X"
+		// across every device's log to reconstruct a real 3-way merge base,
+		// and this is the only place that content is ever recorded. A
+		// failed read (e.g. the file was removed again before this line
+		// runs) just leaves it empty rather than failing the whole cycle -
+		// base reconstruction already treats a missing snapshot as "fall
+		// back to a real conflict" (safe default, see mergeAndTrackConflicts).
+		var content string
+		if ch.Action != scan.ActionDelete {
+			if data, err := os.ReadFile(filepath.Join(e.vaultPath, ch.Path)); err == nil {
+				content = string(scan.NormalizeLF(data))
+			}
+		}
+
+		entry := syncedlog.CreateLogEntryFromChange(deviceID, e.label, seq, ch, content)
 		if err := e.logMgr.AppendLogEntry(entry); err != nil {
 			return fmt.Errorf("failed to append log entry: %w", err)
 		}
@@ -133,52 +150,8 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get latest log entries: %w", err)
 	}
-
-	for relPath, devEntries := range latestByPath {
-		if len(devEntries) <= 1 {
-			continue // No concurrent changes across multiple devices
-		}
-
-		// Perform N-way merge if multiple devices have modified relPath
-		var versions []merge.DeviceVersion
-		for devID, entry := range devEntries {
-			// Read content from Vault or file
-			fullPath := filepath.Join(e.vaultPath, relPath)
-			content, err := os.ReadFile(fullPath)
-			if err != nil {
-				continue
-			}
-			versions = append(versions, merge.DeviceVersion{
-				DeviceID: devID,
-				Content:  string(scan.NormalizeLF(content)),
-				BaseHash: entry.BaseHash,
-			})
-		}
-
-		if len(versions) > 1 {
-			// Assume common base or empty for initial
-			res, err := merge.NWayMerge("", versions)
-			if err != nil {
-				return fmt.Errorf("merge error for %s: %w", relPath, err)
-			}
-
-			fullPath := filepath.Join(e.vaultPath, relPath)
-			if err := os.WriteFile(fullPath, []byte(res.MergedContent), 0644); err != nil {
-				return fmt.Errorf("failed to write merged file: %w", err)
-			}
-
-			if res.HasConflict {
-				resolver := merge.NewConflictResolver(os.Stdin, os.Stdout)
-				labels := make(map[string]string)
-				for dID, entry := range devEntries {
-					labels[dID] = entry.Label
-				}
-				resolved, err := resolver.ResolveInteractive(relPath, res.MergedContent, labels)
-				if err == nil && resolved != "" {
-					_ = merge.ResolveAndRecord(e.logMgr, e.vaultPath, relPath, resolved, deviceID, e.label)
-				}
-			}
-		}
+	if err := e.mergeAndTrackConflicts(latestByPath); err != nil {
+		return err
 	}
 
 	// 3. Mirror to Google Drive via rclone sync
@@ -206,6 +179,151 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// mergeAndTrackConflicts runs N-way merges (spec 3.3) for every path with
+// concurrent changes across devices, and reconciles the set of unresolved
+// genuine conflicts (spec 3.3.2). Only ever called for the Primary device -
+// merging never runs on a Secondary.
+//
+// Each device's own content at the time of its change is read from its log
+// entry (the Diff field - spec 3.4), never from the current Vault file:
+// the Vault file holds exactly one state at a time, so re-reading it once
+// per device would hand every "version" the same content and make N-way
+// merge meaningless. The merge base is reconstructed the same way, via
+// FindCommonBaseHash + a lookup across every device's log for a matching
+// result_hash - a real base (rather than empty) is essential, since
+// git merge-file falsely reports a conflict for non-overlapping edits when
+// given no base at all.
+func (e *SyncEngine) mergeAndTrackConflicts(latestByPath map[string]map[string]syncedlog.LogEntry) error {
+	// Drop any previously-pending conflict whose file has since changed
+	// (the recorded hash no longer matches what's on disk) - the user
+	// resolved it, manually in Obsidian or otherwise, so it shouldn't keep
+	// being surfaced (spec 3.3.2).
+	existing, err := e.cfgMgr.LoadPendingConflicts()
+	if err != nil {
+		return fmt.Errorf("failed to load pending conflicts: %w", err)
+	}
+	pendingByPath := make(map[string]config.PendingConflict, len(existing))
+	for _, pc := range existing {
+		fullPath := filepath.Join(e.vaultPath, pc.RelPath)
+		if currentHash, err := scan.CalculateNormalizedHash(fullPath); err == nil && currentHash == pc.WrittenHash {
+			pendingByPath[pc.RelPath] = pc
+		}
+	}
+
+	allDeviceLogs, err := e.logMgr.ReadAllDeviceLogs()
+	if err != nil {
+		return fmt.Errorf("failed to read device logs for merge base lookup: %w", err)
+	}
+
+	for relPath, devEntries := range latestByPath {
+		if len(devEntries) <= 1 {
+			continue // No concurrent changes across multiple devices
+		}
+
+		var versions []merge.DeviceVersion
+		for devID, entry := range devEntries {
+			if entry.Diff == "" {
+				continue // no content snapshot for this entry (e.g. its latest action was a delete) - can't include it in the merge
+			}
+			versions = append(versions, merge.DeviceVersion{
+				DeviceID: devID,
+				Content:  entry.Diff,
+				BaseHash: entry.BaseHash,
+			})
+		}
+		if len(versions) <= 1 {
+			continue
+		}
+
+		baseContent := ""
+		if baseHash := merge.FindCommonBaseHash(devEntries); baseHash != "" {
+			if content, found := merge.FindContentByHash(allDeviceLogs, baseHash); found {
+				baseContent = content
+			}
+		}
+
+		res, err := merge.NWayMerge(baseContent, versions)
+		if err != nil {
+			return fmt.Errorf("merge error for %s: %w", relPath, err)
+		}
+
+		fullPath := filepath.Join(e.vaultPath, relPath)
+		if err := os.WriteFile(fullPath, []byte(res.MergedContent), 0644); err != nil {
+			return fmt.Errorf("failed to write merged file: %w", err)
+		}
+
+		if !res.HasConflict {
+			// Clean auto-merge - any earlier conflict recorded for this
+			// path has just been superseded.
+			delete(pendingByPath, relPath)
+			continue
+		}
+
+		writtenHash, err := scan.CalculateNormalizedHash(fullPath)
+		if err != nil {
+			return fmt.Errorf("failed to hash conflict-marked file %s: %w", relPath, err)
+		}
+		conflictVersions := make([]config.PendingConflictVersion, 0, len(versions))
+		for _, v := range versions {
+			conflictVersions = append(conflictVersions, config.PendingConflictVersion{
+				DeviceID: v.DeviceID,
+				Label:    devEntries[v.DeviceID].Label,
+				Content:  v.Content,
+			})
+		}
+		pendingByPath[relPath] = config.PendingConflict{
+			RelPath:     relPath,
+			DetectedAt:  time.Now().Format(time.RFC3339),
+			WrittenHash: writtenHash,
+			Versions:    conflictVersions,
+		}
+	}
+
+	pending := make([]config.PendingConflict, 0, len(pendingByPath))
+	for _, pc := range pendingByPath {
+		pending = append(pending, pc)
+	}
+	return e.cfgMgr.SavePendingConflicts(pending)
+}
+
+// ResolvePendingConflict applies chosenDeviceID's recorded content for
+// conflict (spec 3.3.2), recording the resolution under
+// resolverDeviceID/resolverLabel (normally the Primary device's own
+// identity, since that's the only device that ever holds pending
+// conflicts), and removes conflict from the locally-tracked pending set.
+// A package-level function rather than a SyncEngine method since the GUI
+// resolves conflicts outside of any RunCycle invocation.
+func ResolvePendingConflict(cfgMgr *config.ConfigManager, vaultPath string, conflict config.PendingConflict, chosenDeviceID, resolverDeviceID, resolverLabel string) error {
+	var content string
+	found := false
+	for _, v := range conflict.Versions {
+		if v.DeviceID == chosenDeviceID {
+			content = v.Content
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("device %q is not one of the recorded versions for %s", chosenDeviceID, conflict.RelPath)
+	}
+
+	if err := merge.ApplyResolution(syncedlog.NewLogManager(vaultPath), vaultPath, conflict.RelPath, content, resolverDeviceID, resolverLabel); err != nil {
+		return err
+	}
+
+	remaining, err := cfgMgr.LoadPendingConflicts()
+	if err != nil {
+		return err
+	}
+	kept := remaining[:0]
+	for _, pc := range remaining {
+		if pc.RelPath != conflict.RelPath {
+			kept = append(kept, pc)
+		}
+	}
+	return cfgMgr.SavePendingConflicts(kept)
 }
 
 // RunDaemon runs RunCycle in a continuous loop with the specified interval until ctx is canceled.

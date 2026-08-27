@@ -203,6 +203,81 @@ func (cm *ConfigManager) ClearPrimaryConflict() error {
 	return nil
 }
 
+// PendingConflictVersion is one device's content for a file caught in a
+// genuine (overlapping-edit) merge conflict.
+type PendingConflictVersion struct {
+	DeviceID string `json:"device_id"`
+	Label    string `json:"label"`
+	Content  string `json:"content"`
+}
+
+// PendingConflict is an unresolved genuine content conflict (spec 3.3.2):
+// git merge-file produced conflict markers for relPath because two or more
+// devices changed the same region since their common base. Only ever held
+// by the Primary device (merging only ever happens there) - never shared
+// or synced with other devices.
+type PendingConflict struct {
+	RelPath string `json:"rel_path"`
+	// DetectedAt is informational only (display), never used to decide
+	// anything - matching syncedlog.LogEntry.TS's convention.
+	DetectedAt string `json:"detected_at"`
+	// WrittenHash is the hash of the conflict-marker-laden content that was
+	// written to the Vault file when this conflict was detected - if the
+	// file's current hash no longer matches, the user must have resolved
+	// it manually in Obsidian, and this entry should be dropped rather
+	// than keep nagging about a conflict that no longer exists.
+	WrittenHash string                   `json:"written_hash"`
+	Versions    []PendingConflictVersion `json:"versions"`
+}
+
+// PendingConflictsPath returns the path to pending_conflicts.json.
+func (cm *ConfigManager) PendingConflictsPath() string {
+	return filepath.Join(cm.configDir, "pending_conflicts.json")
+}
+
+// SavePendingConflicts persists the full set of currently-unresolved
+// content conflicts. Passing an empty slice still writes an (empty-array)
+// file rather than removing it - callers that want "no file at all" should
+// use ClearPendingConflicts instead; LoadPendingConflicts treats both the
+// same way regardless.
+func (cm *ConfigManager) SavePendingConflicts(conflicts []PendingConflict) error {
+	if err := cm.EnsureDir(); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(conflicts, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal pending conflicts: %w", err)
+	}
+	return os.WriteFile(cm.PendingConflictsPath(), data, 0644)
+}
+
+// LoadPendingConflicts reads the locally cached set of unresolved content
+// conflicts, or returns (nil, nil) if none is recorded.
+func (cm *ConfigManager) LoadPendingConflicts() ([]PendingConflict, error) {
+	data, err := os.ReadFile(cm.PendingConflictsPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read pending conflicts: %w", err)
+	}
+	var conflicts []PendingConflict
+	if err := json.Unmarshal(data, &conflicts); err != nil {
+		return nil, fmt.Errorf("failed to parse pending conflicts: %w", err)
+	}
+	return conflicts, nil
+}
+
+// ClearPendingConflicts removes the locally cached conflict set entirely
+// (e.g. once every conflict has been resolved). Removing an already-absent
+// file is not an error.
+func (cm *ConfigManager) ClearPendingConflicts() error {
+	if err := os.Remove(cm.PendingConflictsPath()); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to clear pending conflicts: %w", err)
+	}
+	return nil
+}
+
 // IsInstallReminderDismissed reports whether the user previously checked
 // "Don't show this again" on the missing-dependency startup reminder.
 func (cm *ConfigManager) IsInstallReminderDismissed() bool {
@@ -317,5 +392,6 @@ func (cm *ConfigManager) ResetConfig() error {
 	_ = os.Remove(cm.InstallReminderDismissedPath())
 	_ = os.Remove(cm.DriveSyncStatusPath())
 	_ = os.Remove(cm.PrimaryConflictPath())
+	_ = os.Remove(cm.PendingConflictsPath())
 	return nil
 }

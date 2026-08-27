@@ -93,6 +93,50 @@ func Choice(title, message, btn1Text, btn2Text string, onChoice func(result int)
 	})
 }
 
+// ChoiceN is Choice generalized to an arbitrary, dynamic number of named
+// options (one button per row, rather than Choice's fixed 2-column grid) -
+// used where the option set varies at runtime, e.g. picking one of several
+// devices' conflicting versions of a file (spec 3.3.2). onChoice is called
+// exactly once with a 1-based index into optionLabels, or 0 if the dialog
+// was dismissed without a selection (Cancel, or closed). Safe to call from
+// any goroutine; onChoice always runs on the Fyne main thread.
+func ChoiceN(title, message string, optionLabels []string, onChoice func(result int)) {
+	fyne.Do(func() {
+		wasHidden := ensureWindowVisible()
+		result := 0
+		var d dialog.Dialog
+
+		buttons := make([]fyne.CanvasObject, 0, len(optionLabels))
+		for i, label := range optionLabels {
+			idx := i + 1
+			btn := widget.NewButton(label, func() {
+				result = idx
+				d.Hide()
+			})
+			if idx == 1 {
+				btn.Importance = widget.HighImportance
+			}
+			buttons = append(buttons, btn)
+		}
+
+		content := container.NewVBox(
+			widget.NewLabel(message),
+			container.NewVBox(buttons...),
+		)
+
+		d = dialog.NewCustom(title, lang.L("Cancel"), content, mainWindow)
+		d.SetOnClosed(func() {
+			if onChoice != nil {
+				onChoice(result)
+			}
+			if wasHidden {
+				hideWindowNow()
+			}
+		})
+		d.Show()
+	})
+}
+
 // InstallReminder shows a dismissible reminder dialog with a "Don't show
 // this again" checkbox, e.g. for nagging the user about missing Git/rclone
 // on every startup until they either install them or opt out. onClose

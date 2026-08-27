@@ -57,6 +57,13 @@ type SettingsFormData struct {
 	// explanation of the conflict (which other device is involved and
 	// since when), shown only when PrimaryConflictActive.
 	PrimaryConflictMessage string
+	// PendingConflictCount is the number of unresolved genuine content
+	// conflicts (spec 3.3.2) - files where two or more devices changed the
+	// same region since their common base, which auto-merge alone can't
+	// resolve. Only ever non-zero on the Primary device (merging only ever
+	// happens there). Shows a warning row and "Resolve Conflicts..."
+	// button when > 0.
+	PendingConflictCount int
 
 	// Configurable Form
 	VaultPath       string
@@ -104,6 +111,10 @@ type SettingsHandlers struct {
 	// form's current values when they tap "Promote to Primary...". Shown
 	// whenever data.CanPromoteToPrimary is true (spec 3.6.1.2 / 3.6.1.4).
 	OnPromoteToPrimary func(current SettingsFormData)
+	// OnResolveConflicts is called with the form's current values when the
+	// user taps "Resolve Conflicts...". Shown whenever
+	// data.PendingConflictCount > 0 (spec 3.3.2).
+	OnResolveConflicts func(current SettingsFormData)
 	// OnSave is called with the current form values when the user taps
 	// "Save Settings".
 	OnSave func(data SettingsFormData)
@@ -305,6 +316,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			CanPromoteToPrimary:    data.CanPromoteToPrimary,
 			PrimaryConflictActive:  data.PrimaryConflictActive,
 			PrimaryConflictMessage: data.PrimaryConflictMessage,
+			PendingConflictCount:   data.PendingConflictCount,
 		}
 	}
 
@@ -389,6 +401,17 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		// template data (it embeds the other device's label/timestamp), so
 		// it already arrives pre-localized.
 		statusRows = append(statusRows, statusLine(lang.L("⚠ Primary conflict:"), data.PrimaryConflictMessage, "", nil))
+	}
+	if data.PendingConflictCount > 0 {
+		var resolveConflicts func()
+		if handlers.OnResolveConflicts != nil {
+			resolveConflicts = func() { handlers.OnResolveConflicts(currentSnapshot()) }
+		}
+		statusRows = append(statusRows, statusLine(
+			lang.L("⚠ Unresolved conflicts:"),
+			lang.L("{{.Count}} file(s) need your input", map[string]string{"Count": strconv.Itoa(data.PendingConflictCount)}),
+			lang.L("Resolve Conflicts..."), resolveConflicts,
+		))
 	}
 	statusCard := widget.NewCard(lang.L("Status"), "", container.NewVBox(statusRows...))
 

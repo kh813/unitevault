@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/kh813/unitevault/internal/scan"
@@ -120,7 +121,68 @@ func NWayMerge(baseContent string, versions []DeviceVersion) (MergeResult, error
 	return currentResult, nil
 }
 
-// ReconstructBaseFromDiff applies reverse unified diff or reconstructs content if base entries exist in logs
+// ApplyResolution writes resolvedContent to the Vault file at relPath and
+// records it as a new log entry under resolverDeviceID/resolverLabel (spec
+// 3.3.2) - used once a genuine conflict has been resolved, e.g. by a user
+// picking one device's version in the GUI. The new entry's Diff carries
+// the resolved content itself (spec 3.4), same as any ordinary change, so
+// it's usable as a merge base for future edits too.
+func ApplyResolution(lm *syncedlog.LogManager, vaultPath, relPath, resolvedContent, resolverDeviceID, resolverLabel string) error {
+	fullPath := filepath.Join(vaultPath, relPath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return fmt.Errorf("failed to create parent directory for resolved file: %w", err)
+	}
+	normalized := scan.NormalizeLF([]byte(resolvedContent))
+	if err := os.WriteFile(fullPath, normalized, 0644); err != nil {
+		return fmt.Errorf("failed to write resolved content to file: %w", err)
+	}
+
+	hash, err := scan.CalculateNormalizedHash(fullPath)
+	if err != nil {
+		return fmt.Errorf("failed to hash resolved file: %w", err)
+	}
+
+	seq, err := lm.GetNextSeq(resolverDeviceID)
+	if err != nil {
+		return err
+	}
+
+	entry := syncedlog.LogEntry{
+		Device:     resolverDeviceID,
+		Label:      resolverLabel,
+		Seq:        seq,
+		Path:       relPath,
+		ResultHash: hash,
+		Diff:       string(normalized),
+		Action:     scan.ActionModify,
+	}
+
+	return lm.AppendLogEntry(entry)
+}
+
+// FindContentByHash searches every device's log for an entry whose
+// ResultHash equals targetHash, returning its stored content (the Diff
+// field - spec 3.4 stores full content there, not a true diff, as a v1
+// simplification) and whether a match was found. Which device originally
+// logged it doesn't matter - every device's log is readable by any other
+// (spec 3.2). Used to reconstruct the real merge base from a common
+// base_hash (see mergeAndTrackConflicts).
+func FindContentByHash(allDeviceLogs map[string][]syncedlog.LogEntry, targetHash string) (string, bool) {
+	if targetHash == "" {
+		return "", false
+	}
+	for _, entries := range allDeviceLogs {
+		for _, e := range entries {
+			if e.ResultHash == targetHash {
+				return e.Diff, true
+			}
+		}
+	}
+	return "", false
+}
+
+// FindCommonBaseHash reports the base_hash shared by every device's latest
+// entry for a path, or "" if they disagree (see mergeAndTrackConflicts).
 func FindCommonBaseHash(latestEntries map[string]syncedlog.LogEntry) string {
 	var firstHash string
 	for _, entry := range latestEntries {

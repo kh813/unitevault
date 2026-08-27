@@ -138,6 +138,7 @@ Settingsウィンドウの「Status」セクションから、それぞれ未イ
 - **Git/rcloneのインストールを促すダイアログが毎回出る**: 未初期化のままGit/rcloneが未検出の場合、起動のたびに案内ダイアログが表示されます。表示不要な場合は「Don't show this again」にチェックを入れてください。
 - **設定をやり直したい**: Settingsウィンドウ内の **[ Reset Configuration ]** ボタンから、ローカルの設定・端末役割情報をクリアして初期状態に戻せます（誤操作防止のため、タスクトレイメニューには配置していません）。
 - **Google Driveの接続をやり直したい（別のGoogleアカウントに変更したい等）**: rcloneセクションの **[ Remove Remote Configuration... ]** ボタン（リモートが設定済みの場合のみ表示）から、確認の上でrclone側の認証情報を削除できます。Google Drive上のバックアップファイル自体は削除されません。削除後、改めて **[ Configure Google Drive Remote... ]** から設定し直せます。
+- **タスクトレイ／メニューバーが「Status: Conflict」と表示される**: 複数端末が同じファイルの同じ箇所を編集した（自動マージできない、真の競合）か、複数端末が同時にPrimaryだと判断している状態です。Settingsウィンドウの **Status** セクションに表示される **[ Resolve Conflicts... ]** または **[ Promote to Primary... ]** ボタンから解決できます。ファイル競合は、Obsidian上で該当ファイルを直接開いて手動でコンフリクトマーカー（`<<<<<<<`等）を編集・削除しても解決できます。
 - **ローカルの設定・ログの保存場所**:
   - Mac: `~/.unitevault/`（`config.json`, `device_id`, `role`, `engine.log`）
   - Windows: `%APPDATA%\unitevault\`

@@ -175,6 +175,70 @@ func TestConfigManager_DriveSyncStatus(t *testing.T) {
 	}
 }
 
+func TestConfigManager_PendingConflicts(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := config.NewConfigManagerWithDir(tempDir)
+
+	conflicts, err := cm.LoadPendingConflicts()
+	if err != nil {
+		t.Fatalf("expected no error loading non-existent pending conflicts, got %v", err)
+	}
+	if conflicts != nil {
+		t.Errorf("expected nil before any conflict is recorded, got %+v", conflicts)
+	}
+
+	want := []config.PendingConflict{
+		{
+			RelPath:     "Notes/foo.md",
+			DetectedAt:  "2026-08-27T10:00:00+09:00",
+			WrittenHash: "hash-with-markers",
+			Versions: []config.PendingConflictVersion{
+				{DeviceID: "dev-a", Label: "mac-mini", Content: "A's version"},
+				{DeviceID: "dev-b", Label: "iphone", Content: "B's version"},
+			},
+		},
+	}
+	if err := cm.SavePendingConflicts(want); err != nil {
+		t.Fatalf("failed to save pending conflicts: %v", err)
+	}
+
+	loaded, err := cm.LoadPendingConflicts()
+	if err != nil {
+		t.Fatalf("failed to load saved pending conflicts: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].RelPath != "Notes/foo.md" || len(loaded[0].Versions) != 2 {
+		t.Fatalf("expected pending conflicts to round-trip %+v, got %+v", want, loaded)
+	}
+	if loaded[0].Versions[1].Content != "B's version" {
+		t.Errorf("expected version content to round-trip, got %+v", loaded[0].Versions[1])
+	}
+
+	if err := cm.ClearPendingConflicts(); err != nil {
+		t.Fatalf("ClearPendingConflicts failed: %v", err)
+	}
+	loaded, err = cm.LoadPendingConflicts()
+	if err != nil {
+		t.Fatalf("expected no error loading pending conflicts after clear, got %v", err)
+	}
+	if loaded != nil {
+		t.Error("expected ClearPendingConflicts to remove the recorded conflicts")
+	}
+
+	if err := cm.SavePendingConflicts(want); err != nil {
+		t.Fatalf("failed to save pending conflicts: %v", err)
+	}
+	if err := cm.ResetConfig(); err != nil {
+		t.Fatalf("ResetConfig failed: %v", err)
+	}
+	loaded, err = cm.LoadPendingConflicts()
+	if err != nil {
+		t.Fatalf("expected no error loading pending conflicts after reset, got %v", err)
+	}
+	if loaded != nil {
+		t.Error("expected ResetConfig to clear pending conflicts")
+	}
+}
+
 func TestGetConfigDir(t *testing.T) {
 	dir, err := config.GetConfigDir()
 	if err != nil {
