@@ -24,6 +24,7 @@ import (
 	"github.com/kh813/unitevault/internal/engine"
 	"github.com/kh813/unitevault/internal/eventlog"
 	"github.com/kh813/unitevault/internal/gui"
+	"github.com/kh813/unitevault/internal/obsidianconfig"
 	"github.com/kh813/unitevault/internal/selfupdate"
 )
 
@@ -734,6 +735,7 @@ func (t *trayApp) showSettingsGUI(data gui.SettingsFormData) {
 		OnConfigureRemote:  t.configureRemote,
 		OnRemoveRemote:     t.removeRemote,
 		OnPromoteToPrimary: t.promoteToPrimary,
+		OnMigrateVault:     t.migrateVault,
 		OnResolveConflicts: t.resolveConflicts,
 		OnSave:             t.saveSettings,
 		OnReset:            t.performReset,
@@ -1046,6 +1048,102 @@ func (t *trayApp) resolveNextConflict(vaultPath, deviceID, label string, pending
 	)
 }
 
+// migrateVault handles the Obsidian Vault section's "Migrate Vault to
+// Local Folder..." button (spec 1.6, "Vault Migration"). Lets the user
+// pick an existing Vault folder (typically one living inside iCloud
+// Drive - spec 3.6.1.6 explains why that's risky) via the OS folder
+// picker, then moves it into this app's own local folder.
+func (t *trayApp) migrateVault(current gui.SettingsFormData) {
+	gui.PickFolder(lang.L("Select the Vault Folder to Migrate"), func(oldPath string, ok bool) {
+		if !ok {
+			return
+		}
+
+		home, err := os.UserHomeDir()
+		if err != nil {
+			gui.Info(lang.L("Migration Failed"), lang.L("Could not determine your home folder: {{.Err}}", map[string]string{"Err": err.Error()}))
+			return
+		}
+		newPath := filepath.Join(home, filepath.Base(oldPath))
+
+		gui.ConfirmDanger(
+			lang.L("Migrate Vault"),
+			lang.L(
+				"Move this Vault:\n{{.Old}}\n\nto:\n{{.New}}\n\nUniteVault, Obsidian, and Google Drive sync will all be updated to look for it in the new location. Continue?",
+				map[string]string{"Old": oldPath, "New": newPath},
+			),
+			func(confirmed bool) {
+				if confirmed {
+					t.runVaultMigration(oldPath, newPath, current)
+				}
+			},
+		)
+	})
+}
+
+// runVaultMigration does the actual work of migrateVault, once confirmed:
+// moves the folder, then best-effort updates Obsidian's own vault list and
+// seeds an iCloud Bridge copy (spec 1.6.3) if iCloud Drive is available,
+// then hands off to saveSettingsConfirmed for the usual "ensure Google
+// Drive remote configured, initialize, start the daemon loop" tail -
+// exactly as if the user had just typed the new Vault path in and pressed
+// Save Settings.
+func (t *trayApp) runVaultMigration(oldPath, newPath string, current gui.SettingsFormData) {
+	go func() {
+		release, ok := t.tryBeginExclusiveOp()
+		if !ok {
+			gui.Info(lang.L("Sync In Progress"), lang.L("A sync is currently running. Please wait for it to finish, then try again."))
+			return
+		}
+
+		err := gui.RunWithProgress(
+			lang.L("Migrating Vault"),
+			lang.L("Moving your Vault to its new location..."),
+			func() error { return bootstrap.MoveVaultFolder(oldPath, newPath) },
+		)
+		if err != nil {
+			release()
+			gui.Info(lang.L("Migration Failed"), lang.L("Could not move the Vault: {{.Err}}", map[string]string{"Err": err.Error()}))
+			return
+		}
+
+		var notes []string
+		if err := obsidianconfig.UpdateVaultPath(oldPath, newPath); err != nil {
+			notes = append(notes, lang.L(
+				"Could not automatically update Obsidian's own vault list ({{.Err}}). Open the new folder from Obsidian manually (File > Open Vault).",
+				map[string]string{"Err": err.Error()},
+			))
+		}
+
+		if icloudRoot, ok := bootstrap.ICloudDriveRoot(); ok {
+			bridgePath := filepath.Join(icloudRoot, "Obsidian", filepath.Base(newPath))
+			if err := bootstrap.CopyDirRecursive(newPath, bridgePath); err != nil {
+				notes = append(notes, lang.L(
+					"Could not set up the iCloud Bridge copy for iPhone/iPad ({{.Err}}).",
+					map[string]string{"Err": err.Error()},
+				))
+			} else {
+				cfg, err := t.cfgMgr.LoadConfig()
+				if err != nil || cfg == nil {
+					cfg = &config.Config{}
+				}
+				cfg.ICloudBridgePath = bridgePath
+				_ = t.cfgMgr.SaveConfig(cfg)
+			}
+		}
+
+		release()
+
+		if len(notes) > 0 {
+			gui.Info(lang.L("Vault Moved - Action Needed"), strings.Join(notes, "\n\n"))
+		}
+
+		newData := current
+		newData.VaultPath = newPath
+		t.saveSettingsConfirmed(newData)
+	}()
+}
+
 // saveSettings handles the "Save Settings" button: validates input, warns
 // about a Vault switch that would silently overwrite a previous Vault's
 // Google Drive backup, saves config.json, ensures the Google Drive remote is
@@ -1249,11 +1347,21 @@ func (t *trayApp) saveSettingsConfirmed(data gui.SettingsFormData) {
 			}
 		}
 
+		// Carry the iCloud Bridge path (spec 1.6.3) forward from whatever was
+		// already saved - it's not a field on the form itself (Vault
+		// Migration is the only thing that sets it), so an ordinary Save
+		// Settings must never silently wipe it back to "".
+		var icloudBridgePath string
+		if prevCfg, err := t.cfgMgr.LoadConfig(); err == nil && prevCfg != nil {
+			icloudBridgePath = prevCfg.ICloudBridgePath
+		}
+
 		newCfg := &config.Config{
-			VaultPath:       data.VaultPath,
-			RcloneRemote:    data.RcloneRemote,
-			RclonePath:      data.RclonePath,
-			IntervalSeconds: data.IntervalSeconds,
+			VaultPath:        data.VaultPath,
+			RcloneRemote:     data.RcloneRemote,
+			RclonePath:       data.RclonePath,
+			IntervalSeconds:  data.IntervalSeconds,
+			ICloudBridgePath: icloudBridgePath,
 		}
 		if err := t.cfgMgr.SaveConfig(newCfg); err != nil {
 			gui.Info(lang.L("Save Failed"), lang.L("Failed to save configuration: {{.Err}}", map[string]string{"Err": err.Error()}))

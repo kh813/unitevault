@@ -189,6 +189,73 @@
 
 ---
 
+---
+
+## Phase 14〜19：Google Drive中心アーキテクチャへの移行（2026-08-27〜検討開始）
+
+**背景：** iCloud Drive上に置いたVaultへObsidianが直接書き込む現行方式は、iCloudの内部デーモン（bounced copy等の独自コンフリクト処理）とこのアプリのスキャン・マージ処理が同じファイルを同時に触ってしまうリスクを構造的に抱えている（詳細はunitevault-spec.md 3.6.1.6節「アーキテクチャ移行の経緯」を参照）。これを解消するため、Vault本体はローカル専用フォルダに置き、Google Drive（rclone）を全PC間の主同期経路とし、iCloudは「iPhoneとの橋渡し専用のステージング領域」に限定する方式へ移行する。
+
+対応する仕様書セクション：1.3節・1.4節・2章・3.5節・3.6節（全面改訂、詳細は仕様書側に記載）
+
+### Phase 14：設定・データモデルの拡張
+
+- [ ] Vaultのデフォルト置き場所をローカル専用フォルダに変更（Mac: `~/ObsidianVault`、Windows: `%USERPROFILE%\ObsidianVault`）。iCloud配下に置く運用は禁止しない（自己責任で可）が、推奨・デフォルトではなくする
+- [x] `config.Config`に新フィールド追加：`ICloudBridgePath`（任意。空文字列＝iPhone連携なし・Google Drive同期のみ）
+- [ ] `config.Config`に新フィールド追加：`TickIntervalSeconds`（デフォルト60秒）。既存の`IntervalSeconds`は「Google Drive同期・iCloud Bridge同期それぞれの実効間隔」の目安表示用に意味を変更するか、廃止して`TickIntervalSeconds`に一本化するかを実装時に決定する
+- [ ] iCloud Bridge用の仮想デバイスIDの生成・永続化（`icloud_bridge_device_id`、本体の`device_id`とは別に1つ、Primary機のみが持つ）— Phase 15（継続的なブリッジ同期）着手時に実施。現時点のVault Migration機能は初回シードコピーのみで、継続的な仮想デバイスとしての扱いはまだ無い
+- [x] **Vault Migration機能を先行実装**（Settings画面の「Migrate Vault to Local Folder...」ボタン）：既存Vaultフォルダの選択（OS標準ダイアログ）→ ローカル標準フォルダへの移動（`bootstrap.MoveVaultFolder`、同一ボリューム内はrename、クロスボリュームはcopy+delete）→ Obsidian自身のvault一覧（`obsidian.json`）のベストエフォート更新（`internal/obsidianconfig`、更新前にバックアップ作成）→ iCloud Driveが検出できればブリッジフォルダへの初回シードコピー（`bootstrap.ICloudDriveRoot`/`CopyDirRecursive`）→ 既存の`saveSettingsConfirmed`（remote未設定なら設定を促す・`InitializeNode`・デーモンループ起動）へ引き継ぎ、という一連の流れとして実装済み。**ただし、iCloud Bridgeは今のところ「移行時の初回シードコピー」のみ**で、その後の継続的な双方向同期・マージへの組み込みは未実装（Phase 15で行う）
+- [ ] **コンパイル確認**：実施済み（Vault Migration機能の追加分について。Phase 14の残り項目は引き続き未着手）
+
+### Phase 15：iCloud Bridge機構の実装（継続的な双方向同期。`internal/bridge` 新設想定）
+
+**現状：** 上記Phase 14で実装したVault Migrationは、iCloud Bridgeフォルダへの**初回シードコピーのみ**を行う。iPhone側がその後に行った編集を本体Vaultへ取り込み、マージし、再度ブリッジフォルダへ書き戻すという継続的な同期は、本Phaseで実装する。
+
+- [ ] ブリッジフォルダ（`ICloudBridgePath`）を対象にした独立スキャン（`internal/scan`を別ルートパスに対して再利用）
+- [ ] ブリッジ用ログ（Vault本体の`_sync/log-<bridge-id>.jsonl`）への変更記録 - 仮想デバイスとして通常のデバイスログと同じスキーマに乗せる
+- [ ] 既存の`mergeAndTrackConflicts`にブリッジデバイスがそのまま`devEntries`の一員として混じることを確認（追加のマージロジック変更は基本不要なはず）
+- [ ] マージ結果をブリッジフォルダへ書き戻す処理（ローカル→ローカルミラー。rcloneのlocal-to-localリモートで済ませるか、`os`パッケージで素朴にコピーするかは実装時に決定）
+- [ ] ブリッジフォルダが存在しない／iCloudが未インストール（Windows）の場合のフォールバック（ブリッジ機能を静かに無効化するだけで、他の同期は継続する）
+- [ ] 単体テスト（ブリッジ経由の変更が本体Vaultへ正しく反映されること、逆方向も）
+- [ ] **コンパイル確認**
+
+### Phase 16：Google Drive同期をSecondaryにも拡張
+
+- [ ] Secondary機もGoogle Driveリモートの設定を必須にする（Settings画面の案内・バリデーションを更新）
+- [ ] Secondary: 自分の`_sync/log-<own-id>.jsonl`と変更されたVaultファイルをGoogle Driveへ`rclone copy`でアップロード（`sync`ではなく`copy`を使い、リモート側の削除・他デバイス分ファイルの巻き添え削除を防ぐ）
+- [ ] Primary: Google Driveから全デバイスの`_sync/`ログをpull（`rclone copy`でローカルへ）→ 既存のマージ処理 → マージ後のVault全体を`rclone sync`でGoogle Driveへpublish（Primaryのみがミラー転送の権限を持つ、という既存方針を維持）
+- [ ] Secondary側の`rclone copy` pull処理（Primaryが`sync`で公開した最新のマージ結果を取得し、ローカルVaultへ反映）
+- [ ] 複数Secondaryが同時にpushした場合の扱い（既存のPrimary/Secondary固定ハブ方式の範囲内で解決できるはずだが、実装時に再確認）
+- [ ] **コンパイル確認**
+
+### Phase 17：交互スケジューリングの実装
+
+- [ ] 60秒ティックの共通デーモンループ：毎ティックでローカルスキャン・ログ記録・（Primaryのみ）マージを実行
+- [ ] 外部同期タスク（Google Drive同期・iCloud Bridge同期）をリストとして持ち、ティックごとに順番に1つずつ実行するラウンドロビン方式（Google Driveが未設定 or iCloud Bridgeが未設定の場合はそのタスクをリストから除外する）
+- [ ] 各外部同期の失敗時リトライ方針を3.5.1節の指数バックオフ方針に合わせて見直す
+- [ ] Settings画面の「Sync Interval」表示・設定項目を新モデルに合わせて更新（表記・デフォルト値の見直し）
+- [ ] **コンパイル確認**
+
+### Phase 18：既存ユーザーの移行
+
+- [ ] 起動時、現在のVaultパスがiCloud Drive配下にあると検出した場合の案内ダイアログ（新方式への移行を推奨する旨、手動での移行手順、または自動移行オプション）
+- [ ] 自動移行オプション：新しいローカルVaultフォルダを作成し、既存内容をコピーし、旧iCloud上のVaultフォルダをiCloud Bridge用フォルダとして設定する一連の処理
+- [ ] 移行後、旧`_sync/`ログとの整合性確認（device_id・ログファイルの扱いを実装時に精査）
+- [ ] **コンパイル確認**
+
+### Phase 19：ドキュメント・テスト・仕上げ
+
+- [ ] `unitevault-spec.md`の全面改訂（本Phaseの各項目に対応する節を実装内容に合わせて最終確認・更新）
+- [ ] `README.md`の全面改訂（セットアップ手順・トラブルシューティングを新方式に合わせる）
+- [ ] 新機構全体の統合テスト（Google Drive同期のみ／iCloud Bridgeのみ／両方、の3パターン）
+- [ ] Windows/Macでの実機検証
+- [ ] **コンパイル確認・フルテスト**：`go build ./...` → `go vet ./...` → `go test ./...`、Windowsクロスコンパイル確認
+
+### 将来のTodo（このPhase群のスコープ外）
+
+- Vaultのデータ量・ファイル数に応じて、Google Drive同期・iCloud Bridge同期それぞれの間隔を自動調整、またはユーザーへ変更を提案する機能
+
+---
+
 ## 進め方の補足
 
 - 各PhaseはPhase番号の順に進めることを推奨する（Phase 4〈drive〉→Phase 5〈bootstrap〉→Phase 6〈merge〉の順は依存関係上この並びが自然）。

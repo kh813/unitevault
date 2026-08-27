@@ -17,6 +17,14 @@ type Config struct {
 	RcloneRemote    string `json:"rclone_remote"`
 	RclonePath      string `json:"rclone_path"`
 	IntervalSeconds int    `json:"interval_seconds"`
+	// ICloudBridgePath is the iCloud Drive-resident folder Vault Migration
+	// (spec 1.6.3) seeded a copy of the Vault into, for iPhone/iPad to keep
+	// editing via iCloud. Empty means no bridge was set up (e.g. iCloud
+	// Drive wasn't detected at migration time, or the user has no iPhone).
+	// This is currently a one-time seed copy only - the ongoing bridge
+	// sync/merge described in spec 1.6.3 is still future work (Phase 15,
+	// unitevault-todo.md).
+	ICloudBridgePath string `json:"icloud_bridge_path,omitempty"`
 }
 
 // ConfigManager handles loading and saving settings in the local config directory

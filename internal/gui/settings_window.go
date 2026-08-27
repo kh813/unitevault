@@ -111,6 +111,11 @@ type SettingsHandlers struct {
 	// form's current values when they tap "Promote to Primary...". Shown
 	// whenever data.CanPromoteToPrimary is true (spec 3.6.1.2 / 3.6.1.4).
 	OnPromoteToPrimary func(current SettingsFormData)
+	// OnMigrateVault is called with the form's current values when the
+	// user taps "Migrate Vault to Local Folder..." (spec 1.6, "Vault
+	// Migration"). Always shown when non-nil, regardless of whether a
+	// Vault is already configured.
+	OnMigrateVault func(current SettingsFormData)
 	// OnResolveConflicts is called with the form's current values when the
 	// user taps "Resolve Conflicts...". Shown whenever
 	// data.PendingConflictCount > 0 (spec 3.3.2).
@@ -240,8 +245,6 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		vaultFormItems = append(vaultFormItems, widget.NewFormItem("", hint))
 	}
 
-	vaultCard := widget.NewCard(lang.L("Obsidian Vault"), "", widget.NewForm(vaultFormItems...))
-
 	intervalEntry := widget.NewEntry()
 	intervalEntry.SetText(fmt.Sprintf("%d", data.IntervalSeconds))
 
@@ -319,6 +322,22 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			PendingConflictCount:   data.PendingConflictCount,
 		}
 	}
+
+	// Migrate Vault to Local Folder... (spec 1.6, "Vault Migration") moves
+	// an existing Vault (typically one currently living inside iCloud
+	// Drive) to this app's own local folder, sets up Google Drive sync
+	// there, and seeds an iCloud Bridge copy if iCloud Drive is available -
+	// always available (not gated on data.VaultPath), since it's also how
+	// a brand new user with an existing iCloud-resident Vault gets started.
+	var vaultCardContent []fyne.CanvasObject
+	vaultCardContent = append(vaultCardContent, widget.NewForm(vaultFormItems...))
+	if handlers.OnMigrateVault != nil {
+		migrateVaultBtn := widget.NewButton(lang.L("Migrate Vault to Local Folder..."), func() {
+			handlers.OnMigrateVault(currentSnapshot())
+		})
+		vaultCardContent = append(vaultCardContent, migrateVaultBtn)
+	}
+	vaultCard := widget.NewCard(lang.L("Obsidian Vault"), "", container.NewVBox(vaultCardContent...))
 
 	configureRemoteBtn := widget.NewButton(lang.L("Configure Google Drive Remote..."), func() {
 		if handlers.OnConfigureRemote != nil {
