@@ -76,18 +76,32 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		return fmt.Errorf("vault scan failed: %w", err)
 	}
 
-	lastState, err := e.scanner.LoadLastScan()
+	// lastRawState is purely the debounce comparison baseline (was this
+	// file's hash the same the last time we looked, regardless of whether
+	// that was ever confirmed/logged) - never used to decide what changed.
+	lastRawState, err := e.scanner.LoadLastScan()
 	if err != nil {
 		return fmt.Errorf("failed to load last scan: %w", err)
 	}
+	stableState := scan.DebounceFilter(lastRawState, currState)
 
-	// Debounce check
-	stableState := scan.DebounceFilter(lastState, currState)
-	changes := scan.DetectChanges(lastState, stableState)
+	// confirmedState is what DetectChanges actually compares against - see
+	// Scanner.ConfirmedStateFilePath's doc comment for why this must be a
+	// separate, independently-advanced baseline from lastRawState above.
+	// ReconcileForDetection (not stableState directly) tells apart a
+	// genuine deletion from a file simply mid-edit, not yet confirmed
+	// stable - see its own doc comment.
+	confirmedState, err := e.scanner.LoadConfirmedState()
+	if err != nil {
+		return fmt.Errorf("failed to load confirmed scan state: %w", err)
+	}
+	changes := scan.DetectChanges(confirmedState, scan.ReconcileForDetection(confirmedState, currState, stableState))
 
-	// Save scan state
 	if err := e.scanner.SaveScanState(currState); err != nil {
 		return fmt.Errorf("failed to save scan state: %w", err)
+	}
+	if err := e.scanner.SaveConfirmedState(scan.ApplyChangesToState(confirmedState, changes)); err != nil {
+		return fmt.Errorf("failed to save confirmed scan state: %w", err)
 	}
 
 	// 2. Log changes for this device
@@ -145,6 +159,17 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		return nil
 	}
 
+	// Primary node: pull in changes from the iCloud Bridge folder (spec
+	// 1.6.3), if one is configured, before merging - best-effort: a
+	// problem with the (optional) Bridge must never block the Google
+	// Drive sync that follows.
+	if primaryCfg.ICloudBridgePath != "" {
+		bridgeDeviceID, err := e.cfgMgr.GetOrCreateBridgeDeviceID()
+		if err == nil {
+			_, _ = ScanBridgeAndLog(e.vaultPath, primaryCfg.ICloudBridgePath, bridgeDeviceID, "iCloud Bridge")
+		}
+	}
+
 	// Primary node: Perform 3-way/N-way merges across device logs
 	latestByPath, err := e.logMgr.LatestEntryByPath()
 	if err != nil {
@@ -152,6 +177,12 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	}
 	if err := e.mergeAndTrackConflicts(latestByPath); err != nil {
 		return err
+	}
+
+	// Mirror the merged result back out to the iCloud Bridge folder, so
+	// the next iCloud sync carries it to iPhone/iPad - again best-effort.
+	if primaryCfg.ICloudBridgePath != "" {
+		_ = MirrorVaultToBridge(e.vaultPath, primaryCfg.ICloudBridgePath)
 	}
 
 	// 3. Mirror to Google Drive via rclone sync

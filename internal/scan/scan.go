@@ -75,13 +75,44 @@ func NewScanner(vaultPath string) *Scanner {
 // ScanResult holds current scan state and stability info for debounce.
 type ScanResult struct {
 	CurrentState *ScanState
-	StableState  *ScanState            // Files that are stable (unchanged across 2 scans)
-	Changes      []FileChange          // Changes detected relative to previous stable state
+	StableState  *ScanState   // Files that are stable (unchanged across 2 scans)
+	Changes      []FileChange // Changes detected relative to previous stable state
 }
 
-// StateFilePath returns the path to _sync/state/last_scan.json
+// StateFilePath returns the path to _sync/state/last_scan.json - the raw
+// scan from the previous cycle, used only as DebounceFilter's comparison
+// baseline (see LoadLastScan/SaveScanState). Deliberately distinct from
+// ConfirmedStateFilePath - see that method's doc comment for why a single
+// state can't serve both roles.
 func (s *Scanner) StateFilePath() string {
 	return filepath.Join(s.vaultPath, "_sync", "state", "last_scan.json")
+}
+
+// ConfirmedStateFilePath returns the path to
+// _sync/state/last_confirmed_scan.json - the state DetectChanges compares
+// against to decide what actually changed (see LoadConfirmedState/
+// SaveConfirmedState/ApplyChangesToState).
+//
+// This must be a *different* file from StateFilePath/last_scan.json, and
+// must only ever be advanced for paths ApplyChangesToState has just
+// logged - never wholesale-replaced with a raw scan. A real, previously-
+// shipped bug came from doing exactly that (SaveScanState(currState) was
+// also being used as DetectChanges' comparison baseline): the cycle right
+// after an edit compares the stale confirmed baseline against a not-yet-
+// debounce-stable current scan, which correctly logs the edit as
+// (spuriously) deleted - deleted because the edited path is genuinely
+// absent from the *stable* set that cycle, not because it was actually
+// removed. But the very next cycle, once the edit *is* stable, the
+// baseline being compared against is by then the raw scan saved during
+// that transitional cycle - which already reflects the new content - so
+// DetectChanges sees no difference and the edit is never logged as a
+// create/modify at all. Net effect: every edit to an existing file
+// produced one bogus delete entry and then vanished from the log
+// entirely, forever, with the real new content never recorded anywhere -
+// undermining the entire cross-device merge system (spec 3.3/3.4), which
+// depends on log entries actually existing to reconstruct anything.
+func (s *Scanner) ConfirmedStateFilePath() string {
+	return filepath.Join(s.vaultPath, "_sync", "state", "last_confirmed_scan.json")
 }
 
 // LoadLastScan loads the last recorded scan state from disk.
@@ -118,6 +149,109 @@ func (s *Scanner) SaveScanState(state *ScanState) error {
 	}
 
 	return os.WriteFile(path, data, 0644)
+}
+
+// LoadConfirmedState loads DetectChanges' comparison baseline (see
+// ConfirmedStateFilePath), or an empty state if none has been recorded
+// yet (first run, or upgrading from before this file existed).
+func (s *Scanner) LoadConfirmedState() (*ScanState, error) {
+	path := s.ConfirmedStateFilePath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &ScanState{Files: make(map[string]FileState)}, nil
+		}
+		return nil, fmt.Errorf("failed to read confirmed scan state: %w", err)
+	}
+
+	var state ScanState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal confirmed scan state: %w", err)
+	}
+	if state.Files == nil {
+		state.Files = make(map[string]FileState)
+	}
+	return &state, nil
+}
+
+// SaveConfirmedState persists DetectChanges' comparison baseline (see
+// ConfirmedStateFilePath). Callers should pass the result of
+// ApplyChangesToState, never a raw scan.
+func (s *Scanner) SaveConfirmedState(state *ScanState) error {
+	path := s.ConfirmedStateFilePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("failed to create confirmed scan state dir: %w", err)
+	}
+
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal confirmed scan state: %w", err)
+	}
+
+	return os.WriteFile(path, data, 0644)
+}
+
+// ReconcileForDetection builds the "curr" argument DetectChanges should
+// compare against confirmed - never stableState directly. stableState
+// alone can't distinguish "genuinely deleted" from "present, but debounce
+// hasn't confirmed it stable yet" (both are simply absent from it), which
+// on its own would make DetectChanges log a spurious delete for any file
+// mid-edit, immediately followed by the real new content never being
+// logged at all (see ConfirmedStateFilePath's doc comment for the full
+// history). Resolving that needs currState too: a confirmed path missing
+// from stableState is only a real deletion if it's *also* missing from
+// currState (the raw scan) - otherwise it's just not stable yet, and must
+// be carried over at its old confirmed value so DetectChanges reports no
+// change for it this cycle (rather than a delete now and total silence
+// once it finally does stabilize).
+func ReconcileForDetection(confirmed, currState, stableState *ScanState) *ScanState {
+	result := &ScanState{Files: make(map[string]FileState, len(confirmed.Files))}
+	for path, f := range confirmed.Files {
+		if sf, ok := stableState.Files[path]; ok {
+			result.Files[path] = sf // freshly confirmed stable - use the new value
+			continue
+		}
+		if _, stillPresent := currState.Files[path]; stillPresent {
+			result.Files[path] = f // mid-transition - not a change yet, keep the old value
+		}
+		// else: genuinely gone from the current raw scan - a real
+		// deletion, omitted so DetectChanges reports it as such.
+	}
+	// Paths stable *and* not yet confirmed at all are brand new creates.
+	for path, sf := range stableState.Files {
+		if _, already := confirmed.Files[path]; !already {
+			result.Files[path] = sf
+		}
+	}
+	return result
+}
+
+// ApplyChangesToState returns a new ScanState with exactly the paths in
+// changes updated against prev - everything else in prev (both genuinely
+// unchanged files and files mid-transition that debounce hasn't confirmed
+// stable yet, and so aren't in changes at all) is carried over untouched.
+// This is how the confirmed-state baseline (see ConfirmedStateFilePath)
+// must always be advanced - never by replacing it outright with a raw or
+// debounced scan, which is what caused the bug that comment documents.
+func ApplyChangesToState(prev *ScanState, changes []FileChange) *ScanState {
+	next := &ScanState{Files: make(map[string]FileState, len(prev.Files))}
+	for path, f := range prev.Files {
+		next.Files[path] = f
+	}
+
+	for _, ch := range changes {
+		switch ch.Action {
+		case ActionDelete:
+			delete(next.Files, ch.Path)
+		case ActionRename:
+			delete(next.Files, ch.OldPath)
+			next.Files[ch.Path] = FileState{Hash: ch.ResultHash}
+		default: // ActionCreate, ActionModify
+			next.Files[ch.Path] = FileState{Hash: ch.ResultHash}
+		}
+	}
+
+	return next
 }
 
 // ScanVault walks the Vault directory and calculates hashes for all files excluding `_sync/`.

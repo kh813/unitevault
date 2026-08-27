@@ -206,17 +206,19 @@
 - [x] **Vault Migration機能を先行実装**（Settings画面の「Migrate Vault to Local Folder...」ボタン）：既存Vaultフォルダの選択（OS標準ダイアログ）→ ローカル標準フォルダへの移動（`bootstrap.MoveVaultFolder`、同一ボリューム内はrename、クロスボリュームはcopy+delete）→ Obsidian自身のvault一覧（`obsidian.json`）のベストエフォート更新（`internal/obsidianconfig`、更新前にバックアップ作成）→ iCloud Driveが検出できればブリッジフォルダへの初回シードコピー（`bootstrap.ICloudDriveRoot`/`CopyDirRecursive`）→ 既存の`saveSettingsConfirmed`（remote未設定なら設定を促す・`InitializeNode`・デーモンループ起動）へ引き継ぎ、という一連の流れとして実装済み。**ただし、iCloud Bridgeは今のところ「移行時の初回シードコピー」のみ**で、その後の継続的な双方向同期・マージへの組み込みは未実装（Phase 15で行う）
 - [ ] **コンパイル確認**：実施済み（Vault Migration機能の追加分について。Phase 14の残り項目は引き続き未着手）
 
-### Phase 15：iCloud Bridge機構の実装（継続的な双方向同期。`internal/bridge` 新設想定）
+### Phase 15：iCloud Bridge機構の実装（継続的な双方向同期。実装済み）
 
-**現状：** 上記Phase 14で実装したVault Migrationは、iCloud Bridgeフォルダへの**初回シードコピーのみ**を行う。iPhone側がその後に行った編集を本体Vaultへ取り込み、マージし、再度ブリッジフォルダへ書き戻すという継続的な同期は、本Phaseで実装する。
+**実装済み。** `internal/engine/bridge.go`に、Vault本体とは独立したブリッジフォルダのスキャン・仮想デバイスとしてのログ記録・マージ結果の書き戻しを実装した。`RunCycle`から、Primaryかつ`ICloudBridgePath`が設定されている場合にのみ呼び出す（ベストエフォート、失敗してもGoogle Drive同期は継続する）。
 
-- [ ] ブリッジフォルダ（`ICloudBridgePath`）を対象にした独立スキャン（`internal/scan`を別ルートパスに対して再利用）
-- [ ] ブリッジ用ログ（Vault本体の`_sync/log-<bridge-id>.jsonl`）への変更記録 - 仮想デバイスとして通常のデバイスログと同じスキーマに乗せる
-- [ ] 既存の`mergeAndTrackConflicts`にブリッジデバイスがそのまま`devEntries`の一員として混じることを確認（追加のマージロジック変更は基本不要なはず）
-- [ ] マージ結果をブリッジフォルダへ書き戻す処理（ローカル→ローカルミラー。rcloneのlocal-to-localリモートで済ませるか、`os`パッケージで素朴にコピーするかは実装時に決定）
-- [ ] ブリッジフォルダが存在しない／iCloudが未インストール（Windows）の場合のフォールバック（ブリッジ機能を静かに無効化するだけで、他の同期は継続する）
-- [ ] 単体テスト（ブリッジ経由の変更が本体Vaultへ正しく反映されること、逆方向も）
-- [ ] **コンパイル確認**
+- [x] ブリッジフォルダ（`ICloudBridgePath`）を対象にした独立スキャン（`internal/scan.Scanner`を別ルートパスに対して再利用）
+- [x] ブリッジ用ログ（Vault本体の`_sync/log-<bridge-id>.jsonl`）への変更記録 - 仮想デバイスとして通常のデバイスログと同じスキーマに乗せる（`ScanBridgeAndLog`）。仮想デバイスIDは`config.ConfigManager.GetOrCreateBridgeDeviceID`で生成・永続化（`icloud_bridge_device_id`）
+- [x] 既存の`mergeAndTrackConflicts`にブリッジデバイスがそのまま`devEntries`の一員として混じることを確認 - 追加のマージロジック変更は不要だった
+- [x] マージ結果をブリッジフォルダへ書き戻す処理（`MirrorVaultToBridge`。`os`パッケージでの素朴な再帰コピー＋差分のあるファイルのみ書き込み＋Vaultから消えたファイルの削除、という手作りのローカル⇔ローカルミラー）
+- [x] ブリッジフォルダが存在しない／未設定の場合のフォールバック（`ICloudBridgePath`が空ならスキャン・書き戻しとも単純にスキップ）
+- [x] 単体テスト（`internal/engine/bridge_test.go`：ブリッジ経由の変更が本体Vaultへ正しく反映されること、マージ結果の書き戻し、ブリッジ自身の`_sync/`が誤って上書きされないこと）
+- [x] **コンパイル確認・フルテスト**
+
+**重要：この実装の過程で、`internal/scan`の変更検出パイプライン自体に、Phase 15固有ではない、より根本的なバグを発見・修正した（spec 3.4.2節）。** 既存ファイルの編集が、デバウンス方式と組み合わせると正しくログに記録されず（偽の削除が1回記録された後、本来のmodify/createが永久にログに残らない）、これは3-way merge（3.3節）が依存するログ自体の正しさを損なう、Phase 15より深刻な問題だった。`_sync/state/last_scan.json`（デバウンス比較専用）と`_sync/state/last_confirmed_scan.json`（変更検出の比較基準、新設）を分離し、さらに「デバウンス未確定」と「本当の削除」を区別する`ReconcileForDetection`を追加することで解決した。`internal/scan/scan_test.go`に、実際の複数サイクルを通しで検証する回帰テストを追加済み。
 
 ### Phase 16：Google Drive同期をSecondaryにも拡張
 

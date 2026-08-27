@@ -154,3 +154,174 @@ func TestDebounceFilter(t *testing.T) {
 		t.Errorf("expected a.txt to be stable")
 	}
 }
+
+func TestReconcileForDetection(t *testing.T) {
+	confirmed := &scan.ScanState{Files: map[string]scan.FileState{
+		"stable.md":        {Hash: "h-stable"},
+		"transitioning.md": {Hash: "h-old"},
+		"deleted.md":       {Hash: "h-gone"},
+	}}
+	currState := &scan.ScanState{Files: map[string]scan.FileState{
+		"stable.md":        {Hash: "h-stable"},
+		"transitioning.md": {Hash: "h-new-not-yet-stable"}, // present, but...
+		"created.md":       {Hash: "h-created"},
+		// "deleted.md" is genuinely absent here too.
+	}}
+	stableState := &scan.ScanState{Files: map[string]scan.FileState{
+		"stable.md":  {Hash: "h-stable"},
+		"created.md": {Hash: "h-created"},
+		// "transitioning.md" not yet stable, so absent here (but present
+		// in currState above) - must NOT be treated as deleted.
+	}}
+
+	got := scan.ReconcileForDetection(confirmed, currState, stableState)
+
+	if h, ok := got.Files["stable.md"]; !ok || h.Hash != "h-stable" {
+		t.Errorf("expected stable.md to carry its stable value, got %+v (present=%v)", h, ok)
+	}
+	if h, ok := got.Files["transitioning.md"]; !ok || h.Hash != "h-old" {
+		t.Errorf("expected transitioning.md to keep its OLD confirmed value (not yet a change, and not a deletion), got %+v (present=%v)", h, ok)
+	}
+	if _, ok := got.Files["deleted.md"]; ok {
+		t.Error("expected deleted.md (genuinely absent from currState) to be treated as deleted")
+	}
+	if h, ok := got.Files["created.md"]; !ok || h.Hash != "h-created" {
+		t.Errorf("expected created.md (stable, never confirmed before) to appear as a create, got %+v (present=%v)", h, ok)
+	}
+}
+
+func TestApplyChangesToState(t *testing.T) {
+	prev := &scan.ScanState{Files: map[string]scan.FileState{
+		"unchanged.md": {Hash: "h-unchanged"},
+		"modified.md":  {Hash: "h-old"},
+		"deleted.md":   {Hash: "h-deleted"},
+		"old-name.md":  {Hash: "h-renamed"},
+		// "still-transitioning.md" is deliberately absent from changes below
+		// (debounce hasn't confirmed it stable yet) - it must survive
+		// untouched, which this state alone can't show; see the dedicated
+		// mid-transition test below instead.
+	}}
+	changes := []scan.FileChange{
+		{Action: scan.ActionModify, Path: "modified.md", ResultHash: "h-new"},
+		{Action: scan.ActionDelete, Path: "deleted.md"},
+		{Action: scan.ActionRename, Path: "new-name.md", OldPath: "old-name.md", ResultHash: "h-renamed"},
+		{Action: scan.ActionCreate, Path: "created.md", ResultHash: "h-created"},
+	}
+
+	next := scan.ApplyChangesToState(prev, changes)
+
+	want := map[string]string{
+		"unchanged.md": "h-unchanged",
+		"modified.md":  "h-new",
+		"new-name.md":  "h-renamed",
+		"created.md":   "h-created",
+	}
+	if len(next.Files) != len(want) {
+		t.Fatalf("expected %d files, got %d: %+v", len(want), len(next.Files), next.Files)
+	}
+	for path, hash := range want {
+		if got, ok := next.Files[path]; !ok || got.Hash != hash {
+			t.Errorf("expected %s to have hash %q, got %+v (present=%v)", path, hash, got, ok)
+		}
+	}
+	if _, stillThere := next.Files["deleted.md"]; stillThere {
+		t.Error("expected deleted.md to be removed from the resulting state")
+	}
+	if _, stillThere := next.Files["old-name.md"]; stillThere {
+		t.Error("expected old-name.md to be removed (renamed away) from the resulting state")
+	}
+}
+
+// TestApplyChangesToState_LeavesUnlistedPathsUntouched guards the property
+// the whole fix depends on: a path debounce hasn't confirmed stable yet
+// (and so has no entry in changes) must keep its *old* confirmed value,
+// not be dropped or updated - otherwise the next cycle would have nothing
+// correct left to compare its eventual stable value against.
+func TestApplyChangesToState_LeavesUnlistedPathsUntouched(t *testing.T) {
+	prev := &scan.ScanState{Files: map[string]scan.FileState{
+		"still-transitioning.md": {Hash: "h-original"},
+	}}
+
+	next := scan.ApplyChangesToState(prev, nil)
+
+	if got, ok := next.Files["still-transitioning.md"]; !ok || got.Hash != "h-original" {
+		t.Errorf("expected still-transitioning.md to be carried over unchanged, got %+v (present=%v)", got, ok)
+	}
+}
+
+// TestScanner_MultiCycleIntegration_ModifyIsCorrectlyDetected is the
+// regression test for a real, previously-shipped bug: chaining
+// ScanVault -> DebounceFilter -> DetectChanges -> SaveScanState the way
+// engine.go actually does, using a single shared last_scan.json as both
+// the debounce baseline *and* DetectChanges' comparison baseline, meant
+// that editing an existing file produced one bogus "delete" the cycle
+// right after the edit, and then the edit was never logged as a
+// create/modify at all - the new content silently became the baseline
+// with no log entry ever describing how it got there. This drives several
+// scan cycles exactly the way RunCycle now does (a separately-advanced
+// confirmed-state baseline) and checks a real edit is eventually reported
+// as ActionModify with the correct before/after hashes - never as a
+// delete, and not silently dropped.
+func TestScanner_MultiCycleIntegration_ModifyIsCorrectlyDetected(t *testing.T) {
+	vault := t.TempDir()
+	scanner := scan.NewScanner(vault)
+	notePath := filepath.Join(vault, "note.md")
+
+	runCycle := func() []scan.FileChange {
+		curr, err := scanner.ScanVault()
+		if err != nil {
+			t.Fatalf("ScanVault failed: %v", err)
+		}
+		lastRaw, err := scanner.LoadLastScan()
+		if err != nil {
+			t.Fatalf("LoadLastScan failed: %v", err)
+		}
+		stable := scan.DebounceFilter(lastRaw, curr)
+
+		confirmed, err := scanner.LoadConfirmedState()
+		if err != nil {
+			t.Fatalf("LoadConfirmedState failed: %v", err)
+		}
+		changes := scan.DetectChanges(confirmed, scan.ReconcileForDetection(confirmed, curr, stable))
+
+		if err := scanner.SaveScanState(curr); err != nil {
+			t.Fatalf("SaveScanState failed: %v", err)
+		}
+		if err := scanner.SaveConfirmedState(scan.ApplyChangesToState(confirmed, changes)); err != nil {
+			t.Fatalf("SaveConfirmedState failed: %v", err)
+		}
+		return changes
+	}
+
+	if err := os.WriteFile(notePath, []byte("version 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Two cycles with stable content are needed before version 1 itself
+	// becomes the *confirmed* baseline (debounce needs 2 consecutive
+	// matching raw scans, and confirmation lags a further cycle behind
+	// that) - otherwise editing again before it's confirmed would make the
+	// edit look like the path's first-ever create instead of a modify,
+	// which is a real but different case this test isn't after.
+	runCycle()
+	runCycle()
+
+	if err := os.WriteFile(notePath, []byte("version 2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var modifyChanges []scan.FileChange
+	for i := 0; i < 5 && len(modifyChanges) == 0; i++ {
+		for _, ch := range runCycle() {
+			if ch.Path == "note.md" {
+				modifyChanges = append(modifyChanges, ch)
+			}
+		}
+	}
+
+	if len(modifyChanges) != 1 {
+		t.Fatalf("expected exactly 1 change logged for note.md across settling cycles, got %d: %+v", len(modifyChanges), modifyChanges)
+	}
+	if modifyChanges[0].Action != scan.ActionModify {
+		t.Errorf("expected the edit to be logged as ActionModify, got %s", modifyChanges[0].Action)
+	}
+}

@@ -84,6 +84,15 @@ func (cm *ConfigManager) DeviceIDPath() string {
 	return filepath.Join(cm.configDir, "device_id")
 }
 
+// BridgeDeviceIDPath returns the path to icloud_bridge_device_id - a
+// second, separate UUID (spec 1.6.3) this device uses to log changes
+// detected in the iCloud Bridge folder, kept distinct from this device's
+// own DeviceIDPath so Bridge-originated entries are clearly
+// distinguishable from this device's own real edits in _sync/ logs.
+func (cm *ConfigManager) BridgeDeviceIDPath() string {
+	return filepath.Join(cm.configDir, "icloud_bridge_device_id")
+}
+
 // RolePath returns the path to role
 func (cm *ConfigManager) RolePath() string {
 	return filepath.Join(cm.configDir, "role")
@@ -368,6 +377,33 @@ func (cm *ConfigManager) GetDeviceID() (string, error) {
 	newID := uuid.New().String()
 	if err := os.WriteFile(path, []byte(newID), 0644); err != nil {
 		return "", fmt.Errorf("failed to write device_id: %w", err)
+	}
+
+	return newID, nil
+}
+
+// GetOrCreateBridgeDeviceID reads icloud_bridge_device_id, generating and
+// persisting a new UUID on first use - GetDeviceID's exact behavior,
+// mirrored against BridgeDeviceIDPath instead (spec 1.6.3).
+func (cm *ConfigManager) GetOrCreateBridgeDeviceID() (string, error) {
+	path := cm.BridgeDeviceIDPath()
+	data, err := os.ReadFile(path)
+	if err == nil {
+		id := strings.TrimSpace(string(data))
+		if id != "" {
+			return id, nil
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("failed to read icloud_bridge_device_id: %w", err)
+	}
+
+	if err := cm.EnsureDir(); err != nil {
+		return "", err
+	}
+
+	newID := uuid.New().String()
+	if err := os.WriteFile(path, []byte(newID), 0644); err != nil {
+		return "", fmt.Errorf("failed to write icloud_bridge_device_id: %w", err)
 	}
 
 	return newID, nil
