@@ -10,7 +10,7 @@
   "Migrate Vault": "Vaultを移行",
   "Move this Vault:\n{{.Old}}\n\nto:\n{{.New}}\n\nUniteVault, Obsidian, and Google Drive sync will all be updated to look for it in the new location. Continue?": "このVaultを:\n{{.Old}}\n\n次の場所へ移動します:\n{{.New}}\n\nUniteVault・Obsidian・Google Drive同期のすべてが、新しい場所を参照するよう更新されます。続行しますか？",
   "Migrating Vault": "Vaultを移行中",
-  "Moving your Vault to its new location...": "Vaultを新しい場所へ移動しています...",
+  "Closing Obsidian (if it's currently running) and moving your Vault to its new location...": "Obsidianが起動している場合は終了し、Vaultを新しい場所へ移動しています...",
   "Migration Failed": "移行に失敗しました",
   "Could not determine your home folder: {{.Err}}": "ホームフォルダを特定できませんでした: {{.Err}}",
   "Could not move the Vault: {{.Err}}": "Vaultを移動できませんでした: {{.Err}}",

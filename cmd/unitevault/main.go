@@ -1229,8 +1229,17 @@ func (t *trayApp) runVaultMigration(oldPath, newPath string, current gui.Setting
 
 		err := gui.RunWithProgress(
 			lang.L("Migrating Vault"),
-			lang.L("Moving your Vault to its new location..."),
-			func() error { return bootstrap.MoveVaultFolder(oldPath, newPath) },
+			lang.L("Closing Obsidian (if it's currently running) and moving your Vault to its new location..."),
+			func() error {
+				// Best-effort: if Obsidian has the Vault open, it can hold
+				// file handles that make the move fail outright (Windows)
+				// or leave it pointed at a now-stale location (macOS).
+				// Unconditionally targets Obsidian by name rather than
+				// first checking whether this specific folder is the one
+				// open in it - see QuitObsidian's own doc comment.
+				bootstrap.QuitObsidian(context.Background())
+				return bootstrap.MoveVaultFolder(oldPath, newPath)
+			},
 		)
 		if err != nil {
 			release()
