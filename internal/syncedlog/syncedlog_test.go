@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kh813/unitevault/internal/scan"
+	"github.com/kh813/unitevault/internal/syncdir"
 	"github.com/kh813/unitevault/internal/syncedlog"
 )
 
@@ -130,7 +131,7 @@ func TestLogManager_MultipleDevicesLatestEntry(t *testing.T) {
 func TestDeviceLogPath(t *testing.T) {
 	vault := "/tmp/vault"
 	lm := syncedlog.NewLogManager(vault)
-	expected := filepath.Join("/tmp/vault", "_sync", "log-uuid123.jsonl")
+	expected := filepath.Join("/tmp/vault", syncdir.Name, "log-uuid123.jsonl")
 	if lm.DeviceLogPath("uuid123") != expected {
 		t.Fatalf("expected %s, got %s", expected, lm.DeviceLogPath("uuid123"))
 	}

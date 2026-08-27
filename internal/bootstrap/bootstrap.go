@@ -11,19 +11,20 @@ import (
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/drive"
 	"github.com/kh813/unitevault/internal/eventlog"
+	"github.com/kh813/unitevault/internal/syncdir"
 )
 
 const AppVersion = "0.0.49"
-const PrimaryMarkerRelPath = "_sync/PRIMARY_MARKER.json"
+const PrimaryMarkerRelPath = syncdir.Name + "/PRIMARY_MARKER.json"
 
 // ConflictMarkerRelPath is the Google Drive path (not mirrored into the
-// local Vault/_sync/ folder like PrimaryMarkerRelPath is - see
+// local Vault/.sync/ folder like PrimaryMarkerRelPath is - see
 // VerifyPrimaryStatus) of the shared record filed when two devices
 // disagree about who is Primary (spec section 3.6.1.4). Its mere presence
 // pauses Google Drive sync on every device that notices it, whichever side
 // of the disagreement they're on, until a human resolves it via
 // PromoteToPrimary (Settings > "Promote to Primary...").
-const ConflictMarkerRelPath = "_sync/PRIMARY_CONFLICT.json"
+const ConflictMarkerRelPath = syncdir.Name + "/PRIMARY_CONFLICT.json"
 
 // PrimaryConflictMarker is the schema of PRIMARY_CONFLICT.json.
 type PrimaryConflictMarker struct {
@@ -61,6 +62,13 @@ func NewBootstrapper(cfgMgr *config.ConfigManager, runner drive.RcloneRunner) *B
 
 // InitializeNode checks Google Drive for PRIMARY_MARKER.json and sets up primary or secondary role.
 func (b *Bootstrapper) InitializeNode(ctx context.Context, vaultPath, remoteTarget, label string) (string, error) {
+	// Best-effort, one-time upgrade for a device that ran an older version
+	// of this app before the bookkeeping directory was renamed to a
+	// dot-prefixed name (SyncEngine's own constructor does this too, but
+	// this can also be reached directly - e.g. Save Settings - without one
+	// ever having been constructed first).
+	syncdir.Migrate(vaultPath)
+
 	deviceID, err := b.cfgMgr.GetDeviceID()
 	if err != nil {
 		return "", fmt.Errorf("failed to get device ID: %w", err)
@@ -134,10 +142,10 @@ func (b *Bootstrapper) initAsPrimary(ctx context.Context, vaultPath, remoteTarge
 		return fmt.Errorf("failed to marshal primary marker: %w", err)
 	}
 
-	// 6.3: Save local copy in Vault/_sync/PRIMARY_MARKER.json
-	localMarkerPath := filepath.Join(vaultPath, "_sync", "PRIMARY_MARKER.json")
+	// 6.3: Save local copy in Vault/.sync/PRIMARY_MARKER.json
+	localMarkerPath := filepath.Join(vaultPath, syncdir.Name, "PRIMARY_MARKER.json")
 	if err := os.MkdirAll(filepath.Dir(localMarkerPath), 0755); err != nil {
-		return fmt.Errorf("failed to create local _sync dir: %w", err)
+		return fmt.Errorf("failed to create local sync dir: %w", err)
 	}
 	if err := os.WriteFile(localMarkerPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to save local primary marker: %w", err)
@@ -193,9 +201,9 @@ func (b *Bootstrapper) initAsPrimary(ctx context.Context, vaultPath, remoteTarge
 // needed for anything this device's own sync cycle actually uses.
 func (b *Bootstrapper) initAsSecondary(vaultPath, deviceID string) error {
 	// Create empty log file for this device if not exists
-	localLogPath := filepath.Join(vaultPath, "_sync", fmt.Sprintf("log-%s.jsonl", deviceID))
+	localLogPath := filepath.Join(vaultPath, syncdir.Name, fmt.Sprintf("log-%s.jsonl", deviceID))
 	if err := os.MkdirAll(filepath.Dir(localLogPath), 0755); err != nil {
-		return fmt.Errorf("failed to create _sync dir: %w", err)
+		return fmt.Errorf("failed to create sync dir: %w", err)
 	}
 
 	if _, err := os.Stat(localLogPath); os.IsNotExist(err) {

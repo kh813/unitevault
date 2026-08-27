@@ -13,6 +13,7 @@ import (
 	"github.com/kh813/unitevault/internal/eventlog"
 	"github.com/kh813/unitevault/internal/merge"
 	"github.com/kh813/unitevault/internal/scan"
+	"github.com/kh813/unitevault/internal/syncdir"
 	"github.com/kh813/unitevault/internal/syncedlog"
 	"github.com/kh813/unitevault/internal/watch"
 )
@@ -99,8 +100,17 @@ func (e *SyncEngine) scanStep(lastRawState *scan.ScanState) (*scan.ScanState, er
 }
 
 func NewSyncEngine(cfgMgr *config.ConfigManager, vaultPath string, label string, driveRunner drive.RcloneRunner) *SyncEngine {
+	// Best-effort, one-time upgrade for a device that ran an older version
+	// of this app before the bookkeeping directory was renamed to a
+	// dot-prefixed name (so Obsidian's file explorer hides it - it isn't
+	// meant to be user-visible or user-edited). Done here, at construction
+	// time, so it's complete before any of this engine's other fields
+	// (which all assume syncdir.Name already exists in its final form) are
+	// ever touched.
+	syncdir.Migrate(vaultPath)
+
 	if driveRunner == nil {
-		driveRunner = drive.NewClient(filepath.Join(vaultPath, "_sync", "engine.log"))
+		driveRunner = drive.NewClient(filepath.Join(vaultPath, syncdir.Name, "engine.log"))
 	}
 	return &SyncEngine{
 		cfgMgr:    cfgMgr,
@@ -212,7 +222,7 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		}
 	}
 
-	// Secondary node: push this device's own _sync/ (its log and nothing
+	// Secondary node: push this device's own .sync/ (its log and nothing
 	// else - the log entries already carry full content, spec 3.4, so
 	// there's no need to push raw Vault files too) to Google Drive via
 	// `rclone copy` (additive only, never `sync` - must never delete
@@ -240,13 +250,13 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 			// pushing it never lets another device's pull silently
 			// overwrite that other device's own copy of the same relative
 			// path with this device's state instead.
-			if err := e.drive.Copy(ctx, filepath.Join(e.vaultPath, "_sync"), remoteTarget+"/_sync", "state/**"); err != nil {
+			if err := e.drive.Copy(ctx, filepath.Join(e.vaultPath, syncdir.Name), remoteTarget+"/"+syncdir.Name, "state/**"); err != nil {
 				return fmt.Errorf("failed to push local changes to Google Drive: %w", err)
 			}
-			// _sync/state/** excluded here so this pull can never
+			// .sync/state/** excluded here so this pull can never
 			// overwrite this device's own scanner bookkeeping with
 			// Primary's.
-			if err := e.drive.Copy(ctx, remoteTarget, e.vaultPath, "/_sync/state/**"); err != nil {
+			if err := e.drive.Copy(ctx, remoteTarget, e.vaultPath, "/"+syncdir.Name+"/state/**"); err != nil {
 				return fmt.Errorf("failed to pull latest changes from Google Drive: %w", err)
 			}
 
@@ -298,16 +308,16 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	runDrive := runningExternalTask && task == taskDrive
 	runBridge := runningExternalTask && task == taskBridge
 
-	// Primary node: pull every other device's pushed _sync/ (their logs -
+	// Primary node: pull every other device's pushed .sync/ (their logs -
 	// spec 1.6.4) from Google Drive before merging, so
 	// mergeAndTrackConflicts can see Secondaries' contributions. Scoped to
-	// _sync/ only, via `rclone copy` (additive), so this can never
+	// .sync/ only, via `rclone copy` (additive), so this can never
 	// overwrite this device's own just-edited Vault content with a stale
 	// Drive copy - only the log entries flow in, not raw files.
 	if runDrive {
 		// state/** excluded so this pull can never overwrite Primary's own
 		// scanner bookkeeping with whichever other device pushed last.
-		if err := e.drive.Copy(ctx, remoteTarget+"/_sync", filepath.Join(e.vaultPath, "_sync"), "state/**"); err != nil {
+		if err := e.drive.Copy(ctx, remoteTarget+"/"+syncdir.Name, filepath.Join(e.vaultPath, syncdir.Name), "state/**"); err != nil {
 			return fmt.Errorf("failed to pull other devices' changes from Google Drive: %w", err)
 		}
 	}
@@ -325,7 +335,7 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 
 	// Primary node: Perform 3-way/N-way merges across device logs - always
 	// runs every tick, regardless of which (if any) external destination
-	// got a turn, using whatever's currently in _sync/ (freshly pulled
+	// got a turn, using whatever's currently in .sync/ (freshly pulled
 	// this tick, or carried over from a previous one).
 	latestByPath, err := e.logMgr.LatestEntryByPath()
 	if err != nil {
@@ -352,11 +362,11 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		// actual Drive sync that follows.
 		_ = PublishManifest(e.vaultPath)
 
-		// /_sync/state/** excluded so Primary's own private scanner
+		// /.sync/state/** excluded so Primary's own private scanner
 		// bookkeeping is never published to Drive at all - keeping it
 		// local-only is what lets every other device's pull safely
 		// exclude the same pattern without missing anything real.
-		syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget, "/_sync/state/**")
+		syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget, "/"+syncdir.Name+"/state/**")
 
 		// Recorded regardless of outcome so the Settings window can surface
 		// "last synced" / "last sync failed" without needing a live

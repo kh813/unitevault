@@ -150,7 +150,7 @@ func TestManager_LatestEventForEachDevice_NoEventsAtAll(t *testing.T) {
 
 	got, err := m.LatestEventForEachDevice()
 	if err != nil {
-		t.Fatalf("expected no error when _sync doesn't exist yet, got %v", err)
+		t.Fatalf("expected no error when the sync dir doesn't exist yet, got %v", err)
 	}
 	if len(got) != 0 {
 		t.Errorf("expected an empty result, got %+v", got)

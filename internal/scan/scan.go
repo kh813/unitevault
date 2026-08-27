@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kh813/unitevault/internal/syncdir"
 )
 
 // FileState represents the hash and status of a single file in the Vault.
@@ -79,17 +81,17 @@ type ScanResult struct {
 	Changes      []FileChange // Changes detected relative to previous stable state
 }
 
-// StateFilePath returns the path to _sync/state/last_scan.json - the raw
+// StateFilePath returns the path to .sync/state/last_scan.json - the raw
 // scan from the previous cycle, used only as DebounceFilter's comparison
 // baseline (see LoadLastScan/SaveScanState). Deliberately distinct from
 // ConfirmedStateFilePath - see that method's doc comment for why a single
 // state can't serve both roles.
 func (s *Scanner) StateFilePath() string {
-	return filepath.Join(s.vaultPath, "_sync", "state", "last_scan.json")
+	return filepath.Join(s.vaultPath, syncdir.Name, "state", "last_scan.json")
 }
 
 // ConfirmedStateFilePath returns the path to
-// _sync/state/last_confirmed_scan.json - the state DetectChanges compares
+// .sync/state/last_confirmed_scan.json - the state DetectChanges compares
 // against to decide what actually changed (see LoadConfirmedState/
 // SaveConfirmedState/ApplyChangesToState).
 //
@@ -112,7 +114,7 @@ func (s *Scanner) StateFilePath() string {
 // undermining the entire cross-device merge system (spec 3.3/3.4), which
 // depends on log entries actually existing to reconstruct anything.
 func (s *Scanner) ConfirmedStateFilePath() string {
-	return filepath.Join(s.vaultPath, "_sync", "state", "last_confirmed_scan.json")
+	return filepath.Join(s.vaultPath, syncdir.Name, "state", "last_confirmed_scan.json")
 }
 
 // LoadLastScan loads the last recorded scan state from disk.
@@ -271,7 +273,7 @@ func (s *Scanner) ScanPaths(baseline *ScanState, paths []string) (*ScanState, er
 
 	for _, rel := range paths {
 		slashRel := filepath.ToSlash(rel)
-		if slashRel == "_sync" || strings.HasPrefix(slashRel, "_sync/") {
+		if slashRel == syncdir.Name || strings.HasPrefix(slashRel, syncdir.Name+"/") {
 			continue
 		}
 
@@ -292,7 +294,7 @@ func (s *Scanner) ScanPaths(baseline *ScanState, paths []string) (*ScanState, er
 	return next, nil
 }
 
-// ScanVault walks the Vault directory and calculates hashes for all files excluding `_sync/`.
+// ScanVault walks the Vault directory and calculates hashes for all files excluding `.sync/`.
 func (s *Scanner) ScanVault() (*ScanState, error) {
 	state := &ScanState{Files: make(map[string]FileState)}
 
@@ -313,8 +315,8 @@ func (s *Scanner) ScanVault() (*ScanState, error) {
 		// Convert path to slash-separated for consistency across OSes
 		slashRel := filepath.ToSlash(rel)
 
-		// Ignore _sync directory and hidden files/directories (like .git, .obsidian if needed, though only _sync is specified by spec)
-		if slashRel == "_sync" || strings.HasPrefix(slashRel, "_sync/") {
+		// Ignore this app's own bookkeeping directory and hidden files/directories (like .git, .obsidian)
+		if slashRel == syncdir.Name || strings.HasPrefix(slashRel, syncdir.Name+"/") {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}

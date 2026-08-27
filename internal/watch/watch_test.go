@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kh813/unitevault/internal/syncdir"
 	"github.com/kh813/unitevault/internal/watch"
 )
 
@@ -88,7 +89,7 @@ func TestWatcher_DetectsFileInNewSubdirectory(t *testing.T) {
 
 func TestWatcher_IgnoresSyncDir(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "_sync", "state"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, syncdir.Name, "state"), 0755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
 	}
 
@@ -98,7 +99,7 @@ func TestWatcher_IgnoresSyncDir(t *testing.T) {
 	}
 	defer w.Close()
 
-	if err := os.WriteFile(filepath.Join(root, "_sync", "state", "last_scan.json"), []byte("{}"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, syncdir.Name, "state", "last_scan.json"), []byte("{}"), 0644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 	// Also touch a real Vault file so there's something to positively wait
@@ -110,8 +111,8 @@ func TestWatcher_IgnoresSyncDir(t *testing.T) {
 
 	got := waitForDrain(t, w, "note.md", 2*time.Second)
 	for _, p := range got {
-		if p == "_sync" || strings.HasPrefix(p, "_sync/") {
-			t.Errorf("expected _sync/ to be ignored, got path %q in %v", p, got)
+		if p == syncdir.Name || strings.HasPrefix(p, syncdir.Name+"/") {
+			t.Errorf("expected sync dir to be ignored, got path %q in %v", p, got)
 		}
 	}
 }

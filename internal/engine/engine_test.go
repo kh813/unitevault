@@ -15,6 +15,7 @@ import (
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/engine"
 	"github.com/kh813/unitevault/internal/scan"
+	"github.com/kh813/unitevault/internal/syncdir"
 	"github.com/kh813/unitevault/internal/syncedlog"
 	"github.com/kh813/unitevault/internal/watch"
 )
@@ -240,9 +241,9 @@ func TestSyncEngine_RunCycle_SkipsSyncWhenSupersededByAnotherPrimary(t *testing.
 }
 
 // TestSyncEngine_RunCycle_Primary_PullsSyncFolderBeforePublishing guards
-// spec 1.6.4: before merging, Primary must pull other devices' _sync/
+// spec 1.6.4: before merging, Primary must pull other devices' .sync/
 // (their pushed logs) from Google Drive via the additive `rclone copy` -
-// scoped to _sync/ only, never the whole Vault, so this can never
+// scoped to .sync/ only, never the whole Vault, so this can never
 // overwrite Primary's own just-edited content with a stale Drive copy.
 // The existing full-Vault `rclone sync` publish must still happen
 // afterward, unchanged.
@@ -269,7 +270,7 @@ func TestSyncEngine_RunCycle_Primary_PullsSyncFolderBeforePublishing(t *testing.
 		t.Fatalf("RunCycle failed: %v", err)
 	}
 
-	wantPull := copyCall{Src: "ObsidianVault:MyVault/_sync", Dst: filepath.Join(vaultPath, "_sync"), Excludes: "state/**"}
+	wantPull := copyCall{Src: "ObsidianVault:MyVault/" + syncdir.Name, Dst: filepath.Join(vaultPath, syncdir.Name), Excludes: "state/**"}
 	found := false
 	for _, c := range mock.copyCalls {
 		if c == wantPull {
@@ -282,8 +283,8 @@ func TestSyncEngine_RunCycle_Primary_PullsSyncFolderBeforePublishing(t *testing.
 	if !mock.syncCalled {
 		t.Error("expected the existing full-Vault rclone sync publish to still happen")
 	}
-	if strings.Join(mock.syncExcludes, ",") != "/_sync/state/**" {
-		t.Errorf("expected the publish sync to exclude /_sync/state/** (this device's own private scanner bookkeeping), got %v", mock.syncExcludes)
+	if strings.Join(mock.syncExcludes, ",") != "/"+syncdir.Name+"/state/**" {
+		t.Errorf("expected the publish sync to exclude /%s/state/** (this device's own private scanner bookkeeping), got %v", syncdir.Name, mock.syncExcludes)
 	}
 }
 
@@ -391,7 +392,7 @@ func TestSyncEngine_RunCycle_Primary_SingleExternalTaskRunsEveryTick(t *testing.
 }
 
 // TestSyncEngine_RunCycle_Secondary_PushesAndPullsViaCopy guards spec
-// 1.6.4: a Secondary must push its own _sync/ (never the whole Vault) via
+// 1.6.4: a Secondary must push its own .sync/ (never the whole Vault) via
 // additive `rclone copy`, then pull down whatever Primary already
 // published - and must never call the destructive `rclone sync` at all
 // (that publish step is Primary-only).
@@ -415,8 +416,8 @@ func TestSyncEngine_RunCycle_Secondary_PushesAndPullsViaCopy(t *testing.T) {
 		t.Fatalf("RunCycle failed: %v", err)
 	}
 
-	wantPush := copyCall{Src: filepath.Join(vaultPath, "_sync"), Dst: "ObsidianVault:MyVault/_sync", Excludes: "state/**"}
-	wantPull := copyCall{Src: "ObsidianVault:MyVault", Dst: vaultPath, Excludes: "/_sync/state/**"}
+	wantPush := copyCall{Src: filepath.Join(vaultPath, syncdir.Name), Dst: "ObsidianVault:MyVault/" + syncdir.Name, Excludes: "state/**"}
+	wantPull := copyCall{Src: "ObsidianVault:MyVault", Dst: vaultPath, Excludes: "/" + syncdir.Name + "/state/**"}
 	var gotPush, gotPull bool
 	for _, c := range mock.copyCalls {
 		if c == wantPush {
@@ -1043,5 +1044,72 @@ func TestSyncEngine_RunCycle_WithWatcher_FirstCycleStillSeesPreexistingFile(t *t
 	}
 	if !found {
 		t.Errorf("expected note.md to be logged as a create despite predating the watcher, got entries %+v", entries)
+	}
+}
+
+// TestNewSyncEngine_MigratesLegacySyncDirAndPreservesState guards the
+// upgrade path for a device that ran an older version of this app before
+// the bookkeeping directory was renamed from "_sync" to the dot-prefixed
+// syncdir.Name (so Obsidian's file explorer hides it): its existing device
+// log and scan state must carry forward under the new name, not be
+// silently orphaned (which would make the device look uninitialized -
+// re-logging every file as a fresh "create", or worse, racing a real
+// Primary's already-published state).
+func TestNewSyncEngine_MigratesLegacySyncDirAndPreservesState(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{VaultPath: vaultPath})
+	deviceID, _ := cfgMgr.GetDeviceID()
+
+	// A stable, already-confirmed file from "before the upgrade" - the
+	// scenario this test cares about is that RunCycle must not re-detect
+	// it as a fresh create once the sync dir has been renamed.
+	notePath := filepath.Join(vaultPath, "note.md")
+	writeFile(t, notePath, "already confirmed before the upgrade\n")
+	noteHash, err := scan.CalculateNormalizedHash(notePath)
+	if err != nil {
+		t.Fatalf("CalculateNormalizedHash failed: %v", err)
+	}
+
+	legacySyncDir := filepath.Join(vaultPath, "_sync")
+	writeFile(t, filepath.Join(legacySyncDir, fmt.Sprintf("log-%s.jsonl", deviceID)),
+		`{"device":"`+deviceID+`","label":"mac-test","seq":1,"path":"note.md","base_hash":"","result_hash":"`+noteHash+`","diff":"already confirmed before the upgrade\n","action":"create","ts":"2026-08-01T00:00:00+09:00"}`+"\n")
+	scanStateJSON := `{"files":{"note.md":{"hash":"` + noteHash + `"}}}`
+	writeFile(t, filepath.Join(legacySyncDir, "state", "last_scan.json"), scanStateJSON)
+	writeFile(t, filepath.Join(legacySyncDir, "state", "last_confirmed_scan.json"), scanStateJSON)
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", deviceID, "mac-test")
+	_ = cfgMgr.SaveConfig(&config.Config{VaultPath: vaultPath, RcloneRemote: "ObsidianVault", RclonePath: "MyVault"})
+
+	// Migration happens in NewSyncEngine's constructor - before any cycle
+	// runs.
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+
+	if _, err := os.Stat(legacySyncDir); !os.IsNotExist(err) {
+		t.Errorf("expected the legacy _sync dir to be gone after construction, stat err = %v", err)
+	}
+	preservedEntries, err := syncedlog.NewLogManager(vaultPath).ReadDeviceLog(deviceID)
+	if err != nil {
+		t.Fatalf("ReadDeviceLog failed: %v", err)
+	}
+	if len(preservedEntries) != 1 || preservedEntries[0].Path != "note.md" {
+		t.Fatalf("expected the pre-upgrade log entry to survive the migration, got %+v", preservedEntries)
+	}
+
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	entriesAfter, err := syncedlog.NewLogManager(vaultPath).ReadDeviceLog(deviceID)
+	if err != nil {
+		t.Fatalf("ReadDeviceLog failed: %v", err)
+	}
+	if len(entriesAfter) != 1 {
+		t.Errorf("expected note.md to still show only the one pre-upgrade log entry (not re-detected as a fresh create), got %+v", entriesAfter)
 	}
 }

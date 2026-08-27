@@ -2,7 +2,7 @@
 // changes, primary/secondary conflicts, ...) separately from
 // internal/syncedlog's per-file content diff logs (spec section 3.2.1).
 // Like those content logs, each device only ever writes to its own
-// events-<device-uuid>.jsonl file inside Vault/_sync/, so files never need
+// events-<device-uuid>.jsonl file inside Vault/.sync/, so files never need
 // merging and never conflict - reads may look at any device's file, but
 // writes only ever touch the caller's own.
 package eventlog
@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kh813/unitevault/internal/syncdir"
 )
 
 // EventType enumerates the recognized values of EventEntry.Event.
@@ -70,7 +72,7 @@ type EventEntry struct {
 const DefaultRetentionDays = 365
 
 // Manager handles reading and writing device event log files in
-// Vault/_sync/.
+// Vault/.sync/.
 type Manager struct {
 	vaultPath string
 }
@@ -80,9 +82,9 @@ func NewManager(vaultPath string) *Manager {
 	return &Manager{vaultPath: vaultPath}
 }
 
-// SyncDir returns the path to Vault/_sync/.
+// SyncDir returns the path to Vault/.sync/.
 func (m *Manager) SyncDir() string {
-	return filepath.Join(m.vaultPath, "_sync")
+	return filepath.Join(m.vaultPath, syncdir.Name)
 }
 
 // DeviceLogPath returns the path to events-<deviceID>.jsonl.
@@ -93,7 +95,7 @@ func (m *Manager) DeviceLogPath(deviceID string) string {
 // Append records a new event for deviceID/label, filling in TS if empty.
 func (m *Manager) Append(deviceID, label string, event EventType, details map[string]string) error {
 	if err := os.MkdirAll(m.SyncDir(), 0755); err != nil {
-		return fmt.Errorf("failed to create _sync dir: %w", err)
+		return fmt.Errorf("failed to create sync dir: %w", err)
 	}
 
 	entry := EventEntry{

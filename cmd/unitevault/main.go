@@ -26,6 +26,7 @@ import (
 	"github.com/kh813/unitevault/internal/gui"
 	"github.com/kh813/unitevault/internal/obsidianconfig"
 	"github.com/kh813/unitevault/internal/selfupdate"
+	"github.com/kh813/unitevault/internal/syncdir"
 	"github.com/kh813/unitevault/internal/watch"
 )
 
@@ -1247,6 +1248,14 @@ func (t *trayApp) runVaultMigration(oldPath, newPath string, current gui.Setting
 			return
 		}
 
+		// Migrate newPath's own bookkeeping directory (if the moved Vault
+		// had one from prior use, under the pre-rename "_sync" name) before
+		// the Bridge seed copy below - so that copy never has a chance to
+		// carry the Vault's own bookkeeping into the Bridge folder, where
+		// it doesn't belong (the Bridge gets its own, independent one from
+		// ScanBridgeAndLog once continuous sync starts, spec 1.6.3).
+		syncdir.Migrate(newPath)
+
 		var notes []string
 		if err := obsidianconfig.UpdateVaultPath(oldPath, newPath); err != nil {
 			notes = append(notes, lang.L(
@@ -1263,6 +1272,11 @@ func (t *trayApp) runVaultMigration(oldPath, newPath string, current gui.Setting
 					map[string]string{"Err": err.Error()},
 				))
 			} else {
+				// CopyDirRecursive has no exclusions, so it just copied the
+				// Vault's own bookkeeping directory into the Bridge folder
+				// too - strip it back out (best-effort) so ScanBridgeAndLog
+				// starts the Bridge's own, independent one from scratch.
+				_ = os.RemoveAll(filepath.Join(bridgePath, syncdir.Name))
 				cfg, err := t.cfgMgr.LoadConfig()
 				if err != nil || cfg == nil {
 					cfg = &config.Config{}

@@ -41,7 +41,7 @@
 - [x] 改行コードLF正規化関数の実装（比較・記録の直前に必ず通す）
 - [x] Vault内全ファイルのスキャン（`path/filepath` でOS差異を吸収）
 - [x] ファイルごとの内容ハッシュ算出（`crypto/sha256`）
-- [x] 前回スキャン結果（`_sync/state/last_scan.json`）との比較ロジック
+- [x] 前回スキャン結果（`.sync/state/last_scan.json`）との比較ロジック
   - 新規／削除／変更の検出
   - 消えたパス × 新規パスでハッシュ完全一致 → `rename` と推測
 - [x] デバウンス判定（2回連続で同一ハッシュのファイルのみ「確定」扱いにする）
@@ -84,7 +84,7 @@
 - [x] Phase 4（drive）を使い、Google Drive上のマーカー有無を確認する処理
 - [x] マーカーが存在しない場合：プライマリとして初期化し、マーカーをアップロード後に再ダウンロードして自分自身のIDと一致するか検証するレース条件対策を実装
 - [x] マーカーが存在する場合：セカンダリとして`rclone copy`でVault一式・全ログをローカルへ取得する処理
-- [x] 6.3節の対策：プライマリはローカルVault内`_sync/`にも`PRIMARY_MARKER.json`の複製を保存する処理
+- [x] 6.3節の対策：プライマリはローカルVault内`.sync/`にも`PRIMARY_MARKER.json`の複製を保存する処理
 - [x] プライマリノード移行処理（3.6.1.2節、手動手順を叩くための最小限のコマンド化）
 - [x] 単体テスト（drive部分はインターフェースで抽象化してモック可能にし、マーカー有無それぞれの分岐をテストする）
 - [x] **コンパイル確認**：`go build ./...` → `go test ./internal/bootstrap/...` を実行し、エラー・テスト失敗を解消する
@@ -211,25 +211,25 @@
 **実装済み。** `internal/engine/bridge.go`に、Vault本体とは独立したブリッジフォルダのスキャン・仮想デバイスとしてのログ記録・マージ結果の書き戻しを実装した。`RunCycle`から、Primaryかつ`ICloudBridgePath`が設定されている場合にのみ呼び出す（ベストエフォート、失敗してもGoogle Drive同期は継続する）。
 
 - [x] ブリッジフォルダ（`ICloudBridgePath`）を対象にした独立スキャン（`internal/scan.Scanner`を別ルートパスに対して再利用）
-- [x] ブリッジ用ログ（Vault本体の`_sync/log-<bridge-id>.jsonl`）への変更記録 - 仮想デバイスとして通常のデバイスログと同じスキーマに乗せる（`ScanBridgeAndLog`）。仮想デバイスIDは`config.ConfigManager.GetOrCreateBridgeDeviceID`で生成・永続化（`icloud_bridge_device_id`）
+- [x] ブリッジ用ログ（Vault本体の`.sync/log-<bridge-id>.jsonl`）への変更記録 - 仮想デバイスとして通常のデバイスログと同じスキーマに乗せる（`ScanBridgeAndLog`）。仮想デバイスIDは`config.ConfigManager.GetOrCreateBridgeDeviceID`で生成・永続化（`icloud_bridge_device_id`）
 - [x] 既存の`mergeAndTrackConflicts`にブリッジデバイスがそのまま`devEntries`の一員として混じることを確認 - 追加のマージロジック変更は不要だった
 - [x] マージ結果をブリッジフォルダへ書き戻す処理（`MirrorVaultToBridge`。`os`パッケージでの素朴な再帰コピー＋差分のあるファイルのみ書き込み＋Vaultから消えたファイルの削除、という手作りのローカル⇔ローカルミラー）
 - [x] ブリッジフォルダが存在しない／未設定の場合のフォールバック（`ICloudBridgePath`が空ならスキャン・書き戻しとも単純にスキップ）
-- [x] 単体テスト（`internal/engine/bridge_test.go`：ブリッジ経由の変更が本体Vaultへ正しく反映されること、マージ結果の書き戻し、ブリッジ自身の`_sync/`が誤って上書きされないこと）
+- [x] 単体テスト（`internal/engine/bridge_test.go`：ブリッジ経由の変更が本体Vaultへ正しく反映されること、マージ結果の書き戻し、ブリッジ自身の`.sync/`が誤って上書きされないこと）
 - [x] **コンパイル確認・フルテスト**
 
-**重要：この実装の過程で、`internal/scan`の変更検出パイプライン自体に、Phase 15固有ではない、より根本的なバグを発見・修正した（spec 3.4.2節）。** 既存ファイルの編集が、デバウンス方式と組み合わせると正しくログに記録されず（偽の削除が1回記録された後、本来のmodify/createが永久にログに残らない）、これは3-way merge（3.3節）が依存するログ自体の正しさを損なう、Phase 15より深刻な問題だった。`_sync/state/last_scan.json`（デバウンス比較専用）と`_sync/state/last_confirmed_scan.json`（変更検出の比較基準、新設）を分離し、さらに「デバウンス未確定」と「本当の削除」を区別する`ReconcileForDetection`を追加することで解決した。`internal/scan/scan_test.go`に、実際の複数サイクルを通しで検証する回帰テストを追加済み。
+**重要：この実装の過程で、`internal/scan`の変更検出パイプライン自体に、Phase 15固有ではない、より根本的なバグを発見・修正した（spec 3.4.2節）。** 既存ファイルの編集が、デバウンス方式と組み合わせると正しくログに記録されず（偽の削除が1回記録された後、本来のmodify/createが永久にログに残らない）、これは3-way merge（3.3節）が依存するログ自体の正しさを損なう、Phase 15より深刻な問題だった。`.sync/state/last_scan.json`（デバウンス比較専用）と`.sync/state/last_confirmed_scan.json`（変更検出の比較基準、新設）を分離し、さらに「デバウンス未確定」と「本当の削除」を区別する`ReconcileForDetection`を追加することで解決した。`internal/scan/scan_test.go`に、実際の複数サイクルを通しで検証する回帰テストを追加済み。
 
 ### Phase 16：Google Drive同期をSecondaryにも拡張（実装済み）
 
 - [x] Secondary機もGoogle Driveリモートの設定を必須にする（Settings画面の案内・バリデーションを更新）。**調査の結果、GUIのSave Settingsフロー（`saveSettingsConfirmed`）は既にリモート未設定では保存できない作りだった**（`driveClient.IsRemoteConfigured`のチェックが役割に関わらず常に実行される）。実際に到達可能だったギャップは別にあった：「Remove Remote Configuration...」（`removeRemote`）がrclone側のリモートは削除するのに`config.json`の`RcloneRemote`/`RclonePath`はクリアしていなかったため、削除後は「存在しないリモート名がconfig.jsonに残ったまま」という壊れた状態になり、次回以降の同期サイクルが（静かにスキップされるのではなく）毎回エラーになっていた。これを修正し、リモート削除時に`config.json`側も一緒にクリアするようにした（正常な「リモート未設定」状態へ）。加えて、Settings画面に「⚠ Google Drive not configured:」の警告行を追加：`DeviceRole == "secondary"`かつ`RcloneConfigured == false`の場合のみ表示し、「Configure Google Drive Remote...」ボタン（rcloneセクションの既存ボタンと同じハンドラ）で即座に設定できるようにした。Secondaryにとって未検出のまま放置されると「他のPCの変更を一切受け取れない」という一番目立ちにくい失敗モードになるため（1.6.4節の通り、Secondaryにとって唯一の受信経路がGoogle Drive）。単体テストは`internal/gui/settings_window_test.go`の`TestBuildSettingsContent_SecondaryDriveWarning`（Secondary＋未設定の組み合わせでのみ表示されること）・`TestBuildSettingsContent_SecondaryDriveWarning_ButtonInvokesConfigureRemote`。
-- [x] Secondary: 自分の`_sync/`（ログ）のみをGoogle Driveへ`rclone copy`でアップロード（`sync`ではなく`copy`を使い、リモート側の削除・他デバイス分ファイルの巻き添え削除を防ぐ）。Vault現物ファイルはpushしない - ログエントリの`diff`フィールドに全文が入っている（3.4節）ため、Primary側のマージにはログだけで十分
-- [x] Primary: Google Driveから全デバイスの`_sync/`（ログのみ、Vault現物は対象外）をpull（`rclone copy`）→ 既存のマージ処理 → マージ後のVault全体を`rclone sync`でGoogle Driveへpublish（Primaryのみがミラー転送の権限を持つ、という既存方針を維持）。`_sync/`のみに限定することで、Primary自身の編集中のVaultファイルがpullで上書きされるリスクを避けている
+- [x] Secondary: 自分の`.sync/`（ログ）のみをGoogle Driveへ`rclone copy`でアップロード（`sync`ではなく`copy`を使い、リモート側の削除・他デバイス分ファイルの巻き添え削除を防ぐ）。Vault現物ファイルはpushしない - ログエントリの`diff`フィールドに全文が入っている（3.4節）ため、Primary側のマージにはログだけで十分
+- [x] Primary: Google Driveから全デバイスの`.sync/`（ログのみ、Vault現物は対象外）をpull（`rclone copy`）→ 既存のマージ処理 → マージ後のVault全体を`rclone sync`でGoogle Driveへpublish（Primaryのみがミラー転送の権限を持つ、という既存方針を維持）。`.sync/`のみに限定することで、Primary自身の編集中のVaultファイルがpullで上書きされるリスクを避けている
 - [x] Secondary側の`rclone copy` pull処理（Primaryが`sync`で公開した最新のマージ結果、Vault全体を取得しローカルVaultへ反映）
-- [x] 単体テスト（`internal/engine/engine_test.go`：Secondaryのpush/pull呼び出し内容、リモート未設定時は何もしないこと、Primaryが`_sync/`のみpullしてから既存のpublishを行うこと）
+- [x] 単体テスト（`internal/engine/engine_test.go`：Secondaryのpush/pull呼び出し内容、リモート未設定時は何もしないこと、Primaryが`.sync/`のみpullしてから既存のpublishを行うこと）
 - [x] **コンパイル確認・フルテスト**
 
-**追記：削除の伝播（マニフェスト方式）を実装済み。** `internal/engine/manifest.go`に`PublishManifest`（Primaryがpublish直前に自分のVaultをスキャンし`_sync/vault_manifest.json`として公開）・`LoadManifest`・`ApplyManifestDeletions`（Secondaryがpull後、自分の確定済みスキャン状態とマニフェストを突き合わせ、確定済みなのにマニフェストに無いファイルだけを安全に削除）を実装。単体テストは`internal/engine/manifest_test.go`。
+**追記：削除の伝播（マニフェスト方式）を実装済み。** `internal/engine/manifest.go`に`PublishManifest`（Primaryがpublish直前に自分のVaultをスキャンし`.sync/vault_manifest.json`として公開）・`LoadManifest`・`ApplyManifestDeletions`（Secondaryがpull後、自分の確定済みスキャン状態とマニフェストを突き合わせ、確定済みなのにマニフェストに無いファイルだけを安全に削除）を実装。単体テストは`internal/engine/manifest_test.go`。
 
 **残る既知の制約（v1）：** 直近の未確定（デバウンス未安定）なローカル編集が、稀にpullによって上書きされる可能性がある（Obsidianが実際に編集中のVaultフォルダに対して破壊的な`sync`は使わない、という安全側の判断による）。マニフェスト方式も、極端に速い削除と極端に遅い往復が重なるような稀なケースまでは保証しない（ヒューリスティック）。複数Secondaryが同時にpushした場合の競合解消は、Primary側の固定ハブ方式によるマージで扱われる想定だが、実機での検証はまだ行っていない。
 
@@ -241,7 +241,7 @@
 - [x] Settings画面の「Sync Interval」表示・設定項目を新モデルに合わせて更新：デフォルト値を600→60に変更（`internal/gui/settings_window.go`の2箇所のフォールバック値）。両方設定時は交互実行のため実効間隔がおよそ2倍になる旨のヒント文言を追加（`internal/gui/translations/ja.json`に日本語訳も追加）。
 - [x] **コンパイル確認・フルテスト**：`go build ./...` → `go vet ./...` → `go test ./...`、Windowsクロスコンパイル確認、いずれも成功。単体テストは`internal/engine/engine_test.go`の`TestSyncEngine_RunCycle_Primary_AlternatesExternalSyncTasks`（3サイクル通してDrive→Bridge→Driveと交互に実行されること）・`TestSyncEngine_RunCycle_Primary_SingleExternalTaskRunsEveryTick`（1つしか設定されていない場合は毎ティック実行されること）を追加。
 
-**OS標準のファイル監視（実装済み。上記の交互スケジューリング本体とは別の依頼として先行実装）：** 常時起動のトレイ/メニューバー・プロセスに変わったことを踏まえ（元々cronベースだった頃はOS監視を採用しない理由になっていた前提が変わった、3.3.0節参照）、`internal/watch`パッケージを新設。`fsnotify`（Fyne経由で既に間接依存として存在、v1.9.0）をラップし、Vaultフォルダ（`_sync/`は除外）を再帰的に監視、新規サブディレクトリも動的に監視対象へ追加する。あくまで「フルスキャンを置き換えない、ベストエフォートのヒント」という位置付け（クラウド同期フォルダ、特にiCloud Bridgeでは監視イベントの取りこぼしが起こり得るため、Bridge側は引き続きポーリング/フルスキャン方式のまま、`Watcher`には接続していない）。
+**OS標準のファイル監視（実装済み。上記の交互スケジューリング本体とは別の依頼として先行実装）：** 常時起動のトレイ/メニューバー・プロセスに変わったことを踏まえ（元々cronベースだった頃はOS監視を採用しない理由になっていた前提が変わった、3.3.0節参照）、`internal/watch`パッケージを新設。`fsnotify`（Fyne経由で既に間接依存として存在、v1.9.0）をラップし、Vaultフォルダ（`.sync/`は除外）を再帰的に監視、新規サブディレクトリも動的に監視対象へ追加する。あくまで「フルスキャンを置き換えない、ベストエフォートのヒント」という位置付け（クラウド同期フォルダ、特にiCloud Bridgeでは監視イベントの取りこぼしが起こり得るため、Bridge側は引き続きポーリング/フルスキャン方式のまま、`Watcher`には接続していない）。
 
 - `internal/watch/watch.go`：`Watcher`型。`New(root)`で監視開始、`Drain()`で前回`Drain`以降に変化のあった相対パス一覧を取得・クリア、`Close()`で終了。
 - `internal/scan/scan.go`：`Scanner.ScanPaths(baseline, paths)`を追加。baselineを引き継ぎつつ、指定パスだけ再スキャンする軽量版`ScanVault()`。
@@ -253,7 +253,7 @@
 
 - [x] 起動時、現在のVaultパスがiCloud Drive配下にあると検出した場合の案内ダイアログ（新方式への移行を推奨する旨、手動での移行手順、または自動移行オプション）。`cmd/unitevault/main.go`の`maybeShowICloudMigrationReminder`（`startup()`から、既に設定済みで役割が確定しているデバイスに対してのみ呼ばれる）。検出の中核ロジックは純粋関数`pathIsUnder(root, path)`に切り出し、単体テスト（`TestPathIsUnder`）を追加。「今すぐ移行」「今後表示しない」の2択＋ダイアログ自体のCancel（＝次回起動時にまた聞く）。「今後表示しない」の選択は`config.ConfigManager`の`ICloudMigrationReminderDismissedPath`／`IsICloudMigrationReminderDismissed`／`SetICloudMigrationReminderDismissed`（`IsInstallReminderDismissed`と全く同じパターン）で永続化し、`ResetConfig`でもクリアされる。
 - [x] 自動移行オプション：**Phase 14で実装済みの手動「Migrate Vault to Local Folder...」フロー（`runVaultMigration`）をそのまま再利用**する設計にした（フォルダ選択ダイアログだけをスキップし、`oldPath`は検出済みの現在のVaultパスを使う）。もとの計画にあった「旧iCloud上のVaultフォルダ自体をiCloud Bridge用フォルダとして設定する」という案は採用しなかった——手動フローと処理を分岐させると2つの移行経路が別々の挙動になり分かりにくくなるため、手動フローと同じく「新しいローカル場所へ移動し、iCloud Bridge用には`<iCloud Drive>/Obsidian/<フォルダ名>`へ新規シードコピーする」という一貫した挙動にした。
-- [x] 移行後、旧`_sync/`ログとの整合性確認：**精査の結果、対応不要と判明した。** `device_id`・`role`・`icloud_bridge_device_id`・保留中コンフリクト・Drive同期ステータス等はすべてVaultとは独立したアプリ設定ディレクトリ（`ConfigManager.configDir`、Vault配下ではない）に保存されている。Vault配下の`_sync/`（各デバイスのログ・スキャン状態・マニフェスト）は`bootstrap.MoveVaultFolder`がVaultフォルダ全体をまるごと移動（同一ボリューム内は`rename`、クロスボリュームは再帰コピー＋削除）するため、`_sync/`だけ取り残される・パスが古いままになる、といった不整合は構造上発生しない。ログエントリやスキャン状態はいずれもVaultルートからの相対パスのみを保持しており、絶対パスへの依存もない。
+- [x] 移行後、旧`.sync/`ログとの整合性確認：**精査の結果、対応不要と判明した。** `device_id`・`role`・`icloud_bridge_device_id`・保留中コンフリクト・Drive同期ステータス等はすべてVaultとは独立したアプリ設定ディレクトリ（`ConfigManager.configDir`、Vault配下ではない）に保存されている。Vault配下の`.sync/`（各デバイスのログ・スキャン状態・マニフェスト）は`bootstrap.MoveVaultFolder`がVaultフォルダ全体をまるごと移動（同一ボリューム内は`rename`、クロスボリュームは再帰コピー＋削除）するため、`.sync/`だけ取り残される・パスが古いままになる、といった不整合は構造上発生しない。ログエントリやスキャン状態はいずれもVaultルートからの相対パスのみを保持しており、絶対パスへの依存もない。
 - [x] **コンパイル確認・フルテスト**：`go build ./...` → `go vet ./...` → `go test ./...`、Windowsクロスコンパイル確認、いずれも成功。
 
 ### Phase 19：ドキュメント・テスト・仕上げ（自動テスト・ドキュメントは完了。実機検証のみ残る）
@@ -265,6 +265,8 @@
   - `MirrorVaultToBridge`が「Vaultに存在しない」というだけでBridge側のファイルを削除していたため、iPhoneが作ったばかりでまだデバウンス確定していない新規ファイルが、確定前のミラー実行で誤って削除され、二度とVaultへ届かないバグ（ブリッジ自身の確定済みスキャン状態にあるパスのみ削除するよう修正。詳細は1.6.3節参照）。
 - [ ] Windows/Macでの実機検証：自動テストではカバーできない、実際のGoogle Driveアカウント・複数の実機・iPhoneを使った検証はまだ行っていない。
 - [x] **コンパイル確認・フルテスト**：`go build ./...` → `go vet ./...` → `go test ./...`、Windowsクロスコンパイル確認、いずれも成功。
+
+**追記：ブックキーピング用ディレクトリを`_sync/`から`.sync/`へ改名（実装済み、spec 1.6.9節）。** 実機での動作確認中、Obsidianのファイルエクスプローラーに`_sync`フォルダがそのまま見えてしまい、ユーザーが誤って操作しかねないという指摘を受けて対応。Obsidianは`.obsidian`や`.git`同様、ドット始まりのフォルダをデフォルトで自動的に隠す（ユーザー側で何も設定不要）ため、`internal/syncdir`パッケージで名前を一元管理し、`.sync`へ変更した。旧バージョンで既に`_sync/`を作成済みのデバイス向けに、`syncdir.Migrate`によるベストエフォートの自動リネーム（`NewSyncEngine`・`InitializeNode`・ブリッジ関連関数・Vault Migration直後、の複数箇所で冪等に呼び出し）を実装し、既存のログ・スキャン状態が失われないようにした。実際にRunCycleを1回通して検証する統合テスト（`TestNewSyncEngine_MigratesLegacySyncDirAndPreservesState`）を追加済み。
 
 ### 将来のTodo（このPhase群のスコープ外）
 

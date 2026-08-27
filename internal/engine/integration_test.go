@@ -95,7 +95,7 @@ func fsCopyAdditive(src, dst string, excludes []string) error {
 // fsMirror mimics `rclone sync`: dst ends up matching src exactly, except
 // that any path matching excludes is left untouched on the dst side
 // (neither overwritten nor deleted) - matching how production code relies
-// on --exclude to protect each device's own private _sync/state/ (spec
+// on --exclude to protect each device's own private .sync/state/ (spec
 // 1.6.4).
 func fsMirror(src, dst string, excludes []string) error {
 	if err := os.MkdirAll(dst, 0755); err != nil {

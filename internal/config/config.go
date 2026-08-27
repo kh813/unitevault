@@ -88,7 +88,7 @@ func (cm *ConfigManager) DeviceIDPath() string {
 // second, separate UUID (spec 1.6.3) this device uses to log changes
 // detected in the iCloud Bridge folder, kept distinct from this device's
 // own DeviceIDPath so Bridge-originated entries are clearly
-// distinguishable from this device's own real edits in _sync/ logs.
+// distinguishable from this device's own real edits in .sync/ logs.
 func (cm *ConfigManager) BridgeDeviceIDPath() string {
 	return filepath.Join(cm.configDir, "icloud_bridge_device_id")
 }

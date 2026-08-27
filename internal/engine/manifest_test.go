@@ -7,6 +7,7 @@ import (
 
 	"github.com/kh813/unitevault/internal/engine"
 	"github.com/kh813/unitevault/internal/scan"
+	"github.com/kh813/unitevault/internal/syncdir"
 )
 
 func TestPublishManifest_And_LoadManifest(t *testing.T) {
@@ -126,20 +127,20 @@ func TestApplyManifestDeletions_KeepsUnconfirmedNewFile(t *testing.T) {
 }
 
 // TestApplyManifestDeletions_NeverTouchesSyncDir guards against ever
-// deleting this app's own bookkeeping (_sync/), even if a caller somehow
-// managed to get a _sync-rooted path into the confirmed state.
+// deleting this app's own bookkeeping (.sync/), even if a caller somehow
+// managed to get a .sync-rooted path into the confirmed state.
 func TestApplyManifestDeletions_NeverTouchesSyncDir(t *testing.T) {
 	vaultPath := filepath.Join(t.TempDir(), "Vault")
-	logPath := filepath.Join(vaultPath, "_sync", "log-some-device.jsonl")
+	logPath := filepath.Join(vaultPath, syncdir.Name, "log-some-device.jsonl")
 	writeFile(t, logPath, `{"device":"some-device"}`)
 
 	scanner := scan.NewScanner(vaultPath)
 	// Manually construct a confirmed state that (incorrectly, as a
-	// worst-case test) includes a _sync/ path, to prove the guard inside
+	// worst-case test) includes a .sync/ path, to prove the guard inside
 	// ApplyManifestDeletions itself is what protects it - not just that
-	// ScanVault never reports _sync/ paths in the first place.
+	// ScanVault never reports .sync/ paths in the first place.
 	if err := scanner.SaveConfirmedState(&scan.ScanState{Files: map[string]scan.FileState{
-		"_sync/log-some-device.jsonl": {Hash: "irrelevant"},
+		syncdir.Name + "/log-some-device.jsonl": {Hash: "irrelevant"},
 	}}); err != nil {
 		t.Fatalf("SaveConfirmedState failed: %v", err)
 	}
@@ -150,6 +151,6 @@ func TestApplyManifestDeletions_NeverTouchesSyncDir(t *testing.T) {
 	}
 
 	if _, err := os.Stat(logPath); err != nil {
-		t.Errorf("expected _sync/ content to survive untouched, got %v", err)
+		t.Errorf("expected .sync/ content to survive untouched, got %v", err)
 	}
 }

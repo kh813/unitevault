@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 
 	"github.com/kh813/unitevault/internal/scan"
+	"github.com/kh813/unitevault/internal/syncdir"
 )
 
-// manifestPath returns the path to _sync/vault_manifest.json - Primary's
+// manifestPath returns the path to .sync/vault_manifest.json - Primary's
 // published "what should exist" file list (spec 1.6.4), used by Secondary
 // to safely propagate deletions despite pulling via non-destructive
 // `rclone copy`. Deliberately a separate, shared-on-purpose file from
@@ -17,11 +18,11 @@ import (
 // private and excluded from every Sync/Copy call) - this one is meant to
 // be published and pulled.
 func manifestPath(vaultPath string) string {
-	return filepath.Join(vaultPath, "_sync", "vault_manifest.json")
+	return filepath.Join(vaultPath, syncdir.Name, "vault_manifest.json")
 }
 
 // PublishManifest writes a fresh scan of vaultPath's current content to
-// _sync/vault_manifest.json (spec 1.6.4). Called by Primary right before
+// .sync/vault_manifest.json (spec 1.6.4). Called by Primary right before
 // publishing to Google Drive, so the manifest matches what's about to be
 // published - a fresh scan (not the confirmed-state baseline) is used
 // deliberately, since the merge step just before this writes files
@@ -40,12 +41,12 @@ func PublishManifest(vaultPath string) error {
 
 	path := manifestPath(vaultPath)
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return fmt.Errorf("failed to create _sync dir for manifest: %w", err)
+		return fmt.Errorf("failed to create sync dir for manifest: %w", err)
 	}
 	return os.WriteFile(path, data, 0644)
 }
 
-// LoadManifest reads _sync/vault_manifest.json, returning (nil, nil) if
+// LoadManifest reads .sync/vault_manifest.json, returning (nil, nil) if
 // Primary hasn't published one yet (e.g. this Secondary hasn't completed
 // its first pull, or Primary predates this feature).
 func LoadManifest(vaultPath string) (*scan.ScanState, error) {

@@ -8,25 +8,27 @@ import (
 	"strings"
 
 	"github.com/kh813/unitevault/internal/scan"
+	"github.com/kh813/unitevault/internal/syncdir"
 	"github.com/kh813/unitevault/internal/syncedlog"
 )
 
 // bridgeExcluded reports whether slashRel (a Vault-relative, slash-
 // separated path) is this app's own bookkeeping rather than real Vault
-// content - mirrors scan.Scanner.ScanVault's own _sync/ exclusion exactly,
+// content - mirrors scan.Scanner.ScanVault's own .sync/ exclusion exactly,
 // so the Bridge folder never receives (or has overwritten in it) files
 // that are private to whichever scanner/log owns them.
 func bridgeExcluded(slashRel string) bool {
-	return slashRel == "_sync" || strings.HasPrefix(slashRel, "_sync/")
+	return slashRel == syncdir.Name || strings.HasPrefix(slashRel, syncdir.Name+"/")
 }
 
 // ScanBridgeAndLog scans the iCloud Bridge folder (spec 1.6.3) for changes
-// and logs them into the main Vault's _sync/ under bridgeDeviceID, exactly
+// and logs them into the main Vault's .sync/ under bridgeDeviceID, exactly
 // as if it were another real device - so mergeAndTrackConflicts picks
 // them up with no special-casing. Call once per cycle, before the merge
 // step, whenever a bridge path is configured. Returns how many changes
 // were logged (informational only).
 func ScanBridgeAndLog(mainVaultPath, bridgePath, bridgeDeviceID, bridgeLabel string) (int, error) {
+	syncdir.Migrate(bridgePath)
 	bridgeScanner := scan.NewScanner(bridgePath)
 
 	currState, err := bridgeScanner.ScanVault()
@@ -87,8 +89,8 @@ func ScanBridgeAndLog(mainVaultPath, bridgePath, bridgeDeviceID, bridgeLabel str
 // result out to iPhone/iPad: files present in the Vault are written or
 // updated in the Bridge folder, and files in the Bridge folder that no
 // longer exist in the Vault are removed. This app's own bookkeeping
-// (_sync/, on both sides - see bridgeExcluded) is never touched by this
-// mirror, since the Bridge folder's own _sync/ holds ScanBridgeAndLog's
+// (.sync/, on both sides - see bridgeExcluded) is never touched by this
+// mirror, since the Bridge folder's own .sync/ holds ScanBridgeAndLog's
 // independent scan state, not a copy of the Vault's.
 //
 // A deletion is only ever applied to a bridge-side path that
@@ -105,6 +107,7 @@ func ScanBridgeAndLog(mainVaultPath, bridgePath, bridgeDeviceID, bridgeLabel str
 // (since it wasn't in the Vault yet either), so it could never stabilize,
 // never get logged, and never actually reach the Vault at all.
 func MirrorVaultToBridge(vaultPath, bridgePath string) error {
+	syncdir.Migrate(bridgePath)
 	if err := os.MkdirAll(bridgePath, 0755); err != nil {
 		return fmt.Errorf("failed to create bridge folder: %w", err)
 	}

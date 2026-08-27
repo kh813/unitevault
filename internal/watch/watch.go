@@ -14,9 +14,10 @@ import (
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/kh813/unitevault/internal/syncdir"
 )
 
-// Watcher recursively watches a Vault directory (excluding _sync/, this
+// Watcher recursively watches a Vault directory (excluding .sync/, this
 // app's own bookkeeping) and accumulates the set of relative paths that may
 // have changed since the last Drain call.
 type Watcher struct {
@@ -29,7 +30,7 @@ type Watcher struct {
 	done chan struct{}
 }
 
-// New starts watching root and every current subdirectory (except _sync/),
+// New starts watching root and every current subdirectory (except .sync/),
 // dynamically extending the watch to new subdirectories as they're
 // created.
 func New(root string) (*Watcher, error) {
@@ -55,11 +56,11 @@ func New(root string) (*Watcher, error) {
 }
 
 func excluded(slashRel string) bool {
-	return slashRel == "_sync" || strings.HasPrefix(slashRel, "_sync/")
+	return slashRel == syncdir.Name || strings.HasPrefix(slashRel, syncdir.Name+"/")
 }
 
 // addRecursive adds fsnotify watches for dir and every subdirectory beneath
-// it, except _sync/. fsnotify.Add is non-recursive by design, so new
+// it, except .sync/. fsnotify.Add is non-recursive by design, so new
 // directories must be added explicitly - handled here for the initial
 // walk, and again in handle() for directories created afterward.
 func (w *Watcher) addRecursive(dir string) error {

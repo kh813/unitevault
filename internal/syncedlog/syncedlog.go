@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kh813/unitevault/internal/scan"
+	"github.com/kh813/unitevault/internal/syncdir"
 )
 
 // LogEntry represents a single line in log-<device-uuid>.jsonl schema
@@ -28,7 +29,7 @@ type LogEntry struct {
 	TS         string          `json:"ts"`
 }
 
-// LogManager handles reading and writing device log files in Vault/_sync/
+// LogManager handles reading and writing device log files in Vault/.sync/
 type LogManager struct {
 	vaultPath string
 }
@@ -38,9 +39,9 @@ func NewLogManager(vaultPath string) *LogManager {
 	return &LogManager{vaultPath: vaultPath}
 }
 
-// SyncDir returns the path to Vault/_sync/
+// SyncDir returns the path to Vault/.sync/
 func (lm *LogManager) SyncDir() string {
-	return filepath.Join(lm.vaultPath, "_sync")
+	return filepath.Join(lm.vaultPath, syncdir.Name)
 }
 
 // DeviceLogPath returns the path to log-<deviceID>.jsonl
@@ -51,7 +52,7 @@ func (lm *LogManager) DeviceLogPath(deviceID string) string {
 // AppendLogEntry appends a new LogEntry to log-<deviceID>.jsonl
 func (lm *LogManager) AppendLogEntry(entry LogEntry) error {
 	if err := os.MkdirAll(lm.SyncDir(), 0755); err != nil {
-		return fmt.Errorf("failed to create _sync dir: %w", err)
+		return fmt.Errorf("failed to create sync dir: %w", err)
 	}
 
 	path := lm.DeviceLogPath(entry.Device)
@@ -130,7 +131,7 @@ func ReadLogFile(path string) ([]LogEntry, error) {
 	return entries, nil
 }
 
-// ReadAllDeviceLogs reads all log-*.jsonl files in Vault/_sync/
+// ReadAllDeviceLogs reads all log-*.jsonl files in Vault/.sync/
 func (lm *LogManager) ReadAllDeviceLogs() (map[string][]LogEntry, error) {
 	syncDir := lm.SyncDir()
 	files, err := os.ReadDir(syncDir)
@@ -138,7 +139,7 @@ func (lm *LogManager) ReadAllDeviceLogs() (map[string][]LogEntry, error) {
 		if os.IsNotExist(err) {
 			return make(map[string][]LogEntry), nil
 		}
-		return nil, fmt.Errorf("failed to read _sync dir: %w", err)
+		return nil, fmt.Errorf("failed to read sync dir: %w", err)
 	}
 
 	result := make(map[string][]LogEntry)

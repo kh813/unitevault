@@ -11,6 +11,7 @@ import (
 	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/eventlog"
+	"github.com/kh813/unitevault/internal/syncdir"
 )
 
 type mockDrive struct {
@@ -95,13 +96,13 @@ func TestBootstrap_PrimaryInitialization(t *testing.T) {
 	}
 
 	// Verify local marker exists
-	localMarkerPath := filepath.Join(vaultPath, "_sync", "PRIMARY_MARKER.json")
+	localMarkerPath := filepath.Join(vaultPath, syncdir.Name, "PRIMARY_MARKER.json")
 	if _, err := os.Stat(localMarkerPath); os.IsNotExist(err) {
 		t.Fatalf("expected local PRIMARY_MARKER.json to exist")
 	}
 
 	// Verify remote marker exists in mock drive
-	remoteMarkerFile := "gdrive:Backup/_sync/PRIMARY_MARKER.json"
+	remoteMarkerFile := "gdrive:Backup/" + syncdir.Name + "/PRIMARY_MARKER.json"
 	if _, ok := mock.remoteFiles[remoteMarkerFile]; !ok {
 		t.Fatalf("expected remote PRIMARY_MARKER.json in mock drive")
 	}
@@ -122,7 +123,7 @@ func TestBootstrap_SecondaryInitialization(t *testing.T) {
 	mock := newMockDrive()
 
 	// Simulate existing primary marker on remote drive
-	remoteMarkerFile := "gdrive:Backup/_sync/PRIMARY_MARKER.json"
+	remoteMarkerFile := "gdrive:Backup/" + syncdir.Name + "/PRIMARY_MARKER.json"
 	existingMarker := bootstrap.PrimaryMarker{
 		SchemaVersion:   1,
 		PrimaryDeviceID: "other-primary-uuid",
@@ -143,7 +144,7 @@ func TestBootstrap_SecondaryInitialization(t *testing.T) {
 	}
 
 	deviceID, _ := cfgMgr.GetDeviceID()
-	localLogPath := filepath.Join(vaultPath, "_sync", fmt.Sprintf("log-%s.jsonl", deviceID))
+	localLogPath := filepath.Join(vaultPath, syncdir.Name, fmt.Sprintf("log-%s.jsonl", deviceID))
 	if _, err := os.Stat(localLogPath); os.IsNotExist(err) {
 		t.Fatalf("expected local empty device log file to exist at %s", localLogPath)
 	}
@@ -183,7 +184,7 @@ func TestBootstrap_SecondaryInitialization_DoesNotCopyFromDrive(t *testing.T) {
 	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
 	mock := newMockDrive()
 
-	remoteMarkerFile := "gdrive:Backup/_sync/PRIMARY_MARKER.json"
+	remoteMarkerFile := "gdrive:Backup/" + syncdir.Name + "/PRIMARY_MARKER.json"
 	existingMarker := bootstrap.PrimaryMarker{SchemaVersion: 1, PrimaryDeviceID: "other-primary-uuid", PrimaryLabel: "other-mac"}
 	markerBytes, _ := json.Marshal(existingMarker)
 	mock.remoteFiles[remoteMarkerFile] = markerBytes
@@ -219,7 +220,7 @@ func TestBootstrap_PrimaryReinitializationPreservesPrimaryRole(t *testing.T) {
 	mock := newMockDrive()
 
 	// Remote marker exists and belongs to THIS device
-	remoteMarkerFile := "gdrive:Backup/_sync/PRIMARY_MARKER.json"
+	remoteMarkerFile := "gdrive:Backup/" + syncdir.Name + "/PRIMARY_MARKER.json"
 	existingMarker := bootstrap.PrimaryMarker{
 		SchemaVersion:   1,
 		PrimaryDeviceID: deviceID,
@@ -264,7 +265,7 @@ func TestBootstrap_PrimaryVerificationDownloadFailure_DoesNotDemoteToSecondary(t
 	// Remote marker exists (so InitializeNode takes the verification path)
 	// and belongs to THIS device, but the verification download itself
 	// fails transiently.
-	remoteMarkerFile := "gdrive:Backup/_sync/PRIMARY_MARKER.json"
+	remoteMarkerFile := "gdrive:Backup/" + syncdir.Name + "/PRIMARY_MARKER.json"
 	existingMarker := bootstrap.PrimaryMarker{
 		SchemaVersion:   1,
 		PrimaryDeviceID: deviceID,

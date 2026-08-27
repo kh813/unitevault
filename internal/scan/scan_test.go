@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kh813/unitevault/internal/scan"
+	"github.com/kh813/unitevault/internal/syncdir"
 )
 
 func TestNormalizeLF(t *testing.T) {
@@ -400,11 +401,11 @@ func TestScanPaths_IgnoresSyncPaths(t *testing.T) {
 	scanner := scan.NewScanner(vault)
 	baseline := &scan.ScanState{Files: map[string]scan.FileState{}}
 
-	got, err := scanner.ScanPaths(baseline, []string{"_sync/state/last_scan.json", "_sync"})
+	got, err := scanner.ScanPaths(baseline, []string{syncdir.Name + "/state/last_scan.json", syncdir.Name})
 	if err != nil {
 		t.Fatalf("ScanPaths failed: %v", err)
 	}
 	if len(got.Files) != 0 {
-		t.Errorf("expected _sync/ paths to be ignored, got %+v", got.Files)
+		t.Errorf("expected sync-dir paths to be ignored, got %+v", got.Files)
 	}
 }

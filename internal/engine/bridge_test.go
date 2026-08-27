@@ -7,6 +7,7 @@ import (
 
 	"github.com/kh813/unitevault/internal/engine"
 	"github.com/kh813/unitevault/internal/scan"
+	"github.com/kh813/unitevault/internal/syncdir"
 	"github.com/kh813/unitevault/internal/syncedlog"
 )
 
@@ -22,7 +23,7 @@ func writeFile(t *testing.T, path, content string) {
 
 // TestScanBridgeAndLog_LogsAStableChangeUnderTheBridgeDeviceID guards the
 // core contract (spec 1.6.3): a change detected in the Bridge folder ends
-// up in the *main Vault's* _sync/ log, under the given bridge device ID -
+// up in the *main Vault's* .sync/ log, under the given bridge device ID -
 // not the Bridge folder's own log - so mergeAndTrackConflicts picks it up
 // with no special-casing. Debounce (spec 3.4.1) means this can take a few
 // scan cycles to settle, so this drives several before asserting.
@@ -73,14 +74,14 @@ func TestScanBridgeAndLog_LogsAStableChangeUnderTheBridgeDeviceID(t *testing.T) 
 		t.Errorf("expected a log entry for the bridge's edit under device bridge-id in the main Vault's log, got %+v", entries)
 	}
 
-	// Nothing should have been logged into the bridge folder's own _sync/
+	// Nothing should have been logged into the bridge folder's own .sync/
 	// under this device ID - only the main Vault's.
 	bridgeOwnEntries, err := syncedlog.NewLogManager(bridgePath).ReadDeviceLog("bridge-id")
 	if err != nil {
-		t.Fatalf("ReadDeviceLog (bridge's own _sync) failed: %v", err)
+		t.Fatalf("ReadDeviceLog (bridge's own sync dir) failed: %v", err)
 	}
 	if len(bridgeOwnEntries) != 0 {
-		t.Errorf("expected no log entries in the bridge folder's own _sync/, got %+v", bridgeOwnEntries)
+		t.Errorf("expected no log entries in the bridge folder's own .sync/, got %+v", bridgeOwnEntries)
 	}
 }
 
@@ -183,9 +184,9 @@ func TestMirrorVaultToBridge_NeverDeletesAnUnconfirmedNewBridgeFile(t *testing.T
 
 // TestMirrorVaultToBridge_NeverTouchesBridgesOwnSyncDir guards against the
 // mirror clobbering the Bridge folder's own independent scan-state
-// bookkeeping (its own _sync/state/last_scan.json, written by
-// ScanBridgeAndLog) - only the Vault's _sync/ is excluded from *what gets
-// copied*, but the Bridge's own _sync/ must also survive the "remove
+// bookkeeping (its own .sync/state/last_scan.json, written by
+// ScanBridgeAndLog) - only the Vault's .sync/ is excluded from *what gets
+// copied*, but the Bridge's own .sync/ must also survive the "remove
 // stale files" pass untouched.
 func TestMirrorVaultToBridge_NeverTouchesBridgesOwnSyncDir(t *testing.T) {
 	tempDir := t.TempDir()
@@ -193,7 +194,7 @@ func TestMirrorVaultToBridge_NeverTouchesBridgesOwnSyncDir(t *testing.T) {
 	bridgePath := filepath.Join(tempDir, "Bridge")
 
 	writeFile(t, filepath.Join(vaultPath, "note.md"), "hello")
-	bridgeOwnState := filepath.Join(bridgePath, "_sync", "state", "last_scan.json")
+	bridgeOwnState := filepath.Join(bridgePath, syncdir.Name, "state", "last_scan.json")
 	writeFile(t, bridgeOwnState, `{"files":{}}`)
 
 	if err := engine.MirrorVaultToBridge(vaultPath, bridgePath); err != nil {
@@ -201,6 +202,6 @@ func TestMirrorVaultToBridge_NeverTouchesBridgesOwnSyncDir(t *testing.T) {
 	}
 
 	if _, err := os.Stat(bridgeOwnState); err != nil {
-		t.Errorf("expected the bridge's own _sync/ state file to survive untouched, got %v", err)
+		t.Errorf("expected the bridge's own .sync/ state file to survive untouched, got %v", err)
 	}
 }
