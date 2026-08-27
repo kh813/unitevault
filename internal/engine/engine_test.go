@@ -680,6 +680,146 @@ func TestSyncEngine_RunCycle_PrunesStalePendingConflict(t *testing.T) {
 	}
 }
 
+// TestSyncEngine_RunCycle_AppliesSingleSecondaryChangeToPrimaryVault guards
+// a real, previously-shipped bug: mergeAndTrackConflicts unconditionally
+// skipped every path with fewer than 2 concurrent device log entries, on
+// the assumption there was nothing to merge. That's true for merging, but
+// wrong for applying - a file only ONE Secondary has ever touched, with
+// Primary never having logged anything for that path, was silently never
+// written into Primary's own Vault at all. Under the Google Drive-centric
+// architecture (spec 1.6.4) this is the only channel a Secondary's changes
+// ever reach Primary through, so the bug meant Secondary-authored files
+// and edits were invisibly dropped rather than propagated - they'd never
+// appear in Primary's Vault, and therefore never in Google Drive's
+// published mirror or any other Secondary either.
+func TestSyncEngine_RunCycle_AppliesSingleSecondaryChangeToPrimaryVault(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:    vaultPath,
+		RcloneRemote: "ObsidianVault",
+		RclonePath:   "MyVault",
+	})
+	primaryID, _ := cfgMgr.GetDeviceID()
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", primaryID, "mac-test")
+
+	logMgr := syncedlog.NewLogManager(vaultPath)
+	if err := logMgr.AppendLogEntry(syncedlog.LogEntry{
+		Device: "dev-b", Label: "windows-b", Seq: 1, Path: "note-from-b.md",
+		BaseHash: "", ResultHash: "hash-b", Diff: "created by B\n", Action: scan.ActionCreate,
+	}); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(vaultPath, "note-from-b.md"))
+	if err != nil {
+		t.Fatalf("expected note-from-b.md to have been applied to Primary's Vault, got: %v", err)
+	}
+	if string(got) != "created by B\n" {
+		t.Errorf("expected the Secondary's exact content, got %q", string(got))
+	}
+}
+
+// TestSyncEngine_RunCycle_AppliesSingleSecondaryDeletion is
+// AppliesSingleSecondaryChangeToPrimaryVault's delete counterpart: a
+// Secondary's sole deletion of a file Primary already has must also
+// propagate, not just creates/modifies.
+func TestSyncEngine_RunCycle_AppliesSingleSecondaryDeletion(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:    vaultPath,
+		RcloneRemote: "ObsidianVault",
+		RclonePath:   "MyVault",
+	})
+	primaryID, _ := cfgMgr.GetDeviceID()
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", primaryID, "mac-test")
+
+	toDelete := filepath.Join(vaultPath, "gone.md")
+	writeFile(t, toDelete, "still here until B deletes it\n")
+
+	logMgr := syncedlog.NewLogManager(vaultPath)
+	if err := logMgr.AppendLogEntry(syncedlog.LogEntry{
+		Device: "dev-b", Label: "windows-b", Seq: 1, Path: "gone.md",
+		BaseHash: "hash-old", ResultHash: "", Diff: "", Action: scan.ActionDelete,
+	}); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	if _, err := os.Stat(toDelete); !os.IsNotExist(err) {
+		t.Errorf("expected gone.md to have been deleted from Primary's Vault, stat err = %v", err)
+	}
+}
+
+// TestSyncEngine_RunCycle_SkipsApplyingPrimarysOwnSoleChange guards the
+// other half of the same fix: when Primary is the *only* device that has
+// ever logged a change to a path, applySingleDeviceChange must recognize
+// its own device ID and do nothing - the Vault file already reflects it,
+// and blindly "reapplying" it from the log would be redundant at best.
+func TestSyncEngine_RunCycle_SkipsApplyingPrimarysOwnSoleChange(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:    vaultPath,
+		RcloneRemote: "ObsidianVault",
+		RclonePath:   "MyVault",
+	})
+	primaryID, _ := cfgMgr.GetDeviceID()
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", primaryID, "mac-test")
+
+	notePath := filepath.Join(vaultPath, "own-note.md")
+	writeFile(t, notePath, "primary's own current content\n")
+
+	logMgr := syncedlog.NewLogManager(vaultPath)
+	if err := logMgr.AppendLogEntry(syncedlog.LogEntry{
+		Device: primaryID, Label: "mac-test", Seq: 1, Path: "own-note.md",
+		BaseHash: "", ResultHash: "stale-hash", Diff: "an older logged version\n", Action: scan.ActionCreate,
+	}); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	got, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	if string(got) != "primary's own current content\n" {
+		t.Errorf("expected Primary's own current Vault content to be left untouched, got %q", string(got))
+	}
+}
+
 // TestResolvePendingConflict guards conflict resolution via the GUI
 // device-picker (spec 3.3.2): the chosen device's real content (never a
 // placeholder string - the original bug) gets written to the Vault file

@@ -331,7 +331,7 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get latest log entries: %w", err)
 	}
-	if err := e.mergeAndTrackConflicts(latestByPath); err != nil {
+	if err := e.mergeAndTrackConflicts(deviceID, latestByPath); err != nil {
 		return err
 	}
 
@@ -375,6 +375,57 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	return nil
 }
 
+// applySingleDeviceChange handles a path exactly one device has ever logged
+// a change for - the "1台のみが分岐点から変更している場合は、自動的にそ
+// の変更を採用する" rule (spec 3.3). If that lone device is selfDeviceID
+// (this Primary), it's a no-op: the Vault file already reflects it. If it's
+// any other device (a Secondary or the iCloud Bridge virtual device),
+// applies its logged action directly to the Vault - a delete removes the
+// file, anything else (create/modify/rename) writes the logged content.
+//
+// A real, previously-shipped bug came from mergeAndTrackConflicts
+// unconditionally skipping every path with fewer than 2 concurrent log
+// entries: a file a Secondary alone created or edited, with Primary never
+// having touched it, was silently never written into Primary's Vault at
+// all - meaning it also never reached Google Drive's published mirror or
+// any other Secondary, despite the Secondary's own push having succeeded
+// without error.
+func (e *SyncEngine) applySingleDeviceChange(relPath string, devEntries map[string]syncedlog.LogEntry, pendingByPath map[string]config.PendingConflict, selfDeviceID string) error {
+	var devID string
+	var entry syncedlog.LogEntry
+	for id, en := range devEntries {
+		devID, entry = id, en
+	}
+	if devID == selfDeviceID {
+		return nil
+	}
+
+	fullPath := filepath.Join(e.vaultPath, relPath)
+
+	if entry.Action == scan.ActionDelete {
+		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to apply %s's deletion of %s: %w", devID, relPath, err)
+		}
+		delete(pendingByPath, relPath)
+		return nil
+	}
+
+	if entry.Diff == "" {
+		// No content snapshot to apply (shouldn't normally happen outside
+		// of a delete) - nothing safe to do.
+		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return fmt.Errorf("failed to create parent directory for %s: %w", relPath, err)
+	}
+	if err := os.WriteFile(fullPath, []byte(entry.Diff), 0644); err != nil {
+		return fmt.Errorf("failed to apply %s's change to %s: %w", devID, relPath, err)
+	}
+	delete(pendingByPath, relPath)
+	return nil
+}
+
 // mergeAndTrackConflicts runs N-way merges (spec 3.3) for every path with
 // concurrent changes across devices, and reconciles the set of unresolved
 // genuine conflicts (spec 3.3.2). Only ever called for the Primary device -
@@ -389,7 +440,7 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 // result_hash - a real base (rather than empty) is essential, since
 // git merge-file falsely reports a conflict for non-overlapping edits when
 // given no base at all.
-func (e *SyncEngine) mergeAndTrackConflicts(latestByPath map[string]map[string]syncedlog.LogEntry) error {
+func (e *SyncEngine) mergeAndTrackConflicts(selfDeviceID string, latestByPath map[string]map[string]syncedlog.LogEntry) error {
 	// Drop any previously-pending conflict whose file has since changed
 	// (the recorded hash no longer matches what's on disk) - the user
 	// resolved it, manually in Obsidian or otherwise, so it shouldn't keep
@@ -412,8 +463,25 @@ func (e *SyncEngine) mergeAndTrackConflicts(latestByPath map[string]map[string]s
 	}
 
 	for relPath, devEntries := range latestByPath {
-		if len(devEntries) <= 1 {
-			continue // No concurrent changes across multiple devices
+		if len(devEntries) == 0 {
+			continue
+		}
+
+		if len(devEntries) == 1 {
+			// Exactly one device has ever logged a change to this path -
+			// no concurrent changes to merge. If that device is this
+			// Primary itself, its own Vault file already reflects it, so
+			// there's nothing to do. Otherwise (a Secondary, or the
+			// iCloud Bridge virtual device), this loop is the only place
+			// Primary's Vault - and therefore anything Primary later
+			// publishes to Google Drive or mirrors to the iCloud Bridge -
+			// ever learns about that change at all (spec 3.3's "1台のみ
+			// が分岐点から変更している場合は、自動的にその変更を採用す
+			// る" rule), so it must be applied directly here.
+			if err := e.applySingleDeviceChange(relPath, devEntries, pendingByPath, selfDeviceID); err != nil {
+				return err
+			}
+			continue
 		}
 
 		var versions []merge.DeviceVersion
