@@ -735,6 +735,83 @@ func TestBuildSettingsContent_ConflictBanner_ShownWhenActive(t *testing.T) {
 	}
 }
 
+// TestBuildSettingsContent_SecondaryDriveWarning guards spec 1.6.4/Phase
+// 16: a Secondary with no working Google Drive remote is otherwise
+// invisible (RunCycle just silently skips the Drive step), so this warning
+// is the only thing that would ever tell the user it's not actually
+// receiving Primary's changes. Must show only for that specific
+// combination - never for Primary (which stays fully useful without
+// Drive, spec 1.6.4), an uninitialized device, or once Drive is
+// configured.
+func TestBuildSettingsContent_SecondaryDriveWarning(t *testing.T) {
+	newTestWindow()
+
+	cases := []struct {
+		name             string
+		role             string
+		rcloneConfigured bool
+		wantWarning      bool
+	}{
+		{name: "secondary without a configured remote", role: "secondary", rcloneConfigured: false, wantWarning: true},
+		{name: "secondary with a configured remote", role: "secondary", rcloneConfigured: true, wantWarning: false},
+		{name: "primary without a configured remote", role: "primary", rcloneConfigured: false, wantWarning: false},
+		{name: "not yet initialized", role: "", rcloneConfigured: false, wantWarning: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			content := buildSettingsContent(SettingsFormData{
+				VaultPath:        "/tmp/vault",
+				DeviceRole:       c.role,
+				RcloneConfigured: c.rcloneConfigured,
+			}, SettingsHandlers{})
+			got := hasLabelText(content, "⚠ Google Drive not configured:")
+			if got != c.wantWarning {
+				t.Errorf("warning shown = %v, want %v", got, c.wantWarning)
+			}
+		})
+	}
+}
+
+// TestBuildSettingsContent_SecondaryDriveWarning_ButtonInvokesConfigureRemote
+// guards that the warning's action button reuses the exact same
+// OnConfigureRemote handler as the rclone section's own "Configure Google
+// Drive Remote..." button, rather than a separate, possibly-diverging path.
+func TestBuildSettingsContent_SecondaryDriveWarning_ButtonInvokesConfigureRemote(t *testing.T) {
+	newTestWindow()
+
+	var got SettingsFormData
+	called := false
+	content := buildSettingsContent(SettingsFormData{
+		VaultPath:        "/tmp/vault",
+		DeviceRole:       "secondary",
+		RcloneConfigured: false,
+	}, SettingsHandlers{
+		OnConfigureRemote: func(d SettingsFormData) {
+			called = true
+			got = d
+		},
+	})
+
+	// Two buttons now share this label (the rclone section's own button and
+	// the warning's) - tap all of them and confirm the handler still fires.
+	tapped := false
+	walkObjects(content, func(o fyne.CanvasObject) {
+		if b, ok := o.(*widget.Button); ok && b.Text == "Configure Google Drive Remote..." {
+			test.Tap(b)
+			tapped = true
+		}
+	})
+	if !tapped {
+		t.Fatal("expected at least one 'Configure Google Drive Remote...' button")
+	}
+	if !called {
+		t.Fatal("expected OnConfigureRemote to be invoked")
+	}
+	if got.VaultPath != "/tmp/vault" {
+		t.Errorf("expected the current form snapshot to be passed through, got %+v", got)
+	}
+}
+
 // TestBuildSettingsContent_PromoteToPrimary_ConfirmThenInvokesHandler
 // guards the full interaction: tapping the button shows a confirmation
 // dialog (matching the Reset Configuration button's own pattern), and only

@@ -42,6 +42,8 @@
   "⚠ Primary conflict:": "⚠ Primaryの衝突:",
   "⚠ Unresolved conflicts:": "⚠ 未解決の競合:",
   "{{.Count}} file(s) need your input": "{{.Count}}件のファイルで選択が必要です",
+  "⚠ Google Drive not configured:": "⚠ Google Driveが未設定:",
+  "This device won't receive changes from other devices until Google Drive is set up": "Google Driveを設定するまで、このデバイスは他のデバイスの変更を受け取れません",
   "Resolve Conflicts...": "競合を解決...",
   "No Conflicts": "競合はありません",
   "There are no unresolved conflicts.": "未解決の競合はありません。",

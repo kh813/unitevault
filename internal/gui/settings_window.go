@@ -418,6 +418,23 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		deviceRoleValue = lang.L("{{.Role}} ({{.Status}})", map[string]string{"Role": deviceRoleValue, "Status": data.MultiDeviceStatus})
 	}
 	statusRows = append(statusRows, statusLine(lang.L("Device role:"), deviceRoleValue, promoteToPrimaryLabel, promoteToPrimary))
+	// A Secondary with no working Google Drive remote is otherwise
+	// invisible to the user: it never errors (RunCycle just skips the
+	// Drive push/pull entirely, spec 1.6.4), so nothing else in this
+	// window would ever hint that it's not actually receiving Primary's
+	// changes at all - Google Drive is the only channel a Secondary has
+	// for that since the 1.6 migration away from iCloud-as-transport.
+	if data.DeviceRole == "secondary" && !data.RcloneConfigured {
+		var configureRemote func()
+		if handlers.OnConfigureRemote != nil {
+			configureRemote = func() { handlers.OnConfigureRemote(currentSnapshot()) }
+		}
+		statusRows = append(statusRows, statusLine(
+			lang.L("⚠ Google Drive not configured:"),
+			lang.L("This device won't receive changes from other devices until Google Drive is set up"),
+			lang.L("Configure Google Drive Remote..."), configureRemote,
+		))
+	}
 	if data.PrimaryConflictActive {
 		// data.PrimaryConflictMessage is built in main.go via lang.L with
 		// template data (it embeds the other device's label/timestamp), so

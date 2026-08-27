@@ -1000,10 +1000,27 @@ func (t *trayApp) removeRemote(current gui.SettingsFormData) {
 				client := drive.NewClient(engineLogPath())
 				if err := client.RemoveRemote(context.Background(), remoteName); err != nil {
 					gui.Info(lang.L("Remove Failed"), lang.L("Failed to remove remote '{{.Remote}}': {{.Err}}", map[string]string{"Remote": remoteName, "Err": err.Error()}))
-				} else {
-					gui.Info(lang.L("Remote Removed"), lang.L("Removed rclone remote '{{.Remote}}'.", map[string]string{"Remote": remoteName}))
+					t.reopenSettingsGUI(current)
+					return
 				}
-				t.reopenSettingsGUI(current)
+
+				// Also clear the now-stale remote name out of config.json -
+				// otherwise every sync cycle keeps trying (and failing) to
+				// use a remote that no longer exists, instead of cleanly
+				// treating this as "no remote configured" (the same state
+				// RunCycle already tolerates gracefully for both roles,
+				// spec 1.6.4).
+				if cfg, err := t.cfgMgr.LoadConfig(); err == nil && cfg != nil {
+					cfg.RcloneRemote = ""
+					cfg.RclonePath = ""
+					_ = t.cfgMgr.SaveConfig(cfg)
+				}
+				gui.Info(lang.L("Remote Removed"), lang.L("Removed rclone remote '{{.Remote}}'.", map[string]string{"Remote": remoteName}))
+
+				reopenData := current
+				reopenData.RcloneRemote = ""
+				reopenData.RclonePath = ""
+				t.reopenSettingsGUI(reopenData)
 			}()
 		},
 	)

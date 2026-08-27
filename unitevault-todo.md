@@ -220,9 +220,9 @@
 
 **重要：この実装の過程で、`internal/scan`の変更検出パイプライン自体に、Phase 15固有ではない、より根本的なバグを発見・修正した（spec 3.4.2節）。** 既存ファイルの編集が、デバウンス方式と組み合わせると正しくログに記録されず（偽の削除が1回記録された後、本来のmodify/createが永久にログに残らない）、これは3-way merge（3.3節）が依存するログ自体の正しさを損なう、Phase 15より深刻な問題だった。`_sync/state/last_scan.json`（デバウンス比較専用）と`_sync/state/last_confirmed_scan.json`（変更検出の比較基準、新設）を分離し、さらに「デバウンス未確定」と「本当の削除」を区別する`ReconcileForDetection`を追加することで解決した。`internal/scan/scan_test.go`に、実際の複数サイクルを通しで検証する回帰テストを追加済み。
 
-### Phase 16：Google Drive同期をSecondaryにも拡張（エンジン部分は実装済み）
+### Phase 16：Google Drive同期をSecondaryにも拡張（実装済み）
 
-- [ ] Secondary機もGoogle Driveリモートの設定を必須にする（Settings画面の案内・バリデーションを更新）- **未着手**。現状はリモート未設定のSecondaryはDrive関連処理を静かにスキップするだけ（エラーにはならないが、Google Drive経由の反映もされない）
+- [x] Secondary機もGoogle Driveリモートの設定を必須にする（Settings画面の案内・バリデーションを更新）。**調査の結果、GUIのSave Settingsフロー（`saveSettingsConfirmed`）は既にリモート未設定では保存できない作りだった**（`driveClient.IsRemoteConfigured`のチェックが役割に関わらず常に実行される）。実際に到達可能だったギャップは別にあった：「Remove Remote Configuration...」（`removeRemote`）がrclone側のリモートは削除するのに`config.json`の`RcloneRemote`/`RclonePath`はクリアしていなかったため、削除後は「存在しないリモート名がconfig.jsonに残ったまま」という壊れた状態になり、次回以降の同期サイクルが（静かにスキップされるのではなく）毎回エラーになっていた。これを修正し、リモート削除時に`config.json`側も一緒にクリアするようにした（正常な「リモート未設定」状態へ）。加えて、Settings画面に「⚠ Google Drive not configured:」の警告行を追加：`DeviceRole == "secondary"`かつ`RcloneConfigured == false`の場合のみ表示し、「Configure Google Drive Remote...」ボタン（rcloneセクションの既存ボタンと同じハンドラ）で即座に設定できるようにした。Secondaryにとって未検出のまま放置されると「他のPCの変更を一切受け取れない」という一番目立ちにくい失敗モードになるため（1.6.4節の通り、Secondaryにとって唯一の受信経路がGoogle Drive）。単体テストは`internal/gui/settings_window_test.go`の`TestBuildSettingsContent_SecondaryDriveWarning`（Secondary＋未設定の組み合わせでのみ表示されること）・`TestBuildSettingsContent_SecondaryDriveWarning_ButtonInvokesConfigureRemote`。
 - [x] Secondary: 自分の`_sync/`（ログ）のみをGoogle Driveへ`rclone copy`でアップロード（`sync`ではなく`copy`を使い、リモート側の削除・他デバイス分ファイルの巻き添え削除を防ぐ）。Vault現物ファイルはpushしない - ログエントリの`diff`フィールドに全文が入っている（3.4節）ため、Primary側のマージにはログだけで十分
 - [x] Primary: Google Driveから全デバイスの`_sync/`（ログのみ、Vault現物は対象外）をpull（`rclone copy`）→ 既存のマージ処理 → マージ後のVault全体を`rclone sync`でGoogle Driveへpublish（Primaryのみがミラー転送の権限を持つ、という既存方針を維持）。`_sync/`のみに限定することで、Primary自身の編集中のVaultファイルがpullで上書きされるリスクを避けている
 - [x] Secondary側の`rclone copy` pull処理（Primaryが`sync`で公開した最新のマージ結果、Vault全体を取得しローカルVaultへ反映）
