@@ -266,6 +266,64 @@ func TestIntegration_DriveOnly_TwoDevicesConverge(t *testing.T) {
 	}
 }
 
+// TestIntegration_Secondary_InFlightEditSurvivesSameCyclePull guards a
+// real, previously-shipped bug (engine.go's unstablePullExcludes): a
+// Secondary's own edit, made just before a sync cycle runs, used to get
+// silently overwritten by that very same cycle's pull from Google Drive -
+// Primary's last-published (now-stale) content would clobber the local
+// edit before it had ever stabilized long enough to be confirmed and
+// logged, and the file having been reverted meant the next scan would
+// never detect a change had happened at all. The edit vanished completely,
+// with no trace anywhere - not even a conflict.
+func TestIntegration_Secondary_InFlightEditSurvivesSameCyclePull(t *testing.T) {
+	tempDir := t.TempDir()
+	remote := newFSDriveRunner(t)
+
+	aVault := filepath.Join(tempDir, "A", "Vault")
+	aCfgMgr := config.NewConfigManagerWithDir(filepath.Join(tempDir, "A", "config"))
+	if err := aCfgMgr.SaveConfig(&config.Config{VaultPath: aVault, RcloneRemote: "ObsidianVault", RclonePath: "MyVault"}); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	aEng := engine.NewSyncEngine(aCfgMgr, aVault, "device-a", remote)
+
+	bVault := filepath.Join(tempDir, "B", "Vault")
+	bCfgMgr := config.NewConfigManagerWithDir(filepath.Join(tempDir, "B", "config"))
+	if err := bCfgMgr.SaveConfig(&config.Config{VaultPath: bVault, RcloneRemote: "ObsidianVault", RclonePath: "MyVault"}); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	bEng := engine.NewSyncEngine(bCfgMgr, bVault, "device-b", remote)
+
+	// A (Primary) publishes shared.md = "v1".
+	writeFile(t, filepath.Join(aVault, "shared.md"), "v1")
+	settle(t, aEng, 2)
+
+	// B (Secondary) pulls it and runs enough cycles for its own scanner to
+	// consider shared.md fully stable/confirmed - exactly the state a file
+	// the user has had open for a while would be in (see DebounceFilter:
+	// a path needs two consecutive matching raw scans, and the very first
+	// pull cycle's scan runs *before* the pull that creates the file, so a
+	// freshly-pulled file needs one extra cycle beyond that to stabilize).
+	settle(t, bEng, 3)
+	if got, err := os.ReadFile(filepath.Join(bVault, "shared.md")); err != nil || string(got) != "v1" {
+		t.Fatalf("expected B to have a stable, confirmed copy of shared.md = \"v1\" before the real test begins, got %q, err %v", got, err)
+	}
+
+	// B edits shared.md right before its next cycle runs - Primary hasn't
+	// seen this edit yet (no push has happened), so Google Drive still
+	// only has the stale "v1". This single cycle's own pull is exactly the
+	// one that used to overwrite the edit before it could ever stabilize.
+	writeFile(t, filepath.Join(bVault, "shared.md"), "v2 by B")
+	settle(t, bEng, 1)
+
+	got, err := os.ReadFile(filepath.Join(bVault, "shared.md"))
+	if err != nil {
+		t.Fatalf("expected shared.md to still exist on B, got: %v", err)
+	}
+	if string(got) != "v2 by B" {
+		t.Errorf("expected B's in-flight edit to survive its own cycle's pull, got %q (reverted to Primary's stale content)", got)
+	}
+}
+
 // TestIntegration_Bridge_PhoneEditReachesVaultAndPublishes exercises the
 // "iCloud Bridge" configuration pattern (unitevault-todo.md Phase 19): a
 // single Primary device with an iCloud Bridge folder configured, standing
@@ -401,5 +459,88 @@ func TestIntegration_Both_DriveAndBridgeConverge(t *testing.T) {
 		if string(got) != want {
 			t.Errorf("%s: got %q, want %q", name, string(got), want)
 		}
+	}
+}
+
+// TestIntegration_SecondaryBridge_PhoneEditReachesPrimaryAndSecondary
+// guards a real gap this app used to have (spec 1.6.3/1.6.7): the iCloud
+// Bridge path is configured per-device (Vault Migration can run on any
+// device, not just Primary), but only Primary ever scanned it - a
+// Secondary with iCloud also set up (e.g. so an iPhone can reach it, or
+// because the user accidentally opened the iCloud-side copy of the Vault
+// on that device instead of the managed local one) would silently ignore
+// any change that appeared there. Guards that a Secondary now detects a
+// Bridge-side change, logs it like any other local change, and pushes it
+// so it reaches Primary and merges in normally - all without the
+// Secondary ever writing back to the Bridge folder itself (that stays
+// Primary-only, spec 1.6.1's single-writer principle - a Secondary's own
+// unrelated Vault edit must never appear there).
+func TestIntegration_SecondaryBridge_PhoneEditReachesPrimaryAndSecondary(t *testing.T) {
+	tempDir := t.TempDir()
+	remote := newFSDriveRunner(t)
+
+	aVault := filepath.Join(tempDir, "A", "Vault")
+	aCfgMgr := config.NewConfigManagerWithDir(filepath.Join(tempDir, "A", "config"))
+	if err := aCfgMgr.SaveConfig(&config.Config{VaultPath: aVault, RcloneRemote: "ObsidianVault", RclonePath: "MyVault"}); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	aEng := engine.NewSyncEngine(aCfgMgr, aVault, "device-a", remote)
+
+	bVault := filepath.Join(tempDir, "B", "Vault")
+	bBridge := filepath.Join(tempDir, "B", "Bridge")
+	bCfgMgr := config.NewConfigManagerWithDir(filepath.Join(tempDir, "B", "config"))
+	if err := bCfgMgr.SaveConfig(&config.Config{
+		VaultPath:        bVault,
+		RcloneRemote:     "ObsidianVault",
+		RclonePath:       "MyVault",
+		ICloudBridgePath: bBridge,
+	}); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	bEng := engine.NewSyncEngine(bCfgMgr, bVault, "device-b", remote)
+
+	// A becomes Primary first (no marker exists yet).
+	settle(t, aEng, 1)
+	// B joins as Secondary (marker now names A), with its own local iCloud
+	// Bridge folder already configured (e.g. from having run Vault
+	// Migration on this device too).
+	settle(t, bEng, 1)
+
+	// B also has an ordinary Vault edit of its own, unrelated to the
+	// Bridge - used below to confirm a Secondary never mirrors its Vault
+	// content back out to the Bridge folder.
+	writeFile(t, filepath.Join(bVault, "b-local-note.md"), "written on B directly\n")
+
+	// Simulate an iPhone edit landing directly in B's local copy of the
+	// Bridge folder - completely independent of A, exactly as Apple's own
+	// iCloud sync would deliver it to whichever devices have iCloud set up.
+	writeFile(t, filepath.Join(bBridge, "from-iphone.md"), "written on iPhone\n")
+
+	// B's own Bridge scan and Vault edit both need to stabilize (2
+	// consecutive matching raw scans) before they're logged and pushed,
+	// then A needs a cycle to pull B's log, merge, and republish, then B
+	// needs one more cycle to pull the republished result back down.
+	settle(t, bEng, 2)
+	settle(t, aEng, 1)
+	settle(t, bEng, 1)
+
+	got, err := os.ReadFile(filepath.Join(aVault, "from-iphone.md"))
+	if err != nil {
+		t.Fatalf("expected Primary to have merged the Bridge-sourced change, got: %v", err)
+	}
+	if string(got) != "written on iPhone\n" {
+		t.Errorf("expected the iPhone's exact content on Primary, got %q", got)
+	}
+
+	got, err = os.ReadFile(filepath.Join(bVault, "from-iphone.md"))
+	if err != nil {
+		t.Fatalf("expected Secondary's own Vault to have it too (via Google Drive), got: %v", err)
+	}
+	if string(got) != "written on iPhone\n" {
+		t.Errorf("expected the iPhone's exact content on Secondary, got %q", got)
+	}
+
+	if _, err := os.Stat(filepath.Join(bBridge, "b-local-note.md")); !os.IsNotExist(err) {
+		t.Errorf("expected a Secondary's own Vault edit to never be mirrored back to the Bridge folder (Primary-only), stat err = %v", err)
 	}
 }

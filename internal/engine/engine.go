@@ -67,6 +67,19 @@ func primaryExternalTasks(cfg *config.Config) []externalSyncTask {
 	return tasks
 }
 
+// unstablePullExcludes turns scan.UnstablePaths into rclone --exclude
+// patterns, each anchored to the Vault root with a leading "/" so a
+// pattern can never accidentally match an unrelated file elsewhere that
+// merely shares the same relative suffix.
+func unstablePullExcludes(currState, stableState *scan.ScanState) []string {
+	paths := scan.UnstablePaths(currState, stableState)
+	excludes := make([]string, len(paths))
+	for i, p := range paths {
+		excludes[i] = "/" + p
+	}
+	return excludes
+}
+
 // SetWatcher attaches an OS-level file watcher (spec 1.6.5) that RunCycle
 // will use, when present, to scan only the paths it reports changed rather
 // than the whole Vault - purely a performance optimization; a nil watcher
@@ -221,19 +234,44 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	// already merged and published (spec 1.6.4). Secondary never merges
 	// itself - that's Primary-only.
 	//
-	// Known limitations (v1, see unitevault-todo.md Phase 16): the pull
-	// uses `copy`, not `sync`, so a file Primary has since deleted
-	// upstream won't be removed locally here - and in the narrow window
-	// where a local edit hasn't stabilized/logged yet, this pull could in
-	// principle overwrite it before this device's own next scan ever
-	// captures it. Accepted for now in favor of never risking a
-	// destructive sync against a Vault folder Obsidian may be actively
-	// editing.
+	// The pull uses `copy`, not `sync`, so a file Primary has since deleted
+	// upstream won't be removed locally here (spec 1.6.4's manifest
+	// reconciliation below handles that instead). A real, previously-
+	// shipped bug came from the OTHER limitation this used to have: in the
+	// narrow window where a local edit hadn't stabilized/logged yet, this
+	// same pull could overwrite (or resurrect a just-deleted) file with
+	// Primary's last-published content before this device's own next scan
+	// ever captured it - silently discarding the edit with no trace, since
+	// the file having been reverted meant the next scan never saw a change
+	// at all. Fixed by excluding every currently-unstable path
+	// (scan.UnstablePaths - not yet confirmed by DebounceFilter this cycle)
+	// from the pull, so an in-flight edit survives long enough to stabilize
+	// and get logged (and thus pushed) on a later cycle instead.
 	if role == "secondary" {
 		secondaryCfg, err := e.cfgMgr.LoadConfig()
 		if err != nil {
 			return fmt.Errorf("failed to load config for secondary drive sync: %w", err)
 		}
+
+		// Read (never write) this device's own local iCloud Bridge copy, if
+		// it has one configured - a real gap otherwise: ICloudBridgePath is
+		// saved per-device (Vault Migration can run on any device, not just
+		// Primary), but only Primary ever scanned it, so a Secondary with
+		// iCloud also set up (e.g. for iPhone) would silently ignore both
+		// iPhone edits arriving via iCloud and a user accidentally editing
+		// the iCloud-side copy directly instead of the managed Vault folder
+		// on that same device. Logging what's found here feeds it into the
+		// exact same push/merge pipeline as any other change on this device
+		// - no special-casing needed. Writing the merged Vault back out to
+		// the Bridge folder stays Primary-only (MirrorVaultToBridge, below)
+		// so only one device ever writes into that iCloud-synced folder,
+		// avoiding the multi-writer hazard spec 1.6.1 moved away from.
+		if secondaryCfg.ICloudBridgePath != "" {
+			if bridgeDeviceID, err := e.cfgMgr.GetOrCreateBridgeDeviceID(); err == nil {
+				_, _ = ScanBridgeAndLog(e.vaultPath, secondaryCfg.ICloudBridgePath, bridgeDeviceID, "iCloud Bridge")
+			}
+		}
+
 		if secondaryCfg.RcloneRemote != "" && secondaryCfg.RclonePath != "" {
 			remoteTarget := fmt.Sprintf("%s:%s", secondaryCfg.RcloneRemote, secondaryCfg.RclonePath)
 			// state/** (Scanner.ConfirmedStateFilePath's directory) is this
@@ -246,8 +284,10 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 			}
 			// .sync/state/** excluded here so this pull can never
 			// overwrite this device's own scanner bookkeeping with
-			// Primary's.
-			if err := e.drive.Copy(ctx, remoteTarget, e.vaultPath, "/"+syncdir.Name+"/state/**"); err != nil {
+			// Primary's. Every currently-unstable path is also excluded -
+			// see this block's own doc comment above.
+			pullExcludes := append([]string{"/" + syncdir.Name + "/state/**"}, unstablePullExcludes(currState, stableState)...)
+			if err := e.drive.Copy(ctx, remoteTarget, e.vaultPath, pullExcludes...); err != nil {
 				return fmt.Errorf("failed to pull latest changes from Google Drive: %w", err)
 			}
 

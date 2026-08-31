@@ -291,6 +291,13 @@
 
 **追記：Windowsでの一瞬のコンソールウィンドウ表示を全面的に排除（実機報告により発見・修正済み、spec 8.4節）。** 自己更新ヘルパーのコンソール表示は既に修正済みだったが、実機テストで「同期サイクルのたび（`rclone`呼び出し）」「3-way merge発動のたび（`git merge-file`呼び出し）」にも同様の一瞬の表示が起きていることが判明した。原因は、これらの箇所が`CREATE_NO_WINDOW`を一切設定せずに`exec.Command`でコンソールサブシステムの実行ファイルを起動していたため。新設した共通ヘルパー`internal/winexec.HideWindow`（旧`internal/bootstrap`の非公開`hideWindow`を格上げ・統合したもの）を、`internal/drive`のrclone呼び出し全箇所・`internal/merge`のgit呼び出し・`internal/bootstrap`のtasklist/taskkill/winget/Gitインストーラー/iCloud起動用cmd/rundll32、すべてに適用した。意図的にユーザーへ見せる対話的ウィンドウ（rclone configのPowerShellターミナル、Gitインストーラーのフォールバック起動）は対象外とした。
 
+**追記：Secondaryの編集がpullで消えるデータロスバグと、iCloud Bridgeの読み取りをSecondaryにも拡張（実機報告により発見・修正済み、spec 1.6.3節・1.6.4節）。**
+
+1. **Secondaryの未確定編集が同サイクルのpullで上書きされ消える不具合を修正。** Phase 16時点では「稀な既知の制約」として受け入れていたが、Windows実機で「保存直後に同期サイクルが回ると編集が跡形もなく消える」ことが実際に発生すると報告を受けた。原因は、デバウンスでまだ安定していない（ログ未記録の）編集を、同じサイクルの「Primary公開済み内容の`rclone copy`によるpull」が物理的に上書きしてしまうこと。`scan.UnstablePaths`（今回のスキャンでまだ安定していないパスを返す）を追加し、pullの`--exclude`へ動的に加えることで解消した。デバッグの過程で、`ApplyManifestDeletions`が「自分自身が直前に確定したファイルを、Primaryのマニフェスト公開がまだ追いついていないタイミングで誤って削除してしまう」別のレースが既に存在し、これまでは（今回修正対象の）pullが結果的にその削除を追加コピーで自己修復していたことも判明した。そのため`UnstablePaths`は意図的に「直前のスキャンから消えたパス（削除）」を保護対象に含めない設計とした（削除まで保護すると、この自己修復を妨げて別の恒久的データロスを生んでしまうため）。実際にこの設計判断が無いとテストが壊れることを、統合テストで確認済み。
+2. **iCloud Bridgeの読み取り(`ScanBridgeAndLog`)をSecondaryにも拡張。** `config.ICloudBridgePath`はVault Migrationを実行したデバイスごとに個別保存されるため、Secondary機でもiCloudを設定していれば持ち得るが、従来はPrimaryしか読み取っていなかった。iPhoneでの編集や、ユーザーが誤って管理フォルダの代わりにiCloud側を直接開いて編集した内容が、Secondary機では永久に無視される抜け穴だった。書き込み(`MirrorVaultToBridge`)は複数デバイスからの同時書き込みによる競合を避けるため引き続きPrimaryのみとし、読み取りだけを全デバイスに拡張した。
+
+なお、この一連の議論の中で「iCloud中心方式への回帰」「Primary/Secondaryの区別を無くした対称同期（gitのようなCAS方式）」という2つの大きな代替案も検討したが、いずれも実装コスト・信頼性の観点から不採用とした（前者は3.6.1.6節の既知の制約を再導入するリスク、後者はrcloneの単純なファイル操作だけではgitのpush拒否に相当する調整機構を安全に実現できないため）。詳細な検討経緯は本セッションの会話ログを参照。
+
 ### 将来のTodo（このPhase群のスコープ外）
 
 - Vaultのデータ量・ファイル数に応じて、Google Drive同期・iCloud Bridge同期それぞれの間隔を自動調整、またはユーザーへ変更を提案する機能

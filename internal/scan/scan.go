@@ -443,6 +443,46 @@ func DebounceFilter(scan1, scan2 *ScanState) *ScanState {
 	return stable
 }
 
+// UnstablePaths returns every Vault-relative path currently present but
+// not yet confirmed stable this cycle (in currState but not matching
+// stableState - changed, or newly created, since the immediately-
+// preceding raw scan). These are exactly the paths that might still be
+// mid-write (Obsidian hasn't finished saving) and haven't been
+// confirmed/logged yet.
+//
+// Deliberately does NOT include paths that disappeared since the last raw
+// scan (present in lastRawState, absent from currState): unlike an
+// in-progress write, a deletion is detected with single-scan confidence
+// (ReconcileForDetection needs no 2-scan stability check for it) and
+// protecting it here would do more harm than good - it would block the
+// exact additive re-pull (spec 1.6.4) that's supposed to self-heal a file
+// a *different*, unrelated bug (ApplyManifestDeletions racing Primary's
+// manifest publish) deleted prematurely, turning a transient hiccup into
+// a permanent loss instead.
+//
+// A real, previously-shipped bug: a Secondary's same-cycle pull from
+// Google Drive (engine.go, RunCycle) used to overwrite any of these paths
+// with Primary's last-published content before this device's own edit
+// ever had a chance to stabilize and get logged - silently discarding the
+// edit with no trace, since the very next scan would then see the
+// reverted content and never detect a change at all. Passing these paths
+// as the pull's rclone --exclude patterns (each prefixed with "/" to
+// anchor it to the Vault root) leaves them completely untouched by that
+// cycle's pull, so an in-flight edit survives long enough to stabilize and
+// be logged (and thus pushed) on a later cycle instead.
+func UnstablePaths(currState, stableState *ScanState) []string {
+	if currState == nil || stableState == nil {
+		return nil
+	}
+	var paths []string
+	for p := range currState.Files {
+		if _, ok := stableState.Files[p]; !ok {
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
 // Helper io reader copier
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)

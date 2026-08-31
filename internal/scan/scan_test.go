@@ -156,6 +156,46 @@ func TestDebounceFilter(t *testing.T) {
 	}
 }
 
+// TestUnstablePaths guards the real, previously-shipped bug this function
+// fixes (see its own doc comment, and internal/engine's unstablePullExcludes):
+// a Secondary's own edit could get silently overwritten by that same
+// cycle's pull from Google Drive if the edit hadn't stabilized (2
+// consecutive matching raw scans) long enough to be confirmed and logged
+// yet. Also guards that a deletion since the last scan is deliberately
+// NOT included - protecting it would block the additive re-pull that's
+// supposed to self-heal an incorrectly-deleted file elsewhere in the
+// system (spec 1.6.4).
+func TestUnstablePaths(t *testing.T) {
+	currState := &scan.ScanState{Files: map[string]scan.FileState{
+		"stable.md":  {Hash: "same"},
+		"changed.md": {Hash: "new-hash"},
+		"created.md": {Hash: "brand-new"},
+	}}
+	stableState := &scan.ScanState{Files: map[string]scan.FileState{
+		"stable.md": {Hash: "same"},
+	}}
+
+	got := scan.UnstablePaths(currState, stableState)
+	want := map[string]bool{"changed.md": true, "created.md": true}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d unstable paths, got %v", len(want), got)
+	}
+	for _, p := range got {
+		if !want[p] {
+			t.Errorf("unexpected unstable path %q", p)
+		}
+	}
+}
+
+// TestUnstablePaths_NilStatesReturnNothing guards against a nil ScanState
+// (e.g. RunCycle's very first-ever cycle, before any scan has run) causing
+// a panic rather than just reporting no unstable paths.
+func TestUnstablePaths_NilStatesReturnNothing(t *testing.T) {
+	if got := scan.UnstablePaths(nil, nil); got != nil {
+		t.Errorf("expected nil for nil inputs, got %v", got)
+	}
+}
+
 func TestReconcileForDetection(t *testing.T) {
 	confirmed := &scan.ScanState{Files: map[string]scan.FileState{
 		"stable.md":        {Hash: "h-stable"},
