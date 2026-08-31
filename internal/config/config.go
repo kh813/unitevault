@@ -11,20 +11,61 @@ import (
 	"github.com/google/uuid"
 )
 
+// SyncMode selects which of the three sync modes (spec 1.6.10) this device
+// uses. Chosen once at setup and not changed afterward (v1) - see
+// Config.SyncMode's own doc comment.
+type SyncMode string
+
+const (
+	// SyncModeDrive is the Google-Drive-centric mode (spec 1.6.10's "B"
+	// and "C" modes - they share this same code path; a single device
+	// with no Secondaries is simply C's degenerate case of B, needing no
+	// separate implementation). Vault lives in this app's own managed
+	// local folder (bootstrap.ManagedVaultParentDir, ~/Obsidian), synced
+	// via the existing Primary/Secondary + 3-way merge engine.
+	SyncModeDrive SyncMode = "drive"
+	// SyncModeICloud is spec 1.6.10's "A" mode: Vault lives directly in
+	// Obsidian's iCloud container (bootstrap.ObsidianICloudContainerRoot),
+	// with Apple's own iCloud sync responsible for consistency across
+	// Mac/Windows/iPhone - this app never merges or elects a Primary in
+	// this mode, it only mirrors the current content to Google Drive as a
+	// one-way backup (engine.RunICloudModeCycle).
+	SyncModeICloud SyncMode = "icloud"
+)
+
 // Config represents the local application configuration (~/.unitevault/config.json)
 type Config struct {
 	VaultPath       string `json:"vault_path"`
 	RcloneRemote    string `json:"rclone_remote"`
 	RclonePath      string `json:"rclone_path"`
 	IntervalSeconds int    `json:"interval_seconds"`
+	// SyncMode is empty for every config saved before this field existed -
+	// treated identically to SyncModeDrive (that was the only behavior
+	// that existed then), so existing installs keep working unchanged
+	// with no migration needed.
+	SyncMode SyncMode `json:"sync_mode,omitempty"`
 	// ICloudBridgePath is the iCloud Drive-resident folder Vault Migration
 	// (spec 1.6.3) seeded a copy of the Vault into, for iPhone/iPad to keep
 	// editing via iCloud. Empty means no bridge was set up (e.g. iCloud
 	// Drive wasn't detected at migration time, or the user has no iPhone).
 	// This is currently a one-time seed copy only - the ongoing bridge
 	// sync/merge described in spec 1.6.3 is still future work (Phase 15,
-	// unitevault-todo.md).
+	// unitevault-todo.md). Only meaningful in SyncModeDrive - SyncModeICloud
+	// has no Bridge concept at all, since the Vault itself already lives in
+	// iCloud (spec 1.6.10).
 	ICloudBridgePath string `json:"icloud_bridge_path,omitempty"`
+}
+
+// EffectiveSyncMode returns cfg.SyncMode, defaulting an empty/legacy value
+// to SyncModeDrive - the only behavior that existed before this field was
+// introduced. Callers should always use this instead of reading SyncMode
+// directly, so a config saved before the field existed is never
+// misinterpreted as "unset".
+func (cfg *Config) EffectiveSyncMode() SyncMode {
+	if cfg == nil || cfg.SyncMode == "" {
+		return SyncModeDrive
+	}
+	return cfg.SyncMode
 }
 
 // ConfigManager handles loading and saving settings in the local config directory

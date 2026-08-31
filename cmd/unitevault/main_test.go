@@ -430,11 +430,61 @@ func TestVaultNeedsAutoMigration(t *testing.T) {
 			data:    gui.SettingsFormData{VaultPath: managedPath},
 			want:    false,
 		},
+		{
+			name:    "first-time setup, iCloud mode selected, outside the managed folder",
+			prevCfg: &config.Config{},
+			data:    gui.SettingsFormData{VaultPath: unmanagedPath, SyncMode: "icloud"},
+			want:    false,
+		},
+		{
+			name:    "already-locked to iCloud mode, outside the managed folder",
+			prevCfg: &config.Config{VaultPath: unmanagedPath, SyncMode: config.SyncModeICloud},
+			data:    gui.SettingsFormData{VaultPath: unmanagedPath, SyncMode: "icloud"},
+			want:    false,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := vaultNeedsAutoMigration(c.prevCfg, c.data); got != c.want {
 				t.Errorf("vaultNeedsAutoMigration(%+v, %+v) = %v, want %v", c.prevCfg, c.data, got, c.want)
+			}
+		})
+	}
+}
+
+// TestLockedSyncMode guards spec 1.6.10's "fixed at setup, no switching in
+// v1" rule at the persistence layer itself, not just via the Settings
+// window hiding the selector - a prior save's SyncMode must always win once
+// set, regardless of what a later (buggy or malicious) form snapshot
+// carries.
+func TestLockedSyncMode(t *testing.T) {
+	cases := []struct {
+		name    string
+		prevCfg *config.Config
+		data    gui.SettingsFormData
+		want    config.SyncMode
+	}{
+		{name: "first-ever save, no selection made", prevCfg: nil, data: gui.SettingsFormData{}, want: config.SyncModeDrive},
+		{name: "first-ever save, drive selected", prevCfg: nil, data: gui.SettingsFormData{SyncMode: "drive"}, want: config.SyncModeDrive},
+		{name: "first-ever save, icloud selected", prevCfg: nil, data: gui.SettingsFormData{SyncMode: "icloud"}, want: config.SyncModeICloud},
+		{name: "pre-SyncMode legacy config, icloud now selected", prevCfg: &config.Config{VaultPath: "/v"}, data: gui.SettingsFormData{SyncMode: "icloud"}, want: config.SyncModeICloud},
+		{
+			name:    "already locked to icloud, form somehow carries drive",
+			prevCfg: &config.Config{VaultPath: "/v", SyncMode: config.SyncModeICloud},
+			data:    gui.SettingsFormData{SyncMode: "drive"},
+			want:    config.SyncModeICloud,
+		},
+		{
+			name:    "already locked to drive, form somehow carries icloud",
+			prevCfg: &config.Config{VaultPath: "/v", SyncMode: config.SyncModeDrive},
+			data:    gui.SettingsFormData{SyncMode: "icloud"},
+			want:    config.SyncModeDrive,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := lockedSyncMode(c.prevCfg, c.data); got != c.want {
+				t.Errorf("lockedSyncMode(%+v, %+v) = %q, want %q", c.prevCfg, c.data, got, c.want)
 			}
 		})
 	}
@@ -558,28 +608,46 @@ func TestVaultUnderManagedRoot(t *testing.T) {
 // what was already saved.
 func TestBuildSaveConfig(t *testing.T) {
 	cases := []struct {
-		name       string
-		prevCfg    *config.Config
-		data       gui.SettingsFormData
-		wantBridge string
+		name         string
+		prevCfg      *config.Config
+		data         gui.SettingsFormData
+		wantBridge   string
+		wantSyncMode config.SyncMode
 	}{
 		{
-			name:       "no previous config at all (first-ever save)",
-			prevCfg:    nil,
-			data:       gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60},
-			wantBridge: "",
+			name:         "no previous config at all (first-ever save)",
+			prevCfg:      nil,
+			data:         gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60},
+			wantBridge:   "",
+			wantSyncMode: config.SyncModeDrive,
 		},
 		{
-			name:       "previous config never had a Bridge path",
-			prevCfg:    &config.Config{VaultPath: "/vaults/A"},
-			data:       gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60},
-			wantBridge: "",
+			name:         "previous config never had a Bridge path",
+			prevCfg:      &config.Config{VaultPath: "/vaults/A"},
+			data:         gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60},
+			wantBridge:   "",
+			wantSyncMode: config.SyncModeDrive,
 		},
 		{
-			name:       "an ordinary re-save carries the Bridge path forward",
-			prevCfg:    &config.Config{VaultPath: "/vaults/A", ICloudBridgePath: "/icloud/Obsidian/A"},
-			data:       gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60},
-			wantBridge: "/icloud/Obsidian/A",
+			name:         "an ordinary re-save carries the Bridge path forward",
+			prevCfg:      &config.Config{VaultPath: "/vaults/A", ICloudBridgePath: "/icloud/Obsidian/A"},
+			data:         gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60},
+			wantBridge:   "/icloud/Obsidian/A",
+			wantSyncMode: config.SyncModeDrive,
+		},
+		{
+			name:         "first-ever save, iCloud mode selected",
+			prevCfg:      nil,
+			data:         gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60, SyncMode: "icloud"},
+			wantBridge:   "",
+			wantSyncMode: config.SyncModeICloud,
+		},
+		{
+			name:         "re-save of an already-locked iCloud-mode Vault",
+			prevCfg:      &config.Config{VaultPath: "/vaults/A", SyncMode: config.SyncModeICloud},
+			data:         gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60},
+			wantBridge:   "",
+			wantSyncMode: config.SyncModeICloud,
 		},
 	}
 	for _, c := range cases {
@@ -587,6 +655,9 @@ func TestBuildSaveConfig(t *testing.T) {
 			got := buildSaveConfig(c.prevCfg, c.data)
 			if got.ICloudBridgePath != c.wantBridge {
 				t.Errorf("ICloudBridgePath = %q, want %q", got.ICloudBridgePath, c.wantBridge)
+			}
+			if got.SyncMode != c.wantSyncMode {
+				t.Errorf("SyncMode = %q, want %q", got.SyncMode, c.wantSyncMode)
 			}
 			if got.VaultPath != c.data.VaultPath || got.RcloneRemote != c.data.RcloneRemote ||
 				got.RclonePath != c.data.RclonePath || got.IntervalSeconds != c.data.IntervalSeconds {

@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -65,6 +66,16 @@ func findEntry(t *testing.T, root fyne.CanvasObject, placeholderOrText string) *
 	if found == nil {
 		t.Fatalf("entry with text/placeholder %q not found in settings window content", placeholderOrText)
 	}
+	return found
+}
+
+func findRadioGroup(root fyne.CanvasObject) *widget.RadioGroup {
+	var found *widget.RadioGroup
+	walkObjects(root, func(o fyne.CanvasObject) {
+		if r, ok := o.(*widget.RadioGroup); ok {
+			found = r
+		}
+	})
 	return found
 }
 
@@ -860,4 +871,104 @@ func hasLabelText(root fyne.CanvasObject, text string) bool {
 		}
 	})
 	return found
+}
+
+// TestBuildSettingsContent_SyncMode_SelectorShownForFirstTimeSetup guards
+// spec 1.6.10: a brand new device (no Vault saved yet) must be offered the
+// A/B/C mode choice - VaultPath=="" is the same "not configured yet" signal
+// buildFormData uses.
+func TestBuildSettingsContent_SyncMode_SelectorShownForFirstTimeSetup(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{}, SettingsHandlers{})
+
+	if findRadioGroup(content) == nil {
+		t.Fatal("expected a sync mode selector (RadioGroup) for an unconfigured device")
+	}
+}
+
+// TestBuildSettingsContent_SyncMode_LockedOnceVaultIsConfigured guards the
+// "fixed at setup, no switching in v1" decision (spec 1.6.10): once a
+// device has a Vault saved, the mode choice must render as a read-only
+// label, not a selector the user could accidentally change.
+func TestBuildSettingsContent_SyncMode_LockedOnceVaultIsConfigured(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "icloud"}, SettingsHandlers{})
+
+	if findRadioGroup(content) != nil {
+		t.Fatal("expected no sync mode selector once a Vault is already configured")
+	}
+	if !hasFormItemText(content, "Sync Mode") {
+		t.Error("expected a read-only 'Sync Mode' row once locked")
+	}
+}
+
+// TestBuildSettingsContent_SyncMode_DefaultsToDriveWhenUnsaved guards
+// config.EffectiveSyncMode's own default: an unconfigured device that saves
+// without touching the selector must persist "drive", not an empty string.
+func TestBuildSettingsContent_SyncMode_DefaultsToDriveWhenUnsaved(t *testing.T) {
+	newTestWindow()
+
+	var saved SettingsFormData
+	content := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault"}, SettingsHandlers{
+		OnSave: func(d SettingsFormData) { saved = d },
+	})
+	test.Tap(findButton(t, content, "Save Settings"))
+
+	if saved.SyncMode != "drive" {
+		t.Errorf("expected default SyncMode 'drive', got %q", saved.SyncMode)
+	}
+}
+
+// TestBuildSettingsContent_SyncMode_SelectingICloudRoundTrips guards that
+// picking the iCloud-centric option in the selector actually reaches
+// OnSave - the mode choice would otherwise silently save as "drive"
+// regardless of what the user picked.
+func TestBuildSettingsContent_SyncMode_SelectingICloudRoundTrips(t *testing.T) {
+	newTestWindow()
+
+	var saved SettingsFormData
+	content := buildSettingsContent(SettingsFormData{}, SettingsHandlers{
+		OnSave: func(d SettingsFormData) { saved = d },
+	})
+
+	radio := findRadioGroup(content)
+	if radio == nil {
+		t.Fatal("expected a sync mode selector")
+	}
+	var icloudOption string
+	for _, opt := range radio.Options {
+		if strings.Contains(opt, "iCloud") {
+			icloudOption = opt
+		}
+	}
+	if icloudOption == "" {
+		t.Fatalf("expected an iCloud-centric option among %v", radio.Options)
+	}
+	radio.SetSelected(icloudOption)
+
+	test.Tap(findButton(t, content, "Save Settings"))
+
+	if saved.SyncMode != "icloud" {
+		t.Errorf("expected SyncMode 'icloud' after selecting it, got %q", saved.SyncMode)
+	}
+}
+
+// TestBuildSettingsContent_SyncMode_LockedValuePassesThroughUnchanged
+// guards that once locked (read-only), Save Settings still reports the
+// Vault's actual mode rather than silently reverting to the "drive"
+// default - there's no widget left to read it back from.
+func TestBuildSettingsContent_SyncMode_LockedValuePassesThroughUnchanged(t *testing.T) {
+	newTestWindow()
+
+	var saved SettingsFormData
+	content := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "icloud"}, SettingsHandlers{
+		OnSave: func(d SettingsFormData) { saved = d },
+	})
+	test.Tap(findButton(t, content, "Save Settings"))
+
+	if saved.SyncMode != "icloud" {
+		t.Errorf("expected locked SyncMode 'icloud' to pass through, got %q", saved.SyncMode)
+	}
 }

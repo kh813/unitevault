@@ -308,6 +308,21 @@
 
 - Vaultのデータ量・ファイル数に応じて、Google Drive同期・iCloud Bridge同期それぞれの間隔を自動調整、またはユーザーへ変更を提案する機能
 - 両端末がiCloud Bridgeを持つ構成（spec 2.1節Case 1/2/6）で発生する、Secondary経由の無駄な同一内容の往復（Primaryが公開→AppleのiCloud同期でSecondaryへ反映→Secondary自身のBridgeスキャンが「新しい変更」として誤検出→Google Drive経由でPrimaryへ送り返し）を抑制する機能（実害はないため優先度は低い）
+- 同期モード（Phase 20・spec 1.6.10節）を、セットアップ後に切り替える機能（v1では非対応、切り替えたい場合はReset Configurationからのやり直しで対応）
+
+## Phase 20：マルチモード方式への発展（設計フェーズ）
+
+**背景：** Phase 14〜19（1.6節）で構築した「Google Drive中心＋iCloud Bridge」の統合方式は、実機テストを重ねるうちに、「PC間同期」と「iPhone/iPad連携」を単一の仕組みで両立させようとすること自体が複雑さ・不具合の主な発生源になっていることが判明した（N-way mergeの入れ子破損、Secondaryのpullレース、Bridgeの読み書き非対称性による無駄な往復、`~/Obsidian/`とiCloud上のVaultのどちらを開けばいいか分からない利用者の混乱、等）。ユーザーからの提案により、セットアップ時に3つの同期モード（A：iCloud中心、B：Google Drive中心・複数PC、C：Google Drive中心・単一PC）から1つを選ぶ方式へ発展させることにした。設計の詳細はspec 1.6.10節・2.1節・3.1節を参照。
+
+- [x] セットアップ画面（Settings Window / Setup Wizard）にモード選択UIを追加
+- [x] Aモード（iCloud中心）の実装：
+  - [x] Vault Migration・iCloud Bridge関連の仕組み（`ManagedVaultParentDir`・`SeedICloudBridge`・`MirrorVaultToBridge`・`ScanBridgeAndLog`等）を経由しない、専用の軽量な同期エンジンを実装する（Primary/Secondaryの区別なし、各PCが独立して`rclone sync`でGoogle Driveへバックアップするのみ、`engine.runICloudModeCycle`）
+  - [ ] iCloudが作成する`ファイル名 (conflicted copy).md`／`ファイル名 2.md`を検出し、元ファイルと3-way mergeする機能（既存の`internal/merge`を再利用可能）——正規のユーザーノート命名（例:「Chapter 2.md」）と区別できないため、誤検出時に無関係なファイルを壊しかねない。検出ヒューリスティックが固まるまで着手しない（ユーザーへの相談待ち）
+- [x] B・Cモードは既存の実装をそのまま使う（追加実装なし、確認済み）
+- [x] モード間の切り替えはv1では非対応（将来のTodo参照）。`cmd/unitevault/main.go`の`lockedSyncMode`が、一度保存されたSyncModeを以後のSaveで上書きさせないことで永続化層でも強制している
+- [ ] README等のユーザーガイドへの詳しい手順の追記は、実装が一段落してから行う（ユーザー指示）
+
+**追記（実装済み）：** Settings画面にモード選択（RadioGroup、初回セットアップ時のみ表示、Vault保存済みなら以後は読み取り専用ラベル表示に切り替え）を追加した。`gui.SettingsFormData.SyncMode`（"drive"/"icloud"の平文字列、`internal/gui`をconfigパッケージから独立に保つ既存方針を踏襲）で受け渡し、`main.go`の`buildFormData`/`buildSaveConfig`/`lockedSyncMode`/`vaultNeedsAutoMigration`/`saveSettingsConfirmed`を対応させた。AモードではVault Migrationへの自動誘導（`vaultNeedsAutoMigration`）とPrimary/Secondary初期化（`InitializeNode`）の両方を明示的にスキップする——後者は、AモードのGoogle Drive同期先が純粋なバックアップ専用（読み返されない）であるにもかかわらず、`InitializeNode`のSecondary初期化パスが実際にはDriveからの初回pullを行うため、iCloud管理下のVaultをその（空または古い）バックアップ内容で上書きしてしまう実害があったため。
 
 ---
 

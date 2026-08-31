@@ -8,6 +8,32 @@ import (
 	"github.com/kh813/unitevault/internal/config"
 )
 
+// TestConfig_EffectiveSyncMode guards spec 1.6.10's backward-compat
+// requirement: every config saved before SyncMode existed has it as the
+// empty string, and must be treated identically to SyncModeDrive (the
+// only behavior that ever existed) rather than as some unrecognized third
+// state - existing installs must keep working unchanged with no
+// migration needed.
+func TestConfig_EffectiveSyncMode(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  *config.Config
+		want config.SyncMode
+	}{
+		{name: "nil config", cfg: nil, want: config.SyncModeDrive},
+		{name: "zero-value config (pre-SyncMode save)", cfg: &config.Config{}, want: config.SyncModeDrive},
+		{name: "explicit drive mode", cfg: &config.Config{SyncMode: config.SyncModeDrive}, want: config.SyncModeDrive},
+		{name: "explicit icloud mode", cfg: &config.Config{SyncMode: config.SyncModeICloud}, want: config.SyncModeICloud},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.cfg.EffectiveSyncMode(); got != c.want {
+				t.Errorf("EffectiveSyncMode() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestConfigManager_DeviceID(t *testing.T) {
 	tempDir := t.TempDir()
 	cm := config.NewConfigManagerWithDir(tempDir)

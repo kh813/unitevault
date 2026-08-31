@@ -119,6 +119,58 @@ func TestSyncEngine_RunCycle(t *testing.T) {
 	}
 }
 
+// TestSyncEngine_RunCycle_ICloudMode_BackupOnlyNoRoleOrMerge guards spec
+// 1.6.10's Mode A: RunCycle must take an entirely different, much simpler
+// path when config.SyncModeICloud is set - a one-way rclone sync backup
+// only, with none of SyncModeDrive's Primary/Secondary election, device
+// log, or merge machinery ever running (Apple's own iCloud sync, not this
+// app, is responsible for cross-device consistency in this mode).
+func TestSyncEngine_RunCycle_ICloudMode_BackupOnlyNoRoleOrMerge(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+	if err := os.MkdirAll(vaultPath, 0755); err != nil {
+		t.Fatalf("failed to create vault dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(vaultPath, "note.md"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("failed to seed a note: %v", err)
+	}
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:       vaultPath,
+		RcloneRemote:    "ObsidianVault",
+		RclonePath:      "MyVault",
+		IntervalSeconds: 120,
+		SyncMode:        config.SyncModeICloud,
+	})
+
+	mock := newMockDriveRunner()
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	if !mock.syncCalled {
+		t.Error("expected Mode A to publish via a one-way rclone sync")
+	}
+	if len(mock.copyCalls) != 0 {
+		t.Errorf("expected Mode A to never push/pull via Copy (no Secondary/Bridge logic), got %+v", mock.copyCalls)
+	}
+	if role, err := cfgMgr.LoadRole(); err != nil || role != "" {
+		t.Errorf("expected Mode A to never elect a Primary/Secondary role, got role=%q, err=%v", role, err)
+	}
+
+	status, err := cfgMgr.LoadDriveSyncStatus()
+	if err != nil || status == nil {
+		t.Fatalf("expected a recorded drive sync status, got %v, err %v", status, err)
+	}
+	if !status.Success {
+		t.Errorf("expected the recorded status to report success, got %+v", status)
+	}
+}
+
 // failingDriveRunner is mockDriveRunner with Sync forced to fail, for
 // exercising RunCycle's drive-sync-failure path.
 type failingDriveRunner struct {

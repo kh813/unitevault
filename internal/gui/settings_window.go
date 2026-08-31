@@ -70,6 +70,16 @@ type SettingsFormData struct {
 	RcloneRemote    string
 	RclonePath      string
 	IntervalSeconds int
+	// SyncMode is "drive" or "icloud" (spec 1.6.10) - deliberately a plain
+	// string rather than config.SyncMode to keep this package independent
+	// of internal/config (see targetPathEntry's comment above for the same
+	// convention elsewhere in this struct). "" means "not yet chosen" (a
+	// brand new, unconfigured device) and is treated identically to
+	// "drive" everywhere this is read, mirroring config.EffectiveSyncMode.
+	// Fixed permanently the first time a Vault is ever saved - see
+	// SettingsHandlers.OnSave and this window's own "locked" rendering
+	// below, keyed off VaultPath already being non-empty.
+	SyncMode string
 
 	// rclone Details
 	RcloneExecPath   string
@@ -175,10 +185,56 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// data.RclonePath's default is computed below, from the Vault folder's
 	// name where possible (see targetPathEntry).
 
+	// --- Sync Mode section (spec 1.6.10) ---
+	// Fixed permanently the first time a Vault is ever saved on this
+	// device - modeLocked keys off VaultPath rather than RcloneConfigured
+	// (unlike vaultChangeDisabled below) because the choice must stick even
+	// before Google Drive gets configured, not just after.
+	modeLocked := data.VaultPath != ""
+	syncMode := data.SyncMode
+	if syncMode == "" {
+		syncMode = "drive"
+	}
+	driveModeLabel := lang.L("Google Drive-centric (multiple Macs/Windows PCs, or a single PC backed up to Google Drive)")
+	icloudModeLabel := lang.L("iCloud-centric (Mac/Windows + iPhone/iPad via iCloud; Google Drive is backup only)")
+	var syncModeContent fyne.CanvasObject
+	if modeLocked {
+		modeDisplay := driveModeLabel
+		if syncMode == "icloud" {
+			modeDisplay = icloudModeLabel
+		}
+		syncModeContent = widget.NewForm(widget.NewFormItem(lang.L("Sync Mode"), widget.NewLabel(modeDisplay)))
+	} else {
+		syncModeRadio := widget.NewRadioGroup([]string{driveModeLabel, icloudModeLabel}, nil)
+		if syncMode == "icloud" {
+			syncModeRadio.SetSelected(icloudModeLabel)
+		} else {
+			syncModeRadio.SetSelected(driveModeLabel)
+		}
+		hint := widget.NewLabel(lang.L("Choose how this Vault stays in sync. This can't be changed later without resetting configuration."))
+		hint.Wrapping = fyne.TextWrapWord
+		syncModeContent = container.NewVBox(syncModeRadio, hint)
+		syncModeRadio.OnChanged = func(selected string) {
+			if selected == icloudModeLabel {
+				syncMode = "icloud"
+			} else {
+				syncMode = "drive"
+			}
+		}
+	}
+	syncModeCard := widget.NewCard(lang.L("Sync Mode"), "", syncModeContent)
+
 	// --- Obsidian Vault section ---
 	vaultEntry := widget.NewEntry()
 	vaultEntry.SetText(data.VaultPath)
-	vaultEntry.SetPlaceHolder(lang.L("Your Obsidian Vault folder"))
+	vaultPlaceholder := lang.L("Your Obsidian Vault folder")
+	if !modeLocked {
+		// Mode A's Vault lives inside Obsidian's own iCloud container, not
+		// this app's managed ~/Obsidian/ folder - hinting at that up front
+		// saves a round trip through "Select Folder..." to the wrong place.
+		vaultPlaceholder = lang.L("Your Obsidian Vault folder (for iCloud-centric mode: the Vault folder inside iCloud Drive, e.g. where Obsidian's \"iCloud\" storage option created it)")
+	}
+	vaultEntry.SetPlaceHolder(vaultPlaceholder)
 
 	// --- rclone section ---
 	// Everything about the Google Drive backup lives here, not in the
@@ -316,6 +372,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			RcloneRemote:           strings.TrimSpace(remoteEntry.Text),
 			RclonePath:             strings.TrimSpace(targetPathEntry.Text),
 			IntervalSeconds:        sec,
+			SyncMode:               syncMode,
 			RcloneExecPath:         data.RcloneExecPath,
 			RcloneRemoteInfo:       data.RcloneRemoteInfo,
 			RcloneConfigured:       data.RcloneConfigured,
@@ -498,7 +555,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// while scrolling for an expanded accordion still works exactly the
 	// same (that's evaluated against the window's actual on-screen size at
 	// layout time, independent of this MinSize hint).
-	topContent := container.NewVBox(statusCard, vaultCard, rcloneCard)
+	topContent := container.NewVBox(statusCard, syncModeCard, vaultCard, rcloneCard)
 	scroll := container.NewVScroll(topContent)
 	scroll.SetMinSize(topContent.MinSize())
 

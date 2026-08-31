@@ -669,6 +669,7 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 
 	if cfg != nil {
 		data.VaultPath = cfg.VaultPath
+		data.SyncMode = string(cfg.EffectiveSyncMode())
 		if cfg.RcloneRemote != "" {
 			data.RcloneRemote = cfg.RcloneRemote
 		}
@@ -1477,8 +1478,34 @@ func vaultChangeNeedsRemoteRemoval(prevCfg *config.Config, data gui.SettingsForm
 // vaultUnderManagedRoot's doc comment for why "outside the managed folder"
 // replaced a growing per-service (iCloud Drive, ...) detection list.
 func vaultNeedsAutoMigration(prevCfg *config.Config, data gui.SettingsFormData) bool {
+	// Mode A's Vault (spec 1.6.10) lives permanently inside Obsidian's own
+	// iCloud container - auto-migrating it into ~/Obsidian/ the way an
+	// unmanaged Mode B/C Vault gets moved would fight the very iCloud sync
+	// this mode relies on, so it must never fire here.
+	if lockedSyncMode(prevCfg, data) == config.SyncModeICloud {
+		return false
+	}
 	freshSelection := prevCfg == nil || prevCfg.VaultPath == "" || prevCfg.VaultPath != data.VaultPath
 	return freshSelection && !vaultUnderManagedRoot(data.VaultPath)
+}
+
+// lockedSyncMode returns the SyncMode a save should actually persist: once
+// prevCfg has ever recorded one, it permanently overrides whatever data
+// carries - spec 1.6.10 fixes the sync mode at first setup with no
+// switching in v1, and the Settings window itself stops offering the
+// selector once a Vault is configured (see SettingsFormData.SyncMode). Only
+// a first-ever save (no prevCfg, or one saved before SyncMode existed) uses
+// data's own selection, falling back to SyncModeDrive if even that is
+// unset - the same default config.EffectiveSyncMode applies everywhere
+// else.
+func lockedSyncMode(prevCfg *config.Config, data gui.SettingsFormData) config.SyncMode {
+	if prevCfg != nil && prevCfg.SyncMode != "" {
+		return prevCfg.SyncMode
+	}
+	if data.SyncMode != "" {
+		return config.SyncMode(data.SyncMode)
+	}
+	return config.SyncModeDrive
 }
 
 // buildSaveConfig constructs the config.Config that saveSettingsConfirmed
@@ -1497,6 +1524,7 @@ func buildSaveConfig(prevCfg *config.Config, data gui.SettingsFormData) *config.
 		RcloneRemote:     data.RcloneRemote,
 		RclonePath:       data.RclonePath,
 		IntervalSeconds:  data.IntervalSeconds,
+		SyncMode:         lockedSyncMode(prevCfg, data),
 		ICloudBridgePath: icloudBridgePath,
 	}
 }
@@ -1620,23 +1648,34 @@ func (t *trayApp) saveSettingsConfirmed(data gui.SettingsFormData) {
 			return
 		}
 
-		hostname, _ := os.Hostname()
-		bootstrapper := bootstrap.NewBootstrapper(t.cfgMgr, driveClient)
 		remoteTarget := fmt.Sprintf("%s:%s", data.RcloneRemote, data.RclonePath)
 
 		var newRole string
-		err := gui.RunWithProgress(
-			lang.L("Initializing UniteVault"),
-			lang.L("Determining Primary/Secondary role and syncing initial state with Google Drive..."),
-			func() error {
-				var initErr error
-				newRole, initErr = bootstrapper.InitializeNode(context.Background(), data.VaultPath, remoteTarget, hostname)
-				return initErr
-			},
-		)
-		if err != nil {
-			gui.Info(lang.L("Initialization Failed"), lang.L("UniteVault could not finish initializing: {{.Err}}", map[string]string{"Err": err.Error()}))
-			return
+		if newCfg.SyncMode == config.SyncModeICloud {
+			// Mode A (spec 1.6.10): Apple's iCloud alone keeps this Vault
+			// consistent across devices - there is no Primary/Secondary to
+			// elect, and running InitializeNode here would attempt an
+			// initial pull from the Google Drive target, which is only
+			// ever a one-way backup destination in this mode (possibly
+			// empty, possibly stale) and must never be written back into
+			// this iCloud-managed Vault.
+			newRole = lang.L("iCloud-centric (backup only)")
+		} else {
+			hostname, _ := os.Hostname()
+			bootstrapper := bootstrap.NewBootstrapper(t.cfgMgr, driveClient)
+			err := gui.RunWithProgress(
+				lang.L("Initializing UniteVault"),
+				lang.L("Determining Primary/Secondary role and syncing initial state with Google Drive..."),
+				func() error {
+					var initErr error
+					newRole, initErr = bootstrapper.InitializeNode(context.Background(), data.VaultPath, remoteTarget, hostname)
+					return initErr
+				},
+			)
+			if err != nil {
+				gui.Info(lang.L("Initialization Failed"), lang.L("UniteVault could not finish initializing: {{.Err}}", map[string]string{"Err": err.Error()}))
+				return
+			}
 		}
 
 		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Active ({{.Role}})", map[string]string{"Role": newRole}))

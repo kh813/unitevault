@@ -128,6 +128,14 @@ func NewSyncEngine(cfgMgr *config.ConfigManager, vaultPath string, label string,
 
 // RunCycle executes a single sync iteration (scan -> log -> merge -> sync drive)
 func (e *SyncEngine) RunCycle(ctx context.Context) error {
+	cfg, err := e.cfgMgr.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if cfg.EffectiveSyncMode() == config.SyncModeICloud {
+		return e.runICloudModeCycle(ctx, cfg)
+	}
+
 	deviceID, err := e.cfgMgr.GetDeviceID()
 	if err != nil {
 		return fmt.Errorf("failed to get device ID: %w", err)
@@ -141,10 +149,6 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 
 	role, err := e.cfgMgr.LoadRole()
 	if err != nil || role == "" {
-		cfg, err := e.cfgMgr.LoadConfig()
-		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
 		remoteTarget := fmt.Sprintf("%s:%s", cfg.RcloneRemote, cfg.RclonePath)
 		bootstrapper := bootstrap.NewBootstrapper(e.cfgMgr, e.drive)
 		role, err = bootstrapper.InitializeNode(ctx, e.vaultPath, remoteTarget, e.label)
@@ -413,6 +417,47 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		}
 	}
 
+	return nil
+}
+
+// runICloudModeCycle implements spec 1.6.10's Mode A: the Vault lives
+// directly in Obsidian's iCloud container, and Apple's own iCloud sync is
+// solely responsible for content consistency across every Mac/Windows/
+// iPhone signed into the same account - this app never elects a Primary
+// and never merges anything in this mode (contrast SyncModeDrive's
+// Primary/Secondary + 3-way merge engine, the rest of this file). Each
+// device independently mirrors its own current view of the Vault to
+// Google Drive as a one-way backup only, via the same destructive
+// `rclone sync` SyncModeDrive's Primary uses to publish - safe here
+// specifically because nothing in this mode ever reads it back: unlike a
+// Secondary's pull (which does get read back, and so needs the
+// debounce/exclude protection RunCycle's SyncModeDrive path has), a
+// moment of staleness in this one-way backup (e.g. two devices publishing
+// close together before iCloud has fully converged them) self-heals on
+// the very next tick once iCloud catches up, with no data ever actually
+// lost - only ever overwritten with what becomes the final, converged
+// content moments later.
+func (e *SyncEngine) runICloudModeCycle(ctx context.Context, cfg *config.Config) error {
+	if err := os.MkdirAll(e.vaultPath, 0755); err != nil {
+		return fmt.Errorf("failed to create vault dir: %w", err)
+	}
+	if cfg.RcloneRemote == "" || cfg.RclonePath == "" {
+		// Not configured yet - nothing to back up to.
+		return nil
+	}
+
+	remoteTarget := fmt.Sprintf("%s:%s", cfg.RcloneRemote, cfg.RclonePath)
+	syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget)
+
+	status := config.DriveSyncStatus{Time: time.Now().Format(time.RFC3339), Success: syncErr == nil}
+	if syncErr != nil {
+		status.Error = syncErr.Error()
+	}
+	_ = e.cfgMgr.SaveDriveSyncStatus(status)
+
+	if syncErr != nil {
+		return fmt.Errorf("rclone sync failed: %w", syncErr)
+	}
 	return nil
 }
 
