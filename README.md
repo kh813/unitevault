@@ -74,11 +74,11 @@ ObsidianがVaultファイルへ直接書き込むのと、iCloudの内部デー�
 
 1. Vaultフォルダをローカル専用フォルダ（`~/Obsidian/<選択したフォルダ名>`）へ移動
 2. Obsidian自身のVault一覧（`obsidian.json`）をベストエフォートで更新（次回Obsidianを開くと新しい場所が自動的に開きます。失敗した場合はObsidianから手動で開き直すよう案内が出ます）
-3. iCloud Driveが検出できれば、`<iCloud Drive>/Obsidian/<フォルダ名>` へ内容をシードコピーし、以降iPhone/iPadとの橋渡し（iCloud Bridge）として継続的に同期される状態にする
+3. iCloud Bridgeの配置先が検出できれば（Mac: Obsidian自身の専用iCloudコンテナ／Windows: iCloud Drive配下の`Obsidian`フォルダ）、内容をそこへシードコピーし、以降iPhone/iPadとの橋渡し（iCloud Bridge）として継続的に同期される状態にする
 
-既に設定済みの端末を起動した際、Vaultパスが今もiCloud Drive配下にあると検出された場合は、この移行を提案するダイアログが自動的に表示されます（「Don't Show This Again」でいつでも非表示にできます）。
+既に設定済みの端末を起動した際、Vaultパスが今もiCloud Drive配下、またはMacではObsidian専用iCloudコンテナ配下にあると検出された場合は、この移行を提案するダイアログが自動的に表示されます（「Don't Show This Again」でいつでも非表示にできます）。
 
-> iPhone/iPadを使わない場合は、上記3の手順は自動的にスキップされます（iCloud Driveが検出できない、またはVaultが元々ローカルフォルダの場合）。
+> iPhone/iPadを使わない場合は、上記3の手順は自動的にスキップされます（iCloud Bridgeの配置先が検出できない、またはVaultが元々ローカルフォルダの場合）。
 
 ### 5. Google Driveへの接続
 
@@ -122,7 +122,7 @@ Primary端末（最初にセットアップした端末がなりますが、Sett
 - 保存すると、Google Drive上に既に `PRIMARY_MARKER.json` が存在するため、自動的に **Secondary** として初期化されます。
 - **Vaultの中身は、最初の同期サイクル（デフォルト最大60秒後、または手動で「Sync Now」を実行）で、Google Driveから自動的に取り込まれます。** 保存直後は空のままなので、少し待つか「Sync Now」を実行してください。
 
-iPhone/iPadは追加インストール不要です。Primary機のiCloud Bridgeフォルダ（`<iCloud Drive>/Obsidian/<フォルダ名>`）が、通常のiCloud同期でiPhone/iPadにも配布されます。
+iPhone/iPadは追加インストール不要です。Primary機のiCloud Bridgeフォルダが、通常のiCloud同期でiPhone/iPadにも配布されます。
 
 ### 9. Vaultを変更する場合の注意
 
@@ -158,7 +158,7 @@ Settingsウィンドウの「Status」セクションから、それぞれ未イ
 ## トラブルシューティング
 
 - **Git/rcloneのインストールを促すダイアログが毎回出る**: 未初期化のままGit/rcloneが未検出の場合、起動のたびに案内ダイアログが表示されます。表示不要な場合は「Don't show this again」にチェックを入れてください。
-- **「Move Your Vault Out of iCloud Drive?」ダイアログが出る**: 現在のVaultパスがiCloud Drive配下にあると検出されました。「Migrate Now」で自動移行するか、「Don't Show This Again」で今後表示しないようにできます（手順4参照）。
+- **「Move Your Vault Out of iCloud Drive?」ダイアログが出る**: 現在のVaultパスがiCloud Drive配下、またはMacの場合はObsidian専用iCloudコンテナ配下（iPhone版Obsidianの「iCloudを使う」オプションで作成したVault）にあると検出されました。「Migrate Now」で自動移行するか、「Don't Show This Again」で今後表示しないようにできます（手順4参照）。
 - **Secondaryとして追加した端末でVaultが空のまま**: 最初の同期サイクル（デフォルト最大60秒）を待つか、メニューの「Sync Now」を実行してください（手順8参照）。
 - **設定をやり直したい**: Settingsウィンドウ内の **[ Reset Configuration ]** ボタンから、ローカルの設定・端末役割情報をクリアして初期状態に戻せます（誤操作防止のため、タスクトレイメニューには配置していません）。
 - **Google Driveの接続をやり直したい（別のGoogleアカウントに変更したい等）**: rcloneセクションの **[ Remove Remote Configuration... ]** ボタン（リモートが設定済みの場合のみ表示）から、確認の上でrclone側の認証情報を削除できます。Google Drive上のバックアップファイル自体は削除されません。削除後、改めて **[ Configure Google Drive Remote... ]** から設定し直せます。

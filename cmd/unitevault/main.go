@@ -300,11 +300,19 @@ func (t *trayApp) maybeShowICloudMigrationReminder(cfg *config.Config) {
 	if t.cfgMgr.IsICloudMigrationReminderDismissed() {
 		return
 	}
-	icloudRoot, ok := bootstrap.ICloudDriveRoot()
-	if !ok {
-		return
+	// Checks both the generic iCloud Drive folder (a Vault manually placed
+	// anywhere under it) and, on macOS, Obsidian's own dedicated iCloud
+	// container (a Vault created via Obsidian iOS's "iCloud" toggle lands
+	// there instead - see ObsidianICloudContainerRoot) - either counts as
+	// "at risk" (spec 1.6.1/3.6.1.6).
+	underICloud := false
+	if root, ok := bootstrap.ICloudDriveRoot(); ok && pathIsUnder(root, cfg.VaultPath) {
+		underICloud = true
 	}
-	if !pathIsUnder(icloudRoot, cfg.VaultPath) {
+	if root, ok := bootstrap.ObsidianICloudContainerRoot(); ok && pathIsUnder(root, cfg.VaultPath) {
+		underICloud = true
+	}
+	if !underICloud {
 		return
 	}
 
@@ -1256,8 +1264,8 @@ func (t *trayApp) runVaultMigration(oldPath, newPath string, current gui.Setting
 			))
 		}
 
-		if icloudRoot, ok := bootstrap.ICloudDriveRoot(); ok {
-			bridgePath := filepath.Join(icloudRoot, "Obsidian", filepath.Base(newPath))
+		if bridgeParent, ok := bootstrap.ICloudBridgeParentDir(); ok {
+			bridgePath := filepath.Join(bridgeParent, filepath.Base(newPath))
 			if err := bootstrap.SeedICloudBridge(newPath, bridgePath); err != nil {
 				notes = append(notes, lang.L(
 					"Could not set up the iCloud Bridge copy for iPhone/iPad ({{.Err}}).",

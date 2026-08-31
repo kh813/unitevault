@@ -268,6 +268,10 @@
 
 **追記：ブックキーピング用ディレクトリを`_sync/`から`.sync/`へ改名（実装済み、spec 1.6.9節）。** 実機での動作確認中、Obsidianのファイルエクスプローラーに`_sync`フォルダがそのまま見えてしまい、ユーザーが誤って操作しかねないという指摘を受けて対応。Obsidianは`.obsidian`や`.git`同様、ドット始まりのフォルダをデフォルトで自動的に隠す（ユーザー側で何も設定不要）ため、`internal/syncdir`パッケージで名前を一元管理し、`.sync`へ変更した。旧`_sync/`からの自動移行処理は、この時点でテスト環境のデバイスしか使っていなかった（実運用データが無かった）ため、コード量を抑える判断で実装しなかった（ユーザー指示により、実装済みだった移行コード一式を削除）。
 
+**追記：Vault Migrationの移行先を`~/Obsidian/<フォルダ名>`へ変更、rclone Remote Nameのデフォルトを`ObsidianVault`→`Vault`へ変更（実装済み）。** ユーザー指摘により対応。`bootstrap.MoveVaultFolder`が移行先の親フォルダを`os.MkdirAll`で自動作成するよう修正（親フォルダが無いと同一ボリューム内の移動でも失敗し得たバグの修正込み）。
+
+**追記：iCloud Bridgeフォルダの配置先を修正（実機検証により発見・修正済み、spec 1.6.3節）。** v0.0.52でVault Migration時に一般のiCloud Drive配下の`Obsidian`フォルダへブリッジをシードコピーするよう実装したが、実機検証で**iPhone版Obsidianからは実際に開けない**ことが判明した。iPhone版Obsidianの「iCloudを使う」オプションでVaultを作成すると、Obsidian自身の専用iCloudコンテナ（Macでは`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/<Vault名>`、一般のiCloud Drive＝`com~apple~CloudDocs`とは別系統）に保存されることが分かったため、Mac側のブリッジ配置先をこちらに変更した（`bootstrap.ObsidianICloudContainerRoot`）。Windowsについては、iCloud for Windowsにアプリ専用コンテナへのアクセス手段が無いことをObsidianコミュニティフォーラムで確認済みのため、従来通り一般のiCloud Drive配下の`Obsidian`フォルダのままとした（`bootstrap.ICloudBridgeParentDir`が両OSの分岐を吸収）。既存ユーザーへの移行案内（`maybeShowICloudMigrationReminder`）も、Mac限定でこの専用コンテナ配下も検出対象に追加した。
+
 ### 将来のTodo（このPhase群のスコープ外）
 
 - Vaultのデータ量・ファイル数に応じて、Google Drive同期・iCloud Bridge同期それぞれの間隔を自動調整、またはユーザーへ変更を提案する機能
