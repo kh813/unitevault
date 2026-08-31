@@ -483,7 +483,16 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			})
 		}
 	}
-	statusRows := []fyne.CanvasObject{
+	// The Status card is split into two columns to keep its height in check
+	// as more rows accumulate (Git/rclone/iCloud install checks, Google
+	// Drive sync, Device role, ...) - tall enough on a small screen to spill
+	// past the display otherwise. Left column: install checks (a fixed,
+	// small set - Git/rclone/iCloud, all "is this tool present" checks).
+	// Right column: this device's actual runtime status (Google Drive sync
+	// outcome, Device role) - conceptually different information, so
+	// splitting along that line (rather than, say, alternating rows) keeps
+	// each column internally consistent.
+	installRows := []fyne.CanvasObject{
 		statusLine(lang.L("Git status:"), lang.L(orDefault(data.GitStatus, "Unknown")), lang.L("Install Git..."), installGit),
 		statusLine(lang.L("rclone status:"), lang.L(orDefault(data.RcloneStatus, "Unknown")), lang.L("Install rclone..."), installRclone),
 	}
@@ -491,13 +500,15 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// hiding the row entirely elsewhere instead of showing "Not Found" for a
 	// concept (a separate iCloud install) that doesn't apply there.
 	if data.ICloudStatus != "" {
-		statusRows = append(statusRows, statusLine(lang.L("iCloud status:"), lang.L(data.ICloudStatus), lang.L("Install iCloud..."), installICloud))
+		installRows = append(installRows, statusLine(lang.L("iCloud status:"), lang.L(data.ICloudStatus), lang.L("Install iCloud..."), installICloud))
 	}
+
+	var operationalRows []fyne.CanvasObject
 	if data.DriveSyncStatus != "" {
 		// data.DriveSyncStatus is built in main.go via lang.L with template
 		// data (it embeds a variable timestamp/error), so it already
 		// arrives pre-localized - it must not be wrapped in lang.L again.
-		statusRows = append(statusRows, statusLine(lang.L("Google Drive sync:"), data.DriveSyncStatus, "", nil))
+		operationalRows = append(operationalRows, statusLine(lang.L("Google Drive sync:"), data.DriveSyncStatus, "", nil))
 	}
 	// Primary/Secondary is a Drive-mode-only concept (spec 1.6.10) - an
 	// iCloud-mode device never has one (see saveSettingsConfirmed, which
@@ -512,7 +523,10 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			// surrounding template here needs its own localization.
 			deviceRoleValue = lang.L("{{.Role}} ({{.Status}})", map[string]string{"Role": deviceRoleValue, "Status": data.MultiDeviceStatus})
 		}
-		statusRows = append(statusRows, statusLine(lang.L("Device role:"), deviceRoleValue, promoteToPrimaryLabel, promoteToPrimary))
+		operationalRows = append(operationalRows, statusLine(lang.L("Device role:"), deviceRoleValue, promoteToPrimaryLabel, promoteToPrimary))
+	}
+	statusRows := []fyne.CanvasObject{
+		container.NewGridWithColumns(2, container.NewVBox(installRows...), container.NewVBox(operationalRows...)),
 	}
 	// A Secondary with no working Google Drive remote is otherwise
 	// invisible to the user: it never errors (RunCycle just skips the
