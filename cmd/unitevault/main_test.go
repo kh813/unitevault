@@ -204,8 +204,8 @@ func TestBuildFormData_DefaultsWhenUnconfigured(t *testing.T) {
 	if data.VaultPath != "" {
 		t.Errorf("expected empty VaultPath before any config is saved, got %q", data.VaultPath)
 	}
-	if data.RcloneRemote != "ObsidianVault" {
-		t.Errorf("expected default RcloneRemote 'ObsidianVault', got %q", data.RcloneRemote)
+	if data.RcloneRemote != "Vault" {
+		t.Errorf("expected default RcloneRemote 'Vault', got %q", data.RcloneRemote)
 	}
 	if data.RclonePath != "VaultBackup" {
 		t.Errorf("expected default RclonePath 'VaultBackup', got %q", data.RclonePath)

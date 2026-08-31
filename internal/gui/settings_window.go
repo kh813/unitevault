@@ -170,7 +170,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		data.IntervalSeconds = 60
 	}
 	if data.RcloneRemote == "" {
-		data.RcloneRemote = "ObsidianVault"
+		data.RcloneRemote = "Vault"
 	}
 	// data.RclonePath's default is computed below, from the Vault folder's
 	// name where possible (see targetPathEntry).

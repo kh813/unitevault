@@ -48,6 +48,15 @@ func MoveVaultFolder(oldPath, newPath string) error {
 		return fmt.Errorf("failed to check destination %s: %w", newPath, err)
 	}
 
+	// newPath's parent (e.g. ~/Obsidian) may not exist yet on a fresh
+	// machine - os.Rename (unlike the CopyDirRecursive fallback below,
+	// which creates it via MkdirAll as part of copying newPath itself)
+	// doesn't create it, and would otherwise fail here even for an
+	// ordinary same-volume move that should just be an instant rename.
+	if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
+		return fmt.Errorf("failed to create parent directory for %s: %w", newPath, err)
+	}
+
 	if err := os.Rename(oldPath, newPath); err == nil {
 		return nil
 	}

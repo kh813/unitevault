@@ -101,9 +101,9 @@ func TestBuildSettingsContent_FillsDefaults(t *testing.T) {
 		t.Fatal("expected non-nil content")
 	}
 
-	remoteEntry := findEntry(t, content, "ObsidianVault")
-	if remoteEntry.Text != "ObsidianVault" {
-		t.Errorf("expected default remote 'ObsidianVault', got %q", remoteEntry.Text)
+	remoteEntry := findEntry(t, content, "Vault")
+	if remoteEntry.Text != "Vault" {
+		t.Errorf("expected default remote 'Vault', got %q", remoteEntry.Text)
 	}
 
 	// With a Vault path already set, the target path defaults to that
@@ -295,7 +295,7 @@ func TestBuildSettingsContent_AdvancedRcloneOptionsCollapsedByDefault(t *testing
 	// The fields must still exist (just collapsed) - findEntry walks into
 	// the Accordion's Detail regardless of Open state, so this also guards
 	// that they haven't been accidentally left out of the tree entirely.
-	findEntry(t, content, "ObsidianVault")
+	findEntry(t, content, "Vault")
 }
 
 // TestBuildSettingsContent_ScrollableAgainstAccordionExpansion guards

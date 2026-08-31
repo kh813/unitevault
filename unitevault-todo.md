@@ -199,7 +199,7 @@
 
 ### Phase 14：設定・データモデルの拡張
 
-- [ ] Vaultのデフォルト置き場所をローカル専用フォルダに変更（Mac: `~/ObsidianVault`、Windows: `%USERPROFILE%\ObsidianVault`）。iCloud配下に置く運用は禁止しない（自己責任で可）が、推奨・デフォルトではなくする
+- [ ] Vaultのデフォルト置き場所をローカル専用フォルダに変更（Mac: `~/Obsidian/Vault`、Windows: `%USERPROFILE%\Obsidian\Vault`）。iCloud配下に置く運用は禁止しない（自己責任で可）が、推奨・デフォルトではなくする
 - [x] `config.Config`に新フィールド追加：`ICloudBridgePath`（任意。空文字列＝iPhone連携なし・Google Drive同期のみ）
 - [ ] `config.Config`に新フィールド追加：`TickIntervalSeconds`（デフォルト60秒）。既存の`IntervalSeconds`は「Google Drive同期・iCloud Bridge同期それぞれの実効間隔」の目安表示用に意味を変更するか、廃止して`TickIntervalSeconds`に一本化するかを実装時に決定する
 - [ ] iCloud Bridge用の仮想デバイスIDの生成・永続化（`icloud_bridge_device_id`、本体の`device_id`とは別に1つ、Primary機のみが持つ）— Phase 15（継続的なブリッジ同期）着手時に実施。現時点のVault Migration機能は初回シードコピーのみで、継続的な仮想デバイスとしての扱いはまだ無い

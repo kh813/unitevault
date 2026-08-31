@@ -50,7 +50,7 @@ Obsidian Vault（Markdownファイル群）を Mac / Windows（複数台可）/ 
 
 そこで、以下の方針へ移行する：
 
-- **Vault本体はローカル専用フォルダに置く**（Mac: `~/ObsidianVault`、Windows: `%USERPROFILE%\ObsidianVault` をデフォルトとする）。iCloudの影響を受けない場所とすることで、Obsidian自身の編集とiCloudの内部処理が競合するリスクを排除する。
+- **Vault本体はローカル専用フォルダに置く**（Mac: `~/Obsidian/Vault`、Windows: `%USERPROFILE%\Obsidian\Vault` を推奨とする）。iCloudの影響を受けない場所とすることで、Obsidian自身の編集とiCloudの内部処理が競合するリスクを排除する。
 - **PC間（Mac⇔Windows、Mac⇔Mac等）の同期は、Google Drive（rclone）を主経路とする。** 全PCがGoogle Driveへ接続し、このアプリ自身のスキャン・ログ・3-way mergeエンジンがPC間の内容統合を担う（3.3節・3.4節の仕組みをそのまま活用できる）。
 - **iPhoneとの橋渡しだけは、引き続きiCloudに依存する**（iOSのバックグラウンド実行制限により、iPhone上でこのアプリ自体を実行する手段が無いため。1.4節参照）。この依存はクラウドの種類を問わず不可避な、iOSプラットフォームの制約であり、Google Drive中心方式へ移行しても解消されない。ただし後述の「iCloud Bridge」方式により、その影響範囲をiPhoneとの橋渡し専用のステージング領域に限定し、Vault本体には及ばないようにする。
 
@@ -133,7 +133,7 @@ iCloud Bridgeフォルダを、**通常のデバイスと同列の「仮想デ�
 **手順：**
 
 1. OS標準のフォルダ選択ダイアログで、移行元のVaultフォルダを選択する。
-2. 移行先を`~/<選択したフォルダ名>`（Windowsは`%USERPROFILE%\<選択したフォルダ名>`）に決定し、確認ダイアログを表示する。
+2. 移行先を`~/Obsidian/<選択したフォルダ名>`（Windowsは`%USERPROFILE%\Obsidian\<選択したフォルダ名>`）に決定し、確認ダイアログを表示する。`Obsidian`親フォルダが無ければ自動的に作成する。
 3. 確認後、まずObsidianが起動していれば通常のQuit相当の終了要求を送り（`bootstrap.QuitObsidian`）、最大10秒間終了を待つ。Obsidianがそのフォルダを開いたままだとファイルハンドルが開いた状態になり、Windowsではフォルダの移動自体が失敗し得るため。移行対象フォルダが実際にObsidianで開かれているかどうかは個別に確認せず、常にObsidianの終了を試みる（両OSで確実に判定する手段が無く、実運用上は移行対象＝普段Obsidianで開いているフォルダである前提で十分なため）。強制終了はしない（未保存状態を失うリスクより、ロックされたままフォルダ移動が失敗する方を許容する）。終了要求後、フォルダを移行先へ移動する（同一ボリューム内なら`rename`、iCloud Drive等クロスボリュームな場合は再帰コピー後に元フォルダを削除。コピーが失敗した場合は元フォルダを残したまま中断し、データを失わない）。移行先に既にフォルダが存在する場合は、上書き・マージせずエラーで中断する。
 4. Obsidian自身のVault一覧（`obsidian.json`）を、移行元パスに一致するエントリを見つけて移行先パスへ書き換える、ベストエフォート処理を行う（書き換え前に`obsidian.json.bak`としてバックアップを作成する）。該当エントリが見つからない・ファイル形式が想定と異なる等の場合はエラーとして扱い、移行処理自体は中断せず、Obsidian側は手動で開き直すよう案内する。
 5. iCloud Driveが検出できる場合（`~/Library/Mobile Documents/com~apple~CloudDocs`または`%USERPROFILE%\iCloud Drive`が存在する）、移行先の内容を`<iCloud Drive>/Obsidian/<フォルダ名>`へ再帰コピーし、`config.ICloudBridgePath`に記録する。このコピー自体は移行時点の1回限りのシードだが、以降は1.6.3節の継続的な双方向同期（実装済み）に引き継がれる。
@@ -208,7 +208,7 @@ Google Drive
 ## 3. コンポーネント別仕様
 
 ### 3.1 Vault本体
-- 保存場所：**各デバイスのローカル専用フォルダ**（Mac: `~/ObsidianVault`、Windows: `%USERPROFILE%\ObsidianVault` がデフォルト。1.6.1節）。iCloudの影響を受けない場所とすることで、Obsidian自身の編集とiCloudの内部処理が競合するリスクを排除する。既存のiCloud上Vaultからの移行は「Vault Migration」機能（1.6.7節）で行う。
+- 保存場所：**各デバイスのローカル専用フォルダ**（Mac: `~/Obsidian/Vault`、Windows: `%USERPROFILE%\Obsidian\Vault` を推奨。1.6.1節）。iCloudの影響を受けない場所とすることで、Obsidian自身の編集とiCloudの内部処理が競合するリスクを排除する。既存のiCloud上Vaultからの移行は「Vault Migration」機能（1.6.7節）で行う。
 - 役割：常に「最新のスナップショット」として扱う。diffログはこの現物に至るまでの変更履歴を記録するものであり、diffだけでは原本を復元できないため、現物ファイル自体が実質的なスナップショットとなる。
 
 ### 3.2 デバイス別ログ
@@ -403,7 +403,7 @@ iCloud（および iCloud for Windows）には「同期完了」を外部から�
     - **Remote Status**: rcloneリモートの設定状態 (`Configured` / `Not Configured` )
     - **Executable**: 検出・利用中の `rclone` バイナリの実行パス
     - **[ Advanced Options ]（折りたたみ表示、デフォルトで閉じた状態）**: 以下の3項目は、いずれもデフォルト値のまま動作する「通常は触る必要のない」設定であるため、`widget.Accordion`で折りたたみ、初期表示では隠す。展開すれば通常通り編集できる。
-      - **Remote Name**: 設定されているリモート名（デフォルト `ObsidianVault`）
+      - **Remote Name**: 設定されているリモート名（デフォルト `Vault`）
       - **Google Drive Target Folder Path**: 転送先フォルダパス。**デフォルトは固定文字列ではなく、選択したVaultフォルダ名を自動提案する**（3.5.0.1節）。Vaultフォルダを選び直すたびに追従するが、ユーザーが手動で変更した値は上書きしない。
       - **Sync Interval**: 全PC共通の同期ティック間隔（秒単位、デフォルト `60` 秒。3.4.1節・1.6.5節）。ローカルのスキャン・ログ記録・（Primaryのみ）マージは毎ティック実行され、外部同期（Google Drive・iCloud Bridge）は両方設定されている場合はティックごとに交互に1つずつ実行される（実効間隔はおよそこの値の2倍になる）。
     - **Configure Google Drive Remote... ボタン**: Save Settingsを押す前でも、その場でrcloneのGoogle Drive認証（新規セットアップ／既存・CLI設定）を実行できる。
@@ -819,7 +819,7 @@ unitevault/                         ← ソースコードリポジトリ（GitH
     1. Vault ディレクトリパス（Obsidian Vault セクション）
     2. rclone リモート名 (`rclone_remote`) と**接続設定状態**（`rclone listremotes` を実行し、指定リモートが rclone 側に登録済みか動的チェック）、rclone バイナリの参照パス、Google Drive バックアップ先パス (`rclone_path`)、同期インターバル秒数 (`interval_seconds`) （いずれも rclone セクション。3.5.2節）
     3. ノード役割 (Primary / Secondary)（Status セクション）
-  2. **rclone リモート名設定と検証**: テキスト入力ダイアログ（デフォルト: `ObsidianVault`）。入力されたリモート名が `rclone listremotes` に存在しない場合、ダイアログで「新規Rclone設定（デフォルト、GUIのみで完結）」と「既存/カスタムRclone設定（Terminal/PowerShell）」をユーザーに選択させる。「新規Rclone設定」選択時は `rclone config create <remote> drive` を非対話実行して自動的にブラウザでのGoogle認証ページを開き、コマンド操作不要で設定を完了する。「既存/カスタムRclone設定」選択時は Terminal (macOS) や PowerShell (Windows) で `rclone config` を対話起動する。
+  2. **rclone リモート名設定と検証**: テキスト入力ダイアログ（デフォルト: `Vault`）。入力されたリモート名が `rclone listremotes` に存在しない場合、ダイアログで「新規Rclone設定（デフォルト、GUIのみで完結）」と「既存/カスタムRclone設定（Terminal/PowerShell）」をユーザーに選択させる。「新規Rclone設定」選択時は `rclone config create <remote> drive` を非対話実行して自動的にブラウザでのGoogle認証ページを開き、コマンド操作不要で設定を完了する。「既存/カスタムRclone設定」選択時は Terminal (macOS) や PowerShell (Windows) で `rclone config` を対話起動する。
   3. **Google Drive バックアップ先パス設定**: rclone セクション内のテキスト入力（デフォルト: `VaultBackup`）。
   4. **設定保存とノード初期化**: `config.json` への保存およびノード役割判定（`PRIMARY_MARKER.json`の検証）を自動実行し、完了ダイアログを表示する。
 

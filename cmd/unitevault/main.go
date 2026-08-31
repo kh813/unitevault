@@ -337,7 +337,7 @@ func (t *trayApp) startICloudMigrationReminderMove(oldPath string) {
 		gui.Info(lang.L("Migration Failed"), lang.L("Could not determine your home folder: {{.Err}}", map[string]string{"Err": err.Error()}))
 		return
 	}
-	newPath := filepath.Join(home, filepath.Base(oldPath))
+	newPath := filepath.Join(home, "Obsidian", filepath.Base(oldPath))
 
 	cfg, err := t.cfgMgr.LoadConfig()
 	if err != nil || cfg == nil {
@@ -670,7 +670,7 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 		ICloudStatus:     icloudStatus,
 		DriveSyncStatus:  driveSyncStatus,
 		DeviceRole:       role,
-		RcloneRemote:     "ObsidianVault",
+		RcloneRemote:     "Vault",
 		RclonePath:       "VaultBackup",
 		IntervalSeconds:  config.DefaultIntervalSeconds,
 		RcloneExecPath:   rcloneExecPath,
@@ -928,7 +928,7 @@ func (t *trayApp) installICloud(current gui.SettingsFormData) {
 func (t *trayApp) configureRemote(current gui.SettingsFormData) {
 	remoteName := strings.TrimSpace(current.RcloneRemote)
 	if remoteName == "" {
-		remoteName = "ObsidianVault"
+		remoteName = "Vault"
 	}
 	current.RcloneRemote = remoteName
 
@@ -1080,7 +1080,7 @@ func (t *trayApp) promoteToPrimary(current gui.SettingsFormData) {
 
 		remoteName := strings.TrimSpace(current.RcloneRemote)
 		if remoteName == "" {
-			remoteName = "ObsidianVault"
+			remoteName = "Vault"
 		}
 		remoteTarget := fmt.Sprintf("%s:%s", remoteName, strings.TrimSpace(current.RclonePath))
 
@@ -1196,7 +1196,7 @@ func (t *trayApp) migrateVault(current gui.SettingsFormData) {
 			gui.Info(lang.L("Migration Failed"), lang.L("Could not determine your home folder: {{.Err}}", map[string]string{"Err": err.Error()}))
 			return
 		}
-		newPath := filepath.Join(home, filepath.Base(oldPath))
+		newPath := filepath.Join(home, "Obsidian", filepath.Base(oldPath))
 
 		gui.ConfirmDanger(
 			lang.L("Migrate Vault"),
@@ -1585,7 +1585,7 @@ func (t *trayApp) saveSettingsConfirmed(data gui.SettingsFormData) {
 func handleInit(args []string) {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	vaultPath := fs.String("vault", "", "Path to Obsidian Vault directory")
-	remoteName := fs.String("remote", "ObsidianVault", "rclone remote name")
+	remoteName := fs.String("remote", "Vault", "rclone remote name")
 	remotePath := fs.String("remote-path", "VaultBackup", "rclone remote backup target folder path")
 	label := fs.String("label", "", "Device label name (default: hostname)")
 	_ = fs.Parse(args)

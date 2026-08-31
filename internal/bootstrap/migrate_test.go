@@ -82,6 +82,31 @@ func TestMoveVaultFolder_MovesContentAndRemovesSource(t *testing.T) {
 	}
 }
 
+// TestMoveVaultFolder_CreatesDestinationParentDirectory guards a real,
+// previously-shipped bug: newPath's parent (e.g. ~/Obsidian, spec 1.6.7)
+// may not exist yet on a device that has never migrated a Vault before -
+// os.Rename doesn't create it, unlike the CopyDirRecursive cross-volume
+// fallback (whose MkdirAll happens to create it as a side effect of
+// copying newPath itself), so an ordinary same-volume move used to fail
+// outright whenever the parent didn't already exist.
+func TestMoveVaultFolder_CreatesDestinationParentDirectory(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "OldVault")
+	writeFile(t, filepath.Join(oldPath, "note.md"), "hello")
+
+	// newPath's parent ("Obsidian") is deliberately never created ahead of
+	// time.
+	newPath := filepath.Join(root, "Obsidian", "NewVault")
+	if err := bootstrap.MoveVaultFolder(oldPath, newPath); err != nil {
+		t.Fatalf("MoveVaultFolder failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(newPath, "note.md"))
+	if err != nil || string(got) != "hello" {
+		t.Errorf("expected note.md to have moved into the newly-created parent directory, got %q, err %v", got, err)
+	}
+}
+
 // TestMoveVaultFolder_RefusesToOverwriteExistingDestination guards against
 // silently merging into or clobbering whatever's already at newPath.
 func TestMoveVaultFolder_RefusesToOverwriteExistingDestination(t *testing.T) {

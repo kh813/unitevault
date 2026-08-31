@@ -2,7 +2,7 @@
 
 Obsidian Vault（Markdownファイル群）を Mac / Windows（複数台可）/ iPhone・iPad 間で安全に利用するための同期・バックアップツールです。PC間（Mac⇔Windows等）の同期・共有ハブはGoogle Driveが担い、iPhone/iPadとの橋渡しのみ既存のiCloudに依存します。
 
-> **VaultフォルダはPC上のローカル専用フォルダに置きます（推奨: `~/ObsidianVault`）。** iCloud Drive上に直接置く必要はありません（むしろ非推奨です。下記「なぜVaultをiCloudの外に置くのか」参照）。既にVaultをiCloud Drive上で使っている場合は、初回起動時に案内ダイアログが表示されるか、Settings画面の **[ Migrate Vault to Local Folder... ]** ボタンから、ローカルフォルダへの移行（Obsidianの設定更新込み）を自動で行えます（手順4参照）。
+> **VaultフォルダはPC上のローカル専用フォルダに置きます（推奨: `~/Obsidian/Vault`）。** iCloud Drive上に直接置く必要はありません（むしろ非推奨です。下記「なぜVaultをiCloudの外に置くのか」参照）。既にVaultをiCloud Drive上で使っている場合は、初回起動時に案内ダイアログが表示されるか、Settings画面の **[ Migrate Vault to Local Folder... ]** ボタンから、ローカルフォルダへの移行（Obsidianの設定更新込み）を自動で行えます（手順4参照）。
 
 ## 特徴
 
@@ -66,13 +66,13 @@ ObsidianがVaultファイルへ直接書き込むのと、iCloudの内部デー�
 
 **新規にVaultを作る場合、または既にローカルフォルダでVaultを使っている場合：**
 
-「Obsidian Vault」セクションの **[ Select Folder... ]** ボタンから、Vaultフォルダを選択します（OS標準のフォルダ選択ダイアログが開きます）。特にこだわりがなければ `~/ObsidianVault`（Windowsは `%USERPROFILE%\ObsidianVault`）を新規作成して選ぶのがおすすめです。
+「Obsidian Vault」セクションの **[ Select Folder... ]** ボタンから、Vaultフォルダを選択します（OS標準のフォルダ選択ダイアログが開きます）。特にこだわりがなければ `~/Obsidian/Vault`（Windowsは `%USERPROFILE%\Obsidian\Vault`）を新規作成して選ぶのがおすすめです。
 
 **既存のVaultをiCloud Drive上で使っている場合：**
 
 「Obsidian Vault」セクションの **[ Migrate Vault to Local Folder... ]** ボタンを押します。既存のVaultフォルダを選ぶと、以下を自動で行います。
 
-1. Vaultフォルダをローカル専用フォルダ（`~/<選択したフォルダ名>`）へ移動
+1. Vaultフォルダをローカル専用フォルダ（`~/Obsidian/<選択したフォルダ名>`）へ移動
 2. Obsidian自身のVault一覧（`obsidian.json`）をベストエフォートで更新（次回Obsidianを開くと新しい場所が自動的に開きます。失敗した場合はObsidianから手動で開き直すよう案内が出ます）
 3. iCloud Driveが検出できれば、`<iCloud Drive>/Obsidian/<フォルダ名>` へ内容をシードコピーし、以降iPhone/iPadとの橋渡し（iCloud Bridge）として継続的に同期される状態にする
 
@@ -176,7 +176,7 @@ GUIを使わず、常駐デーモンとして手動で動かしたい場合は�
 
 ```bash
 # 初期化（Vaultパス・Google Driveリモートを指定して初期化）
-./unitevault init -vault "/path/to/YourVault" -remote ObsidianVault -remote-path VaultBackup
+./unitevault init -vault "/path/to/YourVault" -remote Vault -remote-path VaultBackup
 
 # 同期サイクルを1回だけ実行
 ./unitevault run --once
