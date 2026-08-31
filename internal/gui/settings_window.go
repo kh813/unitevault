@@ -195,8 +195,8 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	if syncMode == "" {
 		syncMode = "drive"
 	}
-	driveModeLabel := lang.L("Google Drive-centric (multiple Macs/Windows PCs, or a single PC backed up to Google Drive)")
-	icloudModeLabel := lang.L("iCloud-centric (Mac/Windows + iPhone/iPad via iCloud; Google Drive is backup only)")
+	driveModeLabel := lang.L("Google Drive-centric")
+	icloudModeLabel := lang.L("iCloud-centric")
 	var syncModeContent fyne.CanvasObject
 	if modeLocked {
 		modeDisplay := driveModeLabel
@@ -205,22 +205,54 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		}
 		syncModeContent = widget.NewForm(widget.NewFormItem(lang.L("Sync Mode"), widget.NewLabel(modeDisplay)))
 	} else {
-		syncModeRadio := widget.NewRadioGroup([]string{driveModeLabel, icloudModeLabel}, nil)
-		if syncMode == "icloud" {
-			syncModeRadio.SetSelected(icloudModeLabel)
-		} else {
-			syncModeRadio.SetSelected(driveModeLabel)
-		}
-		hint := widget.NewLabel(lang.L("Choose how this Vault stays in sync. This can't be changed later without resetting configuration."))
-		hint.Wrapping = fyne.TextWrapWord
-		syncModeContent = container.NewVBox(syncModeRadio, hint)
-		syncModeRadio.OnChanged = func(selected string) {
-			if selected == icloudModeLabel {
-				syncMode = "icloud"
-			} else {
+		// Each option is paired with its own description directly below it,
+		// deliberately leading with "iPhone/iPad" rather than burying it
+		// mid-sentence - whether the user's Vault needs to work on
+		// iPhone/iPad is the one fact that actually decides which mode is
+		// required (iCloud-centric) versus merely an option (Google
+		// Drive-centric), so it belongs at the very front of both
+		// descriptions, not just the one that requires it.
+		//
+		// Built from two widget.Check rather than widget.RadioGroup so each
+		// option can carry a wrapped, multi-line description immediately
+		// under it - RadioGroup's own per-option label is a canvas.Text,
+		// which (per its own doc comment: "No formatting or text parsing
+		// will be performed") cannot wrap or render an embedded newline as
+		// two lines.
+		driveCheck := widget.NewCheck(driveModeLabel, nil)
+		icloudCheck := widget.NewCheck(icloudModeLabel, nil)
+		driveDesc := widget.NewLabel(lang.L("Mac/Windows only (iPhone/iPad won't run Obsidian)"))
+		driveDesc.Wrapping = fyne.TextWrapWord
+		icloudDesc := widget.NewLabel(lang.L("iPhone/iPad will run Obsidian and sync with Mac/Windows - required in this case"))
+		icloudDesc.Wrapping = fyne.TextWrapWord
+		driveCheck.Checked = syncMode != "icloud"
+		icloudCheck.Checked = syncMode == "icloud"
+		// Setting .Checked directly (rather than calling SetChecked) and
+		// calling Refresh instead avoids re-entering the other check's own
+		// OnChanged - SetChecked would fire it and risk infinite recursion.
+		driveCheck.OnChanged = func(checked bool) {
+			if checked {
 				syncMode = "drive"
+				icloudCheck.Checked = false
+				icloudCheck.Refresh()
+			} else if syncMode == "drive" {
+				driveCheck.Checked = true
+				driveCheck.Refresh()
 			}
 		}
+		icloudCheck.OnChanged = func(checked bool) {
+			if checked {
+				syncMode = "icloud"
+				driveCheck.Checked = false
+				driveCheck.Refresh()
+			} else if syncMode == "icloud" {
+				icloudCheck.Checked = true
+				icloudCheck.Refresh()
+			}
+		}
+		hint := widget.NewLabel(lang.L("This can't be changed later without resetting configuration."))
+		hint.Wrapping = fyne.TextWrapWord
+		syncModeContent = container.NewVBox(driveCheck, driveDesc, icloudCheck, icloudDesc, hint)
 	}
 	syncModeCard := widget.NewCard(lang.L("Sync Mode"), "", syncModeContent)
 
@@ -467,14 +499,21 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		// arrives pre-localized - it must not be wrapped in lang.L again.
 		statusRows = append(statusRows, statusLine(lang.L("Google Drive sync:"), data.DriveSyncStatus, "", nil))
 	}
-	deviceRoleValue := lang.L(orDefault(data.DeviceRole, "N/A"))
-	if data.MultiDeviceStatus != "" {
-		// MultiDeviceStatus is already localized (built via lang.L in
-		// main.go), so it must not be wrapped in lang.L again - only the
-		// surrounding template here needs its own localization.
-		deviceRoleValue = lang.L("{{.Role}} ({{.Status}})", map[string]string{"Role": deviceRoleValue, "Status": data.MultiDeviceStatus})
+	// Primary/Secondary is a Drive-mode-only concept (spec 1.6.10) - an
+	// iCloud-mode device never has one (see saveSettingsConfirmed, which
+	// never calls InitializeNode/SaveRole in that mode), so showing this
+	// row would only ever read "N/A", which looks like an unfinished setup
+	// rather than the working, fully-configured state it actually is.
+	if syncMode != "icloud" {
+		deviceRoleValue := lang.L(orDefault(data.DeviceRole, "N/A"))
+		if data.MultiDeviceStatus != "" {
+			// MultiDeviceStatus is already localized (built via lang.L in
+			// main.go), so it must not be wrapped in lang.L again - only the
+			// surrounding template here needs its own localization.
+			deviceRoleValue = lang.L("{{.Role}} ({{.Status}})", map[string]string{"Role": deviceRoleValue, "Status": data.MultiDeviceStatus})
+		}
+		statusRows = append(statusRows, statusLine(lang.L("Device role:"), deviceRoleValue, promoteToPrimaryLabel, promoteToPrimary))
 	}
-	statusRows = append(statusRows, statusLine(lang.L("Device role:"), deviceRoleValue, promoteToPrimaryLabel, promoteToPrimary))
 	// A Secondary with no working Google Drive remote is otherwise
 	// invisible to the user: it never errors (RunCycle just skips the
 	// Drive push/pull entirely, spec 1.6.4), so nothing else in this

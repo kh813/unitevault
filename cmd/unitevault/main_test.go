@@ -260,6 +260,40 @@ func TestBuildFormData_ReflectsSavedConfig(t *testing.T) {
 	}
 }
 
+// TestBuildFormData_ICloudMode_DriveSyncStatusIgnoresRole guards a real bug:
+// driveSyncStatus used to be derived entirely from role (""/"primary"/
+// "secondary"), which is never set at all in iCloud mode (spec 1.6.10 -
+// saveSettingsConfirmed never calls InitializeNode/SaveRole there), so an
+// iCloud-mode device's "Google Drive sync:" status always read "N/A (not
+// configured yet)" even after runICloudModeCycle had successfully backed it
+// up moments earlier.
+func TestBuildFormData_ICloudMode_DriveSyncStatusIgnoresRole(t *testing.T) {
+	tr := newTestTrayApp(t)
+
+	if err := tr.cfgMgr.SaveConfig(&config.Config{
+		VaultPath:    "/tmp/my-vault",
+		RcloneRemote: "myremote",
+		RclonePath:   "Backup",
+		SyncMode:     config.SyncModeICloud,
+	}); err != nil {
+		t.Fatalf("failed to save config: %v", err)
+	}
+	// Role is deliberately left unset, matching iCloud mode's real behavior.
+
+	if err := tr.cfgMgr.SaveDriveSyncStatus(config.DriveSyncStatus{
+		Time:    "2026-08-25T15:04:00+09:00",
+		Success: true,
+	}); err != nil {
+		t.Fatalf("failed to save drive sync status: %v", err)
+	}
+
+	data := tr.buildFormData()
+
+	if data.DriveSyncStatus == "" || data.DriveSyncStatus == lang.L("N/A (not configured yet)") {
+		t.Errorf("expected the recorded backup status to surface for an iCloud-mode device, got %q", data.DriveSyncStatus)
+	}
+}
+
 func TestBuildFormData_IgnoresZeroOrNegativeSavedInterval(t *testing.T) {
 	tr := newTestTrayApp(t)
 

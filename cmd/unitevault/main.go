@@ -604,27 +604,46 @@ func engineLogPath() string {
 func (t *trayApp) buildFormData() gui.SettingsFormData {
 	cfg, _ := t.cfgMgr.LoadConfig()
 	role, _ := t.cfgMgr.LoadRole()
+	isICloudMode := cfg.EffectiveSyncMode() == config.SyncModeICloud
 
-	// engine.RunCycle only ever runs the rclone sync step (and records its
-	// outcome) on a Primary device - a Secondary never attempts it, so
-	// showing its (possibly stale, or simply absent) sync status would be
-	// misleading rather than just showing why there isn't one.
-	driveSyncStatus := lang.L("Never synced yet")
-	if role == "" {
-		driveSyncStatus = lang.L("N/A (not configured yet)")
-		role = "N/A"
-	} else if role == "secondary" {
-		driveSyncStatus = lang.L("N/A (this device is Secondary - Google Drive backup runs on the Primary device)")
-	} else if st, err := t.cfgMgr.LoadDriveSyncStatus(); err == nil && st != nil {
+	// loadDriveSyncStatusText reads the most recent recorded outcome from
+	// whichever code path actually performed it - RunCycle's Primary branch
+	// in Drive mode, or runICloudModeCycle in every device unconditionally
+	// (spec 1.6.10) - and formats it the same way regardless of which one.
+	loadDriveSyncStatusText := func() string {
+		st, err := t.cfgMgr.LoadDriveSyncStatus()
+		if err != nil || st == nil {
+			return lang.L("Never synced yet")
+		}
 		displayTime := st.Time
 		if ts, parseErr := time.Parse(time.RFC3339, st.Time); parseErr == nil {
 			displayTime = ts.Local().Format("2006-01-02 15:04")
 		}
 		if st.Success {
-			driveSyncStatus = lang.L("Last synced: {{.Time}}", map[string]string{"Time": displayTime})
-		} else {
-			driveSyncStatus = lang.L("Last sync failed ({{.Time}}): {{.Error}}", map[string]string{"Time": displayTime, "Error": st.Error})
+			return lang.L("Last synced: {{.Time}}", map[string]string{"Time": displayTime})
 		}
+		return lang.L("Last sync failed ({{.Time}}): {{.Error}}", map[string]string{"Time": displayTime, "Error": st.Error})
+	}
+
+	// engine.RunCycle only ever runs the rclone sync step (and records its
+	// outcome) on a Primary device in Drive mode - a Secondary never
+	// attempts it, so showing its (possibly stale, or simply absent) sync
+	// status would be misleading rather than just showing why there isn't
+	// one. In iCloud mode there is no Primary/Secondary at all - every
+	// device runs its own backup every cycle (runICloudModeCycle), so its
+	// status is always meaningful regardless of role (which is never even
+	// set in this mode - see saveSettingsConfirmed).
+	var driveSyncStatus string
+	switch {
+	case isICloudMode:
+		driveSyncStatus = loadDriveSyncStatusText()
+	case role == "":
+		driveSyncStatus = lang.L("N/A (not configured yet)")
+		role = "N/A"
+	case role == "secondary":
+		driveSyncStatus = lang.L("N/A (this device is Secondary - Google Drive backup runs on the Primary device)")
+	default:
+		driveSyncStatus = loadDriveSyncStatusText()
 	}
 
 	gitStatus := "Not Found"

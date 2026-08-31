@@ -1,7 +1,6 @@
 package gui
 
 import (
-	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -69,11 +68,11 @@ func findEntry(t *testing.T, root fyne.CanvasObject, placeholderOrText string) *
 	return found
 }
 
-func findRadioGroup(root fyne.CanvasObject) *widget.RadioGroup {
-	var found *widget.RadioGroup
+func findCheck(root fyne.CanvasObject, text string) *widget.Check {
+	var found *widget.Check
 	walkObjects(root, func(o fyne.CanvasObject) {
-		if r, ok := o.(*widget.RadioGroup); ok {
-			found = r
+		if c, ok := o.(*widget.Check); ok && c.Text == text {
+			found = c
 		}
 	})
 	return found
@@ -873,6 +872,33 @@ func hasLabelText(root fyne.CanvasObject, text string) bool {
 	return found
 }
 
+// TestBuildSettingsContent_SyncMode_HidesDeviceRoleRow guards a real,
+// previously-shipped confusion: Primary/Secondary is a Drive-mode-only
+// concept (spec 1.6.10) that an iCloud-mode device never has (its role file
+// is never written - see saveSettingsConfirmed), so showing the row always
+// read "N/A" there even on a fully working, correctly-configured device -
+// indistinguishable from an unfinished setup. Drive-mode devices (locked or
+// still mid first-time-setup, where SyncMode is still "") must keep seeing
+// the row.
+func TestBuildSettingsContent_SyncMode_HidesDeviceRoleRow(t *testing.T) {
+	newTestWindow()
+
+	icloud := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "icloud"}, SettingsHandlers{})
+	if hasLabelText(icloud, "Device role:") {
+		t.Error("expected no 'Device role' row for an iCloud-mode device")
+	}
+
+	drive := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "drive"}, SettingsHandlers{})
+	if !hasLabelText(drive, "Device role:") {
+		t.Error("expected a 'Device role' row for a Drive-mode device")
+	}
+
+	unset := buildSettingsContent(SettingsFormData{}, SettingsHandlers{})
+	if !hasLabelText(unset, "Device role:") {
+		t.Error("expected a 'Device role' row while SyncMode is still unset (first-time setup)")
+	}
+}
+
 // TestBuildSettingsContent_SyncMode_SelectorShownForFirstTimeSetup guards
 // spec 1.6.10: a brand new device (no Vault saved yet) must be offered the
 // A/B/C mode choice - VaultPath=="" is the same "not configured yet" signal
@@ -882,8 +908,8 @@ func TestBuildSettingsContent_SyncMode_SelectorShownForFirstTimeSetup(t *testing
 
 	content := buildSettingsContent(SettingsFormData{}, SettingsHandlers{})
 
-	if findRadioGroup(content) == nil {
-		t.Fatal("expected a sync mode selector (RadioGroup) for an unconfigured device")
+	if findCheck(content, "Google Drive-centric") == nil || findCheck(content, "iCloud-centric") == nil {
+		t.Fatal("expected both sync mode options for an unconfigured device")
 	}
 }
 
@@ -896,7 +922,7 @@ func TestBuildSettingsContent_SyncMode_LockedOnceVaultIsConfigured(t *testing.T)
 
 	content := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "icloud"}, SettingsHandlers{})
 
-	if findRadioGroup(content) != nil {
+	if findCheck(content, "Google Drive-centric") != nil || findCheck(content, "iCloud-centric") != nil {
 		t.Fatal("expected no sync mode selector once a Vault is already configured")
 	}
 	if !hasFormItemText(content, "Sync Mode") {
@@ -933,20 +959,11 @@ func TestBuildSettingsContent_SyncMode_SelectingICloudRoundTrips(t *testing.T) {
 		OnSave: func(d SettingsFormData) { saved = d },
 	})
 
-	radio := findRadioGroup(content)
-	if radio == nil {
-		t.Fatal("expected a sync mode selector")
+	icloudCheck := findCheck(content, "iCloud-centric")
+	if icloudCheck == nil {
+		t.Fatal("expected an iCloud-centric option")
 	}
-	var icloudOption string
-	for _, opt := range radio.Options {
-		if strings.Contains(opt, "iCloud") {
-			icloudOption = opt
-		}
-	}
-	if icloudOption == "" {
-		t.Fatalf("expected an iCloud-centric option among %v", radio.Options)
-	}
-	radio.SetSelected(icloudOption)
+	test.Tap(icloudCheck)
 
 	test.Tap(findButton(t, content, "Save Settings"))
 
