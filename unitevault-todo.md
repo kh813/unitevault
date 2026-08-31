@@ -278,6 +278,8 @@
 
 **追記：Vaultの「移行が必要」判定を、個別サービス検出からホワイトリスト方式へ一般化し、新規Vault選択時にも自動移行を追加（実機での指摘により修正済み）。** iCloud上のVaultを誤ってそのまま指定してしまうと、iCloudの同期デーモンと競合して同期がハングアップする不具合が実機で見つかった。根本対応として、「iCloud Drive配下か」「Obsidian専用iCloudコンテナ配下か」を個別に検出していたブロックリスト方式（`ICloudDriveRoot`/`ObsidianICloudContainerRoot`を都度チェック）をやめ、「`bootstrap.ManagedVaultParentDir`（`~/Obsidian`）配下にあるかどうか」の一点のみを見るホワイトリスト方式に一般化した（`vaultUnderManagedRoot`）。将来Dropbox等の別サービスが増えても検出ロジックの追加が要らなくなる。あわせて、既存ユーザー向けの起動時リマインダーだけでなく、**Settings画面でSelect Folderにより新しくVaultを選んだ場合（初回セットアップ含む）にも、選んだ場所が管理フォルダ外ならSave Settings実行時に自動で移行フローへリダイレクトする**機能を追加した（`vaultNeedsAutoMigration`）。これにより、そもそも管理フォルダ外のVaultを設定できてしまう入り口自体を塞いだ。「Migrate Vault to Local Folder...」ボタンは、rcloneリモート設定済みの間はSelect Folder自体が無効化される仕様のため、運用開始後にVaultを別の場所へ移動する唯一の手段として残している。
 
+**追記：`_sync/`のGoogle Drive上への残存データが再ダウンロードされる不具合を修正（実機報告により発見・修正済み、spec 1.6.9節）。** `_sync`→`.sync`リネーム時、旧名からの移行コードはあえて実装しなかった（実運用データが無かったため）。しかしリネーム前にテストで使っていたGoogle Driveリモートには当時の`_sync/`が消えずに残っており、Vault全体を対象とするrcloneの`copy`/`sync`（フォルダ名の新旧を区別せず「そこにあるものをそのまま」ミラーする）が、これを同じリモートへ後から参加したデバイスへ何度でも再ダウンロードしてしまうことが実機で判明した（コード自体に`_sync`という文字列は残っていなかった）。`internal/syncdir`に`LegacyName = "_sync"`と`IsBookkeeping(slashRel)`（`.sync`・`_sync`どちらの配下も判定）を追加し、Vault全体を対象とするrcloneの除外パターンへ`/_sync/**`を追加、スキャナ・iCloud Bridgeミラーの除外判定も同じ関数に統一した。能動的な削除は行わず（除外により今後は無害に取り残されるだけ）、既に汚染されたリモート・ローカルの`_sync/`自体はユーザーが手動で削除する運用とした。
+
 ### 将来のTodo（このPhase群のスコープ外）
 
 - Vaultのデータ量・ファイル数に応じて、Google Drive同期・iCloud Bridge同期それぞれの間隔を自動調整、またはユーザーへ変更を提案する機能

@@ -246,8 +246,11 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 			}
 			// .sync/state/** excluded here so this pull can never
 			// overwrite this device's own scanner bookkeeping with
-			// Primary's.
-			if err := e.drive.Copy(ctx, remoteTarget, e.vaultPath, "/"+syncdir.Name+"/state/**"); err != nil {
+			// Primary's. The legacy bookkeeping dir name is also excluded
+			// (syncdir.LegacyName's own doc comment) so a Google Drive
+			// remote still holding it from before the rename never gets
+			// re-downloaded onto a device that never had it locally.
+			if err := e.drive.Copy(ctx, remoteTarget, e.vaultPath, "/"+syncdir.Name+"/state/**", "/"+syncdir.LegacyName+"/**"); err != nil {
 				return fmt.Errorf("failed to pull latest changes from Google Drive: %w", err)
 			}
 
@@ -356,8 +359,11 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		// /.sync/state/** excluded so Primary's own private scanner
 		// bookkeeping is never published to Drive at all - keeping it
 		// local-only is what lets every other device's pull safely
-		// exclude the same pattern without missing anything real.
-		syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget, "/"+syncdir.Name+"/state/**")
+		// exclude the same pattern without missing anything real. The
+		// legacy bookkeeping dir name is also excluded (syncdir.LegacyName's
+		// own doc comment) so a stray copy of it - however it got there -
+		// is left alone on both sides rather than actively pushed/kept.
+		syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget, "/"+syncdir.Name+"/state/**", "/"+syncdir.LegacyName+"/**")
 
 		// Recorded regardless of outcome so the Settings window can surface
 		// "last synced" / "last sync failed" without needing a live
