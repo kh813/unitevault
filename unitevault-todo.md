@@ -298,9 +298,12 @@
 
 なお、この一連の議論の中で「iCloud中心方式への回帰」「Primary/Secondaryの区別を無くした対称同期（gitのようなCAS方式）」という2つの大きな代替案も検討したが、いずれも実装コスト・信頼性の観点から不採用とした（前者は3.6.1.6節の既知の制約を再導入するリスク、後者はrcloneの単純なファイル操作だけではgitのpush拒否に相当する調整機構を安全に実現できないため）。詳細な検討経緯は本セッションの会話ログを参照。
 
+**追記：ユーザーが洗い出した6通りの端末構成パターンを検証し、spec 2.1節として文書化。** いずれも現在の実装（Primary/Secondaryの区別、iCloud Bridgeの読み取りは全デバイス・書き込みはPrimaryのみ）で正しく動作することを確認した。両端末がiCloud Bridgeを持つ構成（Case 1/2/6）では、Primaryの公開内容がApple自身のiCloud同期でSecondaryへも伝わり、Secondary自身のBridgeスキャンがそれを「新しい変更」として検出してGoogle Drive経由でPrimaryへ送り返す、という無駄な往復が発生し得ることが分かったが、データ破損・ロストの実害はなく現時点では未対応（将来のTodo参照）。
+
 ### 将来のTodo（このPhase群のスコープ外）
 
 - Vaultのデータ量・ファイル数に応じて、Google Drive同期・iCloud Bridge同期それぞれの間隔を自動調整、またはユーザーへ変更を提案する機能
+- 両端末がiCloud Bridgeを持つ構成（spec 2.1節Case 1/2/6）で発生する、Secondary経由の無駄な同一内容の往復（Primaryが公開→AppleのiCloud同期でSecondaryへ反映→Secondary自身のBridgeスキャンが「新しい変更」として誤検出→Google Drive経由でPrimaryへ送り返し）を抑制する機能（実害はないため優先度は低い）
 
 ---
 

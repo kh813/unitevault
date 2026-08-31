@@ -218,11 +218,58 @@ Google Drive
 1. Vault内ファイルのハッシュ比較（OS標準のファイル監視をヒントに、変化があった可能性のあるパスだけを対象にする最適化込み。1.6.8節）→ 変更ファイル抽出（改行コードはLFに正規化してから比較）
 2. 自デバイスのログ (`log-<UUID>.jsonl`) に変更内容を追記
 3. **Primary機のみ**：他デバイスのログ群と突き合わせ → 競合があれば3-way merge (`git merge-file`) を必要な組み合わせ分繰り返す → 自動解決できない箇所のみユーザーに提示 → マージ結果をVault現物ファイルに反映
-4. **外部同期（Google Drive・iCloud Bridge）は、ティックごとに1つずつ交互に実行する**（両方設定されている場合。1.6.5節）。Secondary機はGoogle Driveの1タスクのみのため毎ティック実行される。
+4. **外部同期（Google Drive・iCloud Bridge）は、ティックごとに1つずつ交互に実行する**（両方設定されている場合。1.6.5節）。Secondary機はGoogle Driveの1タスクのみのため毎ティック実行される。iCloud Bridgeの**読み取り**（1.6.3節）は、この交互実行の対象になるのはPrimary機のみで、Secondary機がBridgeパスを持つ場合は（ローカルスキャンのみで送受信を伴わないため）毎ティック実行される。
 
 - 「プライマリノード」は固定ハブ方式（1台に固定、3.6.1節）。移行の担い手はSettings画面の「Promote to Primary...」で手動昇格できる（3.6.1.2節）。
 - Google Drive は **人間が直接編集しない、読み取り専用に近いバックアップ／共有ハブ** として扱う。
 - 双方向の複雑な状態管理（`rclone bisync` 等）はベータ品質のため不採用。Primaryが片方向ミラー（`rclone sync`）で公開し、Secondaryは追加専用の`rclone copy`でpull・マニフェストベースの削除伝播（1.6.4節）を行う方式で十分。
+
+### 2.1 構成パターン例（実機検証・統合テストで確認済み）
+
+実際に使われ得る端末構成の組み合わせを、Primary/Secondaryの役割・iCloud Bridge（iPhone/iPad連携）の有無別に整理する。**iCloud自体（2台のMac/Windows間でのiCloudコンテナの同期）はApple側のインフラが担い、このアプリの管轄外**であることに注意（1.6.3節）。このアプリが管轄するのは、各端末が「自分のローカルiCloudコンテナ」をVault本体と突き合わせる部分と、Google Drive経由のPC間同期の部分のみ。
+
+```
+Case 1/2/6: Primary・Secondaryとも iCloud Bridge を持つ（iPhone/iPad連携あり）
+
+  [Primary]  Obsidian Vault ──────────┬────────── <iCloudコンテナ> ──────────▶ [iPhone/iPad]
+                    │                 │                  ▲
+                    │            Google Drive             │ Apple自身のiCloud同期
+                    │                 │                  │ （このアプリの管轄外）
+                    │                 │                  ▼
+  [Secondary] Obsidian Vault ─────────┴────────── <iCloudコンテナ>
+
+  対応：`TestIntegration_SecondaryBridge_PhoneEditReachesPrimaryAndSecondary`
+  Primary・SecondaryはMac/Windowsどちらの組み合わせでも同じロジックで動作する
+  （`bootstrap.ObsidianICloudContainerRoot`が両OS対応のため、1.6.3節）。
+  Bridgeへの書き込み（MirrorVaultToBridge）はPrimaryのみ、読み取り
+  （ScanBridgeAndLog）は両方が行う。
+
+Case 3: Primary機のみ、iCloud Bridgeあり（Secondaryなし）
+
+  [Primary]  Obsidian Vault ──────────┬────────── <iCloudコンテナ> ──────────▶ [iPhone/iPad]
+                    │                 │
+                    │            Google Drive
+
+  対応：`TestIntegration_Bridge_PhoneEditReachesVaultAndPublishes`
+
+Case 4: Primary機のみ、Google Driveのみ（iCloud/iPhone連携なし）
+
+  [Primary]  Obsidian Vault ──────────── Google Drive
+
+  対応：基本構成。当初から対応済み。
+
+Case 5: PrimaryはiCloud Bridgeあり、SecondaryはiCloudなし
+
+  [Primary]   Obsidian Vault ──────────┬────────── <iCloudコンテナ> ──────────▶ [iPhone/iPad]
+                    │                  │
+                    │             Google Drive
+                    │                  │
+  [Secondary] Obsidian Vault ──────────┘
+
+  対応：`TestIntegration_Both_DriveAndBridgeConverge`
+```
+
+**Case 1/2/6についての既知の非効率（実害なし）：** 両端末がiCloud Bridgeを持つ構成では、Primaryがマージ結果をBridgeへ書き込む→Apple自身のiCloud同期でSecondary側のローカルiCloudコンテナにも反映される→Secondary自身のBridgeスキャンがこれを「新しい変更」として検出し、Secondary自身の仮想デバイスID（`icloud_bridge_device_id`、端末ごとに個別）でログに記録→Google Drive経由でPrimaryへ送り返される→Primaryが同一内容を再度マージする、という無駄な往復が発生し得る。データが破損したり失われたりすることはなく、余分なログエントリ・同期トラフィックが発生するのみのため、現時点では対応していない。
 
 ---
 
