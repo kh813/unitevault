@@ -199,3 +199,5 @@ CLIを使う場合もGitのインストールは事前に必須です（`init`/`
 ## ライセンス
 
 [MIT License](LICENSE)です。コードのコピー・改変・再配布・フォークは自由ですが、本ソフトウェアは無保証で提供され、ファイル操作やデータの取り扱いに起因する不具合・損害について作者は一切の責任を負いません。
+
+UI表示フォントとして [Noto Sans JP](https://fonts.google.com/noto/specimen/Noto+Sans+JP)（[SIL Open Font License 1.1](internal/gui/fonts/OFL.txt)）を同梱しています。

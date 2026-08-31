@@ -81,6 +81,7 @@ func InitApp(appIcon fyne.Resource) fyne.App {
 	}
 
 	fyneApp = app.NewWithID(AppID)
+	fyneApp.Settings().SetTheme(newUnifiedFontTheme())
 	if appIcon != nil {
 		fyneApp.SetIcon(appIcon)
 	}
