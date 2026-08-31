@@ -219,3 +219,47 @@ func TestMoveVaultFolder_RefusesToOverwriteExistingDestination(t *testing.T) {
 		t.Errorf("expected the pre-existing destination content to be untouched, got %v", err)
 	}
 }
+
+// TestCopyVaultFolder_CopiesContentAndLeavesSourceUntouched guards
+// CopyVaultFolder's whole reason for existing (spec 1.6.7,
+// vaultMigrationSourceIsBridge): unlike MoveVaultFolder, oldPath must
+// survive completely intact - it's used when oldPath is itself the iCloud
+// Bridge location, which must keep serving as the Bridge afterward.
+func TestCopyVaultFolder_CopiesContentAndLeavesSourceUntouched(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "OldVault")
+	writeFile(t, filepath.Join(oldPath, "note.md"), "hello")
+
+	newPath := filepath.Join(root, "Obsidian", "NewVault")
+	if err := bootstrap.CopyVaultFolder(oldPath, newPath); err != nil {
+		t.Fatalf("CopyVaultFolder failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(newPath, "note.md"))
+	if err != nil || string(got) != "hello" {
+		t.Errorf("expected note.md to have been copied, got %q, err %v", got, err)
+	}
+	origGot, err := os.ReadFile(filepath.Join(oldPath, "note.md"))
+	if err != nil || string(origGot) != "hello" {
+		t.Errorf("expected the original at oldPath to be untouched, got %q, err %v", origGot, err)
+	}
+}
+
+// TestCopyVaultFolder_RefusesToOverwriteExistingDestination mirrors
+// MoveVaultFolder's own guard against silently merging into or clobbering
+// whatever's already at newPath.
+func TestCopyVaultFolder_RefusesToOverwriteExistingDestination(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "OldVault")
+	writeFile(t, filepath.Join(oldPath, "note.md"), "hello")
+
+	newPath := filepath.Join(root, "NewVault")
+	writeFile(t, filepath.Join(newPath, "existing.md"), "already here")
+
+	if err := bootstrap.CopyVaultFolder(oldPath, newPath); err == nil {
+		t.Fatal("expected an error when the destination already exists")
+	}
+	if _, err := os.Stat(filepath.Join(newPath, "existing.md")); err != nil {
+		t.Errorf("expected the pre-existing destination content to be untouched, got %v", err)
+	}
+}

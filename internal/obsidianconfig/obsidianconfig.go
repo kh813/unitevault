@@ -41,14 +41,18 @@ func ConfigPath() (string, error) {
 //
 // Backs up the original file first (obsidian.json.bak, overwriting any
 // previous backup) and is deliberately conservative: any unexpected
-// structure (missing file, unparseable JSON, no vault entry matching
-// oldPath) returns a descriptive error instead of guessing - callers
-// should treat this as best-effort and tell the user to update Obsidian's
-// vault list by hand rather than fail the whole migration over it.
-func UpdateVaultPath(oldPath, newPath string) error {
+// structure (missing file, unparseable JSON) returns a descriptive error
+// instead of guessing - callers should treat this as best-effort and tell
+// the user to update Obsidian's vault list by hand rather than fail the
+// whole migration over it. A oldPath that simply has no matching entry is
+// *not* treated as an error (see the updated return value) - Obsidian
+// never having had this Vault open at all (e.g. one created on iPhone via
+// its own "iCloud" option and never opened in desktop Obsidian) is a
+// normal, expected state with nothing to fix, not a failure.
+func UpdateVaultPath(oldPath, newPath string) (updated bool, err error) {
 	path, err := ConfigPath()
 	if err != nil {
-		return err
+		return false, err
 	}
 	return UpdateVaultPathAt(path, oldPath, newPath)
 }
@@ -57,20 +61,20 @@ func UpdateVaultPath(oldPath, newPath string) error {
 // path rather than the real, OS-resolved one - split out purely so tests
 // can exercise the actual editing logic against a temp file instead of
 // duplicating it.
-func UpdateVaultPathAt(path, oldPath, newPath string) error {
+func UpdateVaultPathAt(path, oldPath, newPath string) (updated bool, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("could not read Obsidian's vault list at %s: %w", path, err)
+		return false, fmt.Errorf("could not read Obsidian's vault list at %s: %w", path, err)
 	}
 
 	var root map[string]interface{}
 	if err := json.Unmarshal(data, &root); err != nil {
-		return fmt.Errorf("could not parse Obsidian's vault list at %s: %w", path, err)
+		return false, fmt.Errorf("could not parse Obsidian's vault list at %s: %w", path, err)
 	}
 
 	vaults, ok := root["vaults"].(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("unexpected format in %s: no \"vaults\" object found", path)
+		return false, fmt.Errorf("unexpected format in %s: no \"vaults\" object found", path)
 	}
 
 	found := false
@@ -85,19 +89,19 @@ func UpdateVaultPathAt(path, oldPath, newPath string) error {
 		}
 	}
 	if !found {
-		return fmt.Errorf("no vault entry in %s has path %q", path, oldPath)
+		return false, nil
 	}
 
 	if err := os.WriteFile(path+".bak", data, 0644); err != nil {
-		return fmt.Errorf("failed to back up %s before editing: %w", path, err)
+		return false, fmt.Errorf("failed to back up %s before editing: %w", path, err)
 	}
 
-	updated, err := json.MarshalIndent(root, "", "  ")
+	marshaled, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to serialize the updated vault list: %w", err)
+		return false, fmt.Errorf("failed to serialize the updated vault list: %w", err)
 	}
-	if err := os.WriteFile(path, updated, 0644); err != nil {
-		return fmt.Errorf("failed to write the updated vault list to %s: %w", path, err)
+	if err := os.WriteFile(path, marshaled, 0644); err != nil {
+		return false, fmt.Errorf("failed to write the updated vault list to %s: %w", path, err)
 	}
-	return nil
+	return true, nil
 }

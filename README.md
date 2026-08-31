@@ -68,9 +68,9 @@ ObsidianがVaultファイルへ直接書き込むのと、iCloudの内部デー�
 
 選んだフォルダがUniteVaultの管理フォルダ（`~/Obsidian/`、Windowsは `%USERPROFILE%\Obsidian\`）の外にある場合、**[ Save Settings ]** を押した時点で確認ダイアログが表示され、承諾すると以下を自動で行います。
 
-1. Vaultフォルダをローカル専用フォルダ（`~/Obsidian/<選択したフォルダ名>`）へ移動
-2. Obsidian自身のVault一覧（`obsidian.json`）をベストエフォートで更新（次回Obsidianを開くと新しい場所が自動的に開きます。失敗した場合はObsidianから手動で開き直すよう案内が出ます）
-3. iCloud Bridgeの配置先（Obsidian自身の専用iCloudコンテナ。Mac・Windowsとも）が検出できれば、内容をそこへシードコピーし、以降iPhone/iPadとの橋渡し（iCloud Bridge）として継続的に同期される状態にする
+1. Vaultフォルダをローカル専用フォルダ（`~/Obsidian/<選択したフォルダ名>`）へ移動（選んだフォルダがすでにiCloud Bridgeの配置先だった場合は、iCloud側を削除せずコピーのみ行います）
+2. Obsidian自身のVault一覧（`obsidian.json`）をベストエフォートで更新（次回Obsidianを開くと新しい場所が自動的に開きます。失敗した場合はObsidianから手動で開き直すよう案内が出ます。そのVaultをMac/Windows版Obsidianで一度も開いたことが無い場合は、そもそも更新対象が無いため案内自体出ません）
+3. iCloud Bridgeの配置先（Obsidian自身の専用iCloudコンテナ。Mac・Windowsとも）が検出できれば、内容をそこへシードコピーし、以降iPhone/iPadとの橋渡し（iCloud Bridge）として継続的に同期される状態にする（選んだフォルダがすでにその配置先だった場合は、新たにコピーし直さずそのまま使います）
 
 既に設定済みの端末を起動した際、Vaultパスが今も管理フォルダの外にあると検出された場合も、同じ移行を提案するダイアログが自動的に表示されます（「Don't Show This Again」でいつでも非表示にできます）。
 

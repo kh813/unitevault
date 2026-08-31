@@ -42,8 +42,12 @@ func TestUpdateVaultPathAt(t *testing.T) {
 		t.Fatalf("failed to seed obsidian.json: %v", err)
 	}
 
-	if err := obsidianconfig.UpdateVaultPathAt(path, "/Users/me/OldVault", "/Users/me/NewVault"); err != nil {
+	updatedFlag, err := obsidianconfig.UpdateVaultPathAt(path, "/Users/me/OldVault", "/Users/me/NewVault")
+	if err != nil {
 		t.Fatalf("UpdateVaultPathAt failed: %v", err)
+	}
+	if !updatedFlag {
+		t.Error("expected UpdateVaultPathAt to report that an entry was updated")
 	}
 
 	data, err := os.ReadFile(path)
@@ -80,6 +84,11 @@ func TestUpdateVaultPathAt(t *testing.T) {
 	}
 }
 
+// TestUpdateVaultPathAt_NoMatchingEntry guards a real, previously-shipped
+// bug: a Vault Obsidian never had open on this device (e.g. one created on
+// iPhone via its own "iCloud" storage option and never opened in desktop
+// Obsidian) has no vaults.json entry to rewrite at all - a normal, expected
+// state, not a failure - so this must report (false, nil), not an error.
 func TestUpdateVaultPathAt_NoMatchingEntry(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "obsidian.json")
@@ -87,13 +96,24 @@ func TestUpdateVaultPathAt_NoMatchingEntry(t *testing.T) {
 		t.Fatalf("failed to seed obsidian.json: %v", err)
 	}
 
-	if err := obsidianconfig.UpdateVaultPathAt(path, "/Users/me/DoesNotMatch", "/Users/me/NewVault"); err == nil {
-		t.Fatal("expected an error when no vault entry matches oldPath")
+	updated, err := obsidianconfig.UpdateVaultPathAt(path, "/Users/me/DoesNotMatch", "/Users/me/NewVault")
+	if err != nil {
+		t.Fatalf("expected no error when nothing matches oldPath, got %v", err)
+	}
+	if updated {
+		t.Error("expected updated=false when no vault entry matches oldPath")
 	}
 
-	// A failed match must not leave a stray backup file behind.
+	// Nothing to update means nothing should be touched at all.
 	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
 		t.Error("expected no .bak file to be created when nothing was updated")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read obsidian.json: %v", err)
+	}
+	if string(data) != `{"vaults": {"abc123": {"path": "/Users/me/SomeVault"}}}` {
+		t.Errorf("expected obsidian.json to be left untouched, got %s", data)
 	}
 }
 
@@ -101,7 +121,22 @@ func TestUpdateVaultPathAt_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "does-not-exist.json")
 
-	if err := obsidianconfig.UpdateVaultPathAt(path, "/Users/me/OldVault", "/Users/me/NewVault"); err == nil {
+	if _, err := obsidianconfig.UpdateVaultPathAt(path, "/Users/me/OldVault", "/Users/me/NewVault"); err == nil {
 		t.Fatal("expected an error when obsidian.json doesn't exist")
+	}
+}
+
+// TestUpdateVaultPathAt_UnexpectedFormat guards the flip side: a genuinely
+// malformed file (missing the "vaults" object entirely) is a real,
+// unexpected problem worth surfacing as an error, unlike a simple no-match.
+func TestUpdateVaultPathAt_UnexpectedFormat(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "obsidian.json")
+	if err := os.WriteFile(path, []byte(`{"notVaults": {}}`), 0644); err != nil {
+		t.Fatalf("failed to seed obsidian.json: %v", err)
+	}
+
+	if _, err := obsidianconfig.UpdateVaultPathAt(path, "/Users/me/OldVault", "/Users/me/NewVault"); err == nil {
+		t.Fatal("expected an error when the \"vaults\" object is missing")
 	}
 }

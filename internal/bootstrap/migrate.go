@@ -94,19 +94,8 @@ func ObsidianICloudContainerRoot() (string, bool) {
 // volume as the home directory); falls back to a recursive copy-then-
 // delete for cross-volume moves, which os.Rename can't do on any OS.
 func MoveVaultFolder(oldPath, newPath string) error {
-	if _, err := os.Stat(newPath); err == nil {
-		return fmt.Errorf("destination %s already exists", newPath)
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to check destination %s: %w", newPath, err)
-	}
-
-	// newPath's parent (e.g. ~/Obsidian) may not exist yet on a fresh
-	// machine - os.Rename (unlike the CopyDirRecursive fallback below,
-	// which creates it via MkdirAll as part of copying newPath itself)
-	// doesn't create it, and would otherwise fail here even for an
-	// ordinary same-volume move that should just be an instant rename.
-	if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
-		return fmt.Errorf("failed to create parent directory for %s: %w", newPath, err)
+	if err := ensureFreshDestination(newPath); err != nil {
+		return err
 	}
 
 	if err := os.Rename(oldPath, newPath); err == nil {
@@ -123,6 +112,38 @@ func MoveVaultFolder(oldPath, newPath string) error {
 	}
 	if err := os.RemoveAll(oldPath); err != nil {
 		return fmt.Errorf("copied to %s but failed to remove the original at %s: %w", newPath, oldPath, err)
+	}
+	return nil
+}
+
+// CopyVaultFolder copies the Vault at oldPath to newPath, exactly like
+// MoveVaultFolder except oldPath is never touched - used when oldPath is
+// itself the iCloud Bridge location and must be left in place (spec
+// 1.6.7, vaultMigrationSourceIsBridge's doc comment in cmd/unitevault):
+// moving it out and immediately reseeding a fresh copy at the very same
+// path is the exact pattern that previously triggered iCloud's own
+// conflict handling and produced a duplicate folder.
+func CopyVaultFolder(oldPath, newPath string) error {
+	if err := ensureFreshDestination(newPath); err != nil {
+		return err
+	}
+	return CopyDirRecursive(oldPath, newPath)
+}
+
+// ensureFreshDestination checks that newPath doesn't already exist (so a
+// caller never silently merges into or overwrites whatever's already
+// there) and creates its parent directory if needed (e.g. ~/Obsidian on a
+// fresh machine that's never migrated a Vault before - os.Rename doesn't
+// create it, and would otherwise fail even for an ordinary same-volume
+// move/copy that should just work).
+func ensureFreshDestination(newPath string) error {
+	if _, err := os.Stat(newPath); err == nil {
+		return fmt.Errorf("destination %s already exists", newPath)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to check destination %s: %w", newPath, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
+		return fmt.Errorf("failed to create parent directory for %s: %w", newPath, err)
 	}
 	return nil
 }

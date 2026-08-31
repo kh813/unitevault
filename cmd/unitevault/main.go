@@ -1214,13 +1214,28 @@ func (t *trayApp) confirmAndMigrateVault(oldPath string, current gui.SettingsFor
 	)
 }
 
+// vaultMigrationSourceIsBridge reports whether oldPath is already exactly
+// the iCloud Bridge location Vault Migration would otherwise seed a new
+// copy at (bridgeParent, bootstrap.ObsidianICloudContainerRoot's return
+// value, when bridgeAvailable) - a common case, since a Vault created on
+// iPhone via Obsidian's own "iCloud" storage option lands exactly there.
+// If so, runVaultMigration must copy oldPath rather than move it, and
+// leave it in place as the Bridge going forward, rather than moving it out
+// and immediately reseeding a fresh copy at the very same path - a real,
+// previously-shipped bug (spec 1.6.3/1.6.7): iCloud's own daemon can
+// briefly see the path vacated and then recreated and misidentify it as a
+// conflict, producing a duplicate folder.
+func vaultMigrationSourceIsBridge(oldPath, bridgeParent string, bridgeAvailable bool) bool {
+	return bridgeAvailable && filepath.Dir(oldPath) == bridgeParent
+}
+
 // runVaultMigration does the actual work of migrateVault, once confirmed:
-// moves the folder, then best-effort updates Obsidian's own vault list and
-// seeds an iCloud Bridge copy (spec 1.6.3) if iCloud Drive is available,
-// then hands off to saveSettingsConfirmed for the usual "ensure Google
-// Drive remote configured, initialize, start the daemon loop" tail -
-// exactly as if the user had just typed the new Vault path in and pressed
-// Save Settings.
+// moves (or, per vaultMigrationSourceIsBridge, copies) the folder, then
+// best-effort updates Obsidian's own vault list and sets up the iCloud
+// Bridge (spec 1.6.3) if available, then hands off to
+// saveSettingsConfirmed for the usual "ensure Google Drive remote
+// configured, initialize, start the daemon loop" tail - exactly as if the
+// user had just typed the new Vault path in and pressed Save Settings.
 func (t *trayApp) runVaultMigration(oldPath, newPath string, current gui.SettingsFormData) {
 	go func() {
 		release, ok := t.tryBeginExclusiveOp()
@@ -1228,6 +1243,9 @@ func (t *trayApp) runVaultMigration(oldPath, newPath string, current gui.Setting
 			gui.Info(lang.L("Sync In Progress"), lang.L("A sync is currently running. Please wait for it to finish, then try again."))
 			return
 		}
+
+		bridgeParent, bridgeAvailable := bootstrap.ObsidianICloudContainerRoot()
+		sourceIsBridge := vaultMigrationSourceIsBridge(oldPath, bridgeParent, bridgeAvailable)
 
 		err := gui.RunWithProgress(
 			lang.L("Migrating Vault"),
@@ -1240,6 +1258,9 @@ func (t *trayApp) runVaultMigration(oldPath, newPath string, current gui.Setting
 				// first checking whether this specific folder is the one
 				// open in it - see QuitObsidian's own doc comment.
 				bootstrap.QuitObsidian(context.Background())
+				if sourceIsBridge {
+					return bootstrap.CopyVaultFolder(oldPath, newPath)
+				}
 				return bootstrap.MoveVaultFolder(oldPath, newPath)
 			},
 		)
@@ -1249,15 +1270,37 @@ func (t *trayApp) runVaultMigration(oldPath, newPath string, current gui.Setting
 			return
 		}
 
+		if sourceIsBridge {
+			// oldPath's own .sync/ (if any at all - only present if oldPath
+			// was already independently functioning as a Bridge before this
+			// migration) belonged to that previous life, not this copy's
+			// new life as the main Vault - strip it (best-effort) so it
+			// starts from a clean scan state, mirroring how a freshly
+			// seeded Bridge below has the same done to it in the other
+			// direction.
+			_ = os.RemoveAll(filepath.Join(newPath, syncdir.Name))
+		}
+
 		var notes []string
-		if err := obsidianconfig.UpdateVaultPath(oldPath, newPath); err != nil {
+		if _, err := obsidianconfig.UpdateVaultPath(oldPath, newPath); err != nil {
 			notes = append(notes, lang.L(
 				"Could not automatically update Obsidian's own vault list ({{.Err}}). Open the new folder from Obsidian manually (File > Open Vault).",
 				map[string]string{"Err": err.Error()},
 			))
 		}
 
-		if bridgeParent, ok := bootstrap.ObsidianICloudContainerRoot(); ok {
+		switch {
+		case sourceIsBridge:
+			// oldPath already *is* the Bridge location and was never
+			// touched (copy-only above) - it's already exactly what the
+			// Bridge should contain, so just record it.
+			cfg, err := t.cfgMgr.LoadConfig()
+			if err != nil || cfg == nil {
+				cfg = &config.Config{}
+			}
+			cfg.ICloudBridgePath = oldPath
+			_ = t.cfgMgr.SaveConfig(cfg)
+		case bridgeAvailable:
 			bridgePath := filepath.Join(bridgeParent, filepath.Base(newPath))
 			if err := bootstrap.SeedICloudBridge(newPath, bridgePath); err != nil {
 				notes = append(notes, lang.L(

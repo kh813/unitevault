@@ -440,6 +440,60 @@ func TestVaultNeedsAutoMigration(t *testing.T) {
 	}
 }
 
+// TestVaultMigrationSourceIsBridge guards the real, previously-shipped
+// bug this check fixes (spec 1.6.7): migrating a Vault that's already
+// sitting exactly at the iCloud Bridge location must copy rather than
+// move it (see runVaultMigration), since moving it out and immediately
+// reseeding a fresh copy at the very same path is what triggered iCloud's
+// own conflict handling and produced a duplicate folder.
+func TestVaultMigrationSourceIsBridge(t *testing.T) {
+	const bridgeParent = "/Users/me/Library/Mobile Documents/iCloud~md~obsidian/Documents"
+
+	cases := []struct {
+		name            string
+		oldPath         string
+		bridgeParent    string
+		bridgeAvailable bool
+		want            bool
+	}{
+		{
+			name:            "a direct child of the bridge parent",
+			oldPath:         bridgeParent + "/MyVault",
+			bridgeParent:    bridgeParent,
+			bridgeAvailable: true,
+			want:            true,
+		},
+		{
+			name:            "bridge unavailable on this OS/device",
+			oldPath:         bridgeParent + "/MyVault",
+			bridgeParent:    bridgeParent,
+			bridgeAvailable: false,
+			want:            false,
+		},
+		{
+			name:            "an unrelated local folder",
+			oldPath:         "/Users/me/Documents/MyVault",
+			bridgeParent:    bridgeParent,
+			bridgeAvailable: true,
+			want:            false,
+		},
+		{
+			name:            "nested deeper than a direct child",
+			oldPath:         bridgeParent + "/Sub/MyVault",
+			bridgeParent:    bridgeParent,
+			bridgeAvailable: true,
+			want:            false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := vaultMigrationSourceIsBridge(c.oldPath, c.bridgeParent, c.bridgeAvailable); got != c.want {
+				t.Errorf("vaultMigrationSourceIsBridge(%q, %q, %v) = %v, want %v", c.oldPath, c.bridgeParent, c.bridgeAvailable, got, c.want)
+			}
+		})
+	}
+}
+
 // TestPathIsUnder guards the detection logic behind
 // maybeShowICloudMigrationReminder (spec 1.6.1/1.6.7, Phase 18): whether a
 // configured Vault path sits inside iCloud Drive.
