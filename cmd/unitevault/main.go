@@ -1258,7 +1258,7 @@ func (t *trayApp) runVaultMigration(oldPath, newPath string, current gui.Setting
 
 		if icloudRoot, ok := bootstrap.ICloudDriveRoot(); ok {
 			bridgePath := filepath.Join(icloudRoot, "Obsidian", filepath.Base(newPath))
-			if err := bootstrap.CopyDirRecursive(newPath, bridgePath); err != nil {
+			if err := bootstrap.SeedICloudBridge(newPath, bridgePath); err != nil {
 				notes = append(notes, lang.L(
 					"Could not set up the iCloud Bridge copy for iPhone/iPad ({{.Err}}).",
 					map[string]string{"Err": err.Error()},

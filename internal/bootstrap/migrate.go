@@ -75,6 +75,37 @@ func MoveVaultFolder(oldPath, newPath string) error {
 	return nil
 }
 
+// SeedICloudBridge copies src (the just-migrated local Vault) into dst (the
+// iCloud Bridge folder, spec 1.6.3), taking care never to touch dst's
+// parent directory (normally <iCloud Drive>/Obsidian) when it already
+// exists. The common Vault Migration case seeds the Bridge at the very
+// same path the Vault was just moved out of a moment earlier by
+// MoveVaultFolder - a real, previously-shipped bug came from
+// unconditionally recreating that whole path with os.MkdirAll (harmless
+// by itself; MkdirAll no-ops on an already-existing directory), but
+// observed on a real device to trigger iCloud's own conflict handling and
+// leave behind a second, distinct "Obsidian"-named folder - likely a race
+// between iCloud's daemon still settling the deletion and this process
+// almost immediately recreating the same path. Pre-creating dst's parent
+// only if it's actually missing, and dst itself with a single plain
+// os.Mkdir (never MkdirAll) rather than folding that into the recursive
+// copy below, avoids that pattern.
+func SeedICloudBridge(src, dst string) error {
+	parent := filepath.Dir(dst)
+	if _, err := os.Stat(parent); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to check %s: %w", parent, err)
+		}
+		if err := os.MkdirAll(parent, 0755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", parent, err)
+		}
+	}
+	if err := os.Mkdir(dst, 0755); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("failed to create %s: %w", dst, err)
+	}
+	return CopyDirRecursive(src, dst)
+}
+
 // CopyDirRecursive copies every file and subdirectory under src into dst
 // (created if needed), preserving each file's permission bits. Used by
 // MoveVaultFolder's cross-volume fallback and by the iCloud Bridge seed

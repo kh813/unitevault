@@ -58,6 +58,85 @@ func TestCopyDirRecursive(t *testing.T) {
 	}
 }
 
+// TestSeedICloudBridge_NeverRecreatesAnAlreadyExistingParent guards a real,
+// previously-shipped bug: Vault Migration's most common case seeds the
+// iCloud Bridge at the very same parent directory (<iCloud Drive>/Obsidian)
+// the Vault had just been moved out of a moment earlier - recreating that
+// whole path via a single os.MkdirAll call was observed on a real device
+// to trigger iCloud's own conflict handling, leaving behind a second,
+// distinct "Obsidian"-named folder. This guards the fix at the level this
+// package can verify: the destination's parent, when it already exists
+// with unrelated sibling content, is left completely untouched (not
+// removed, not replaced) - only the destination leaf itself is created.
+func TestSeedICloudBridge_NeverRecreatesAnAlreadyExistingParent(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "Obsidian")
+	sibling := filepath.Join(parent, "AnotherVault", "note.md")
+	writeFile(t, sibling, "unrelated sibling content")
+
+	src := filepath.Join(root, "src")
+	writeFile(t, filepath.Join(src, "note.md"), "hello")
+
+	dst := filepath.Join(parent, "my_vault")
+	if err := bootstrap.SeedICloudBridge(src, dst); err != nil {
+		t.Fatalf("SeedICloudBridge failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dst, "note.md"))
+	if err != nil || string(got) != "hello" {
+		t.Errorf("expected note.md to be copied into dst, got %q, err %v", got, err)
+	}
+
+	siblingGot, err := os.ReadFile(sibling)
+	if err != nil || string(siblingGot) != "unrelated sibling content" {
+		t.Errorf("expected the pre-existing sibling under the parent to survive untouched, got %q, err %v", siblingGot, err)
+	}
+}
+
+// TestSeedICloudBridge_CreatesMissingParent guards the other half: a Vault
+// that was never under iCloud at all (so its Bridge parent doesn't exist
+// yet) must still get a working Bridge folder set up from scratch.
+func TestSeedICloudBridge_CreatesMissingParent(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	writeFile(t, filepath.Join(src, "note.md"), "hello")
+
+	// Neither the parent ("Obsidian") nor the destination exist yet.
+	dst := filepath.Join(root, "Obsidian", "my_vault")
+	if err := bootstrap.SeedICloudBridge(src, dst); err != nil {
+		t.Fatalf("SeedICloudBridge failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dst, "note.md"))
+	if err != nil || string(got) != "hello" {
+		t.Errorf("expected note.md to be copied into a freshly-created dst, got %q, err %v", got, err)
+	}
+}
+
+// TestSeedICloudBridge_DestinationAlreadyExists guards idempotency: running
+// Vault Migration again (or the Bridge folder already existing from a
+// prior seed) must not error out just because the destination is already
+// there.
+func TestSeedICloudBridge_DestinationAlreadyExists(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	writeFile(t, filepath.Join(src, "note.md"), "hello")
+
+	dst := filepath.Join(root, "Obsidian", "my_vault")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+
+	if err := bootstrap.SeedICloudBridge(src, dst); err != nil {
+		t.Fatalf("SeedICloudBridge failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dst, "note.md"))
+	if err != nil || string(got) != "hello" {
+		t.Errorf("expected note.md to be copied into the already-existing dst, got %q, err %v", got, err)
+	}
+}
+
 func TestMoveVaultFolder_MovesContentAndRemovesSource(t *testing.T) {
 	root := t.TempDir()
 	oldPath := filepath.Join(root, "OldVault")
