@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kh813/unitevault/internal/syncdir"
 )
@@ -272,7 +273,7 @@ func (s *Scanner) ScanPaths(baseline *ScanState, paths []string) (*ScanState, er
 
 	for _, rel := range paths {
 		slashRel := filepath.ToSlash(rel)
-		if syncdir.IsBookkeeping(slashRel) {
+		if slashRel == syncdir.Name || strings.HasPrefix(slashRel, syncdir.Name+"/") {
 			continue
 		}
 
@@ -315,7 +316,7 @@ func (s *Scanner) ScanVault() (*ScanState, error) {
 		slashRel := filepath.ToSlash(rel)
 
 		// Ignore this app's own bookkeeping directory and hidden files/directories (like .git, .obsidian)
-		if syncdir.IsBookkeeping(slashRel) {
+		if slashRel == syncdir.Name || strings.HasPrefix(slashRel, syncdir.Name+"/") {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}

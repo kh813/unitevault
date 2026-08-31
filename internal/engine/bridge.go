@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kh813/unitevault/internal/scan"
 	"github.com/kh813/unitevault/internal/syncdir"
@@ -13,11 +14,11 @@ import (
 
 // bridgeExcluded reports whether slashRel (a Vault-relative, slash-
 // separated path) is this app's own bookkeeping rather than real Vault
-// content (syncdir.IsBookkeeping, shared with scan.Scanner.ScanVault's own
-// exclusion), so the Bridge folder never receives (or has overwritten in
-// it) files that are private to whichever scanner/log owns them.
+// content - mirrors scan.Scanner.ScanVault's own .sync/ exclusion exactly,
+// so the Bridge folder never receives (or has overwritten in it) files
+// that are private to whichever scanner/log owns them.
 func bridgeExcluded(slashRel string) bool {
-	return syncdir.IsBookkeeping(slashRel)
+	return slashRel == syncdir.Name || strings.HasPrefix(slashRel, syncdir.Name+"/")
 }
 
 // ScanBridgeAndLog scans the iCloud Bridge folder (spec 1.6.3) for changes

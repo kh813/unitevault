@@ -283,9 +283,8 @@ func TestSyncEngine_RunCycle_Primary_PullsSyncFolderBeforePublishing(t *testing.
 	if !mock.syncCalled {
 		t.Error("expected the existing full-Vault rclone sync publish to still happen")
 	}
-	wantExcludes := "/" + syncdir.Name + "/state/**,/" + syncdir.LegacyName + "/**"
-	if strings.Join(mock.syncExcludes, ",") != wantExcludes {
-		t.Errorf("expected the publish sync to exclude %s (this device's own private scanner bookkeeping, plus the legacy bookkeeping dir name), got %v", wantExcludes, mock.syncExcludes)
+	if strings.Join(mock.syncExcludes, ",") != "/"+syncdir.Name+"/state/**" {
+		t.Errorf("expected the publish sync to exclude /%s/state/** (this device's own private scanner bookkeeping), got %v", syncdir.Name, mock.syncExcludes)
 	}
 }
 
@@ -418,7 +417,7 @@ func TestSyncEngine_RunCycle_Secondary_PushesAndPullsViaCopy(t *testing.T) {
 	}
 
 	wantPush := copyCall{Src: filepath.Join(vaultPath, syncdir.Name), Dst: "ObsidianVault:MyVault/" + syncdir.Name, Excludes: "state/**"}
-	wantPull := copyCall{Src: "ObsidianVault:MyVault", Dst: vaultPath, Excludes: "/" + syncdir.Name + "/state/**,/" + syncdir.LegacyName + "/**"}
+	wantPull := copyCall{Src: "ObsidianVault:MyVault", Dst: vaultPath, Excludes: "/" + syncdir.Name + "/state/**"}
 	var gotPush, gotPull bool
 	for _, c := range mock.copyCalls {
 		if c == wantPush {
