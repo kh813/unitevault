@@ -82,6 +82,18 @@ jobs:
         run: |
           go run github.com/akavel/rsrc -ico assets/tray/icon.ico -o cmd/unitevault/rsrc_windows_amd64.syso
 
+      # Pure Go (no CGO/mingw needed) - embedded into UniteVault.exe itself
+      # via go:embed (internal/selfupdate/apply_windows.go) so Apply can
+      # write it out and run it without a separate download. Must exist
+      # before the main binary is built below, since go:embed requires the
+      # file at compile time. Built with "-H=windowsgui" like the main
+      # binary so it has no console subsystem at all - see the helper's own
+      # package doc comment for why.
+      - name: Build Windows self-update helper
+        run: |
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+            go build -ldflags "-H=windowsgui" -o internal/selfupdate/updatehelper_windows_amd64.exe ./cmd/unitevault-updatehelper
+
       - name: Build Windows binary & Create ZIP
         run: |
           CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \

@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/lang"
 	"fyne.io/fyne/v2/test"
+	"github.com/kh813/unitevault/internal/bootstrap"
 	"github.com/kh813/unitevault/internal/config"
 	"github.com/kh813/unitevault/internal/drive"
 	"github.com/kh813/unitevault/internal/engine"
@@ -380,6 +381,65 @@ func TestVaultChangeNeedsRemoteRemoval(t *testing.T) {
 	}
 }
 
+// TestVaultNeedsAutoMigration guards the rule behind Save Settings
+// auto-migrating a freshly selected Vault (spec 1.6.7): only a genuinely
+// new selection (first-time setup, or a changed path) outside the managed
+// folder should trigger it - an ordinary re-save of an unrelated setting,
+// or a Vault that's already managed, must not.
+func TestVaultNeedsAutoMigration(t *testing.T) {
+	root, err := bootstrap.ManagedVaultParentDir()
+	if err != nil {
+		t.Fatalf("ManagedVaultParentDir failed: %v", err)
+	}
+	managedPath := filepath.Join(root, "Vault")
+	unmanagedPath := filepath.Join(filepath.Dir(root), "Documents", "Vault")
+
+	cases := []struct {
+		name    string
+		prevCfg *config.Config
+		data    gui.SettingsFormData
+		want    bool
+	}{
+		{
+			name:    "first-time setup, outside the managed folder",
+			prevCfg: &config.Config{},
+			data:    gui.SettingsFormData{VaultPath: unmanagedPath},
+			want:    true,
+		},
+		{
+			name:    "first-time setup, already under the managed folder",
+			prevCfg: &config.Config{},
+			data:    gui.SettingsFormData{VaultPath: managedPath},
+			want:    false,
+		},
+		{
+			name:    "changed selection, outside the managed folder",
+			prevCfg: &config.Config{VaultPath: managedPath},
+			data:    gui.SettingsFormData{VaultPath: unmanagedPath},
+			want:    true,
+		},
+		{
+			name:    "ordinary re-save of the same, unmanaged Vault",
+			prevCfg: &config.Config{VaultPath: unmanagedPath},
+			data:    gui.SettingsFormData{VaultPath: unmanagedPath},
+			want:    false,
+		},
+		{
+			name:    "ordinary re-save of an already-managed Vault",
+			prevCfg: &config.Config{VaultPath: managedPath},
+			data:    gui.SettingsFormData{VaultPath: managedPath},
+			want:    false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := vaultNeedsAutoMigration(c.prevCfg, c.data); got != c.want {
+				t.Errorf("vaultNeedsAutoMigration(%+v, %+v) = %v, want %v", c.prevCfg, c.data, got, c.want)
+			}
+		})
+	}
+}
+
 // TestPathIsUnder guards the detection logic behind
 // maybeShowICloudMigrationReminder (spec 1.6.1/1.6.7, Phase 18): whether a
 // configured Vault path sits inside iCloud Drive.
@@ -401,6 +461,37 @@ func TestPathIsUnder(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			if got := pathIsUnder(c.root, c.path); got != c.want {
 				t.Errorf("pathIsUnder(%q, %q) = %v, want %v", c.root, c.path, got, c.want)
+			}
+		})
+	}
+}
+
+// TestVaultUnderManagedRoot guards the generalized "does this Vault need
+// migrating" rule (spec 1.6.1/1.6.7) that replaced a growing per-service
+// (iCloud Drive, Obsidian's iCloud container, ...) detection list: only a
+// Vault already under bootstrap.ManagedVaultParentDir (~/Obsidian) counts
+// as managed - anything else (an iCloud path, a Google Drive Desktop
+// folder, or any other plain local folder) needs migrating.
+func TestVaultUnderManagedRoot(t *testing.T) {
+	root, err := bootstrap.ManagedVaultParentDir()
+	if err != nil {
+		t.Fatalf("ManagedVaultParentDir failed: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "direct child of the managed root", path: filepath.Join(root, "Vault"), want: true},
+		{name: "the managed root itself", path: root, want: true},
+		{name: "an unrelated local folder", path: filepath.Join(filepath.Dir(root), "Documents", "Vault"), want: false},
+		{name: "an iCloud path", path: filepath.Join(filepath.Dir(root), "Library", "Mobile Documents", "com~apple~CloudDocs", "Vault"), want: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := vaultUnderManagedRoot(c.path); got != c.want {
+				t.Errorf("vaultUnderManagedRoot(%q) = %v, want %v", c.path, got, c.want)
 			}
 		})
 	}

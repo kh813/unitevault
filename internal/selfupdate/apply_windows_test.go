@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -68,79 +67,14 @@ func TestExtractExe_NoExeInArchive(t *testing.T) {
 	}
 }
 
-// TestUpdateHelperScript_NeverDeletesBackupInsideRetryLoop guards against a
-// real, previously-shipped bug: the retry loop used to delete OLDEXE (the
-// backup of the still-working previous exe) at the top of *every* iteration,
-// not just once before the loop starts. That meant the very first successful
-// EXE->OLDEXE rename got wiped out one iteration later if the second rename
-// (NEWEXE->EXE) kept failing (e.g. an antivirus scan holding the freshly
-// downloaded exe open past the retry window) - by the time all attempts were
-// exhausted, neither EXE nor OLDEXE existed any more and nothing could be
-// relaunched, silently uninstalling the app with no way to recover.
-//
-// This can't be executed here (cmd.exe/batch semantics only exist on
-// Windows), so it's a structural guard on the script text: the retry loop's
-// body - the parenthesized block driven by `for /L` - must never contain a
-// deletion of %OLDEXE%.
-func TestUpdateHelperScript_NeverDeletesBackupInsideRetryLoop(t *testing.T) {
-	const forMarker = "for /L"
-	loopStart := strings.Index(updateHelperScript, forMarker)
-	if loopStart == -1 {
-		t.Fatal("expected the update helper script to contain a `for /L` retry loop")
-	}
-
-	openParen := strings.Index(updateHelperScript[loopStart:], "(")
-	if openParen == -1 {
-		t.Fatal("expected the retry loop to open with '('")
-	}
-	openParen += loopStart
-
-	closeParen := strings.Index(updateHelperScript[openParen:], "\n)")
-	if closeParen == -1 {
-		t.Fatal("expected the retry loop to close with ')' on its own line")
-	}
-	closeParen += openParen
-
-	loopBody := updateHelperScript[openParen:closeParen]
-	if strings.Contains(loopBody, `del`) && strings.Contains(loopBody, `%OLDEXE%`) {
-		t.Errorf("the retry loop body must never delete %%OLDEXE%% - doing so destroys the backup before a swap is confirmed to have succeeded. Loop body:\n%s", loopBody)
-	}
-}
-
-// TestUpdateHelperScript_RestoresBackupOnTotalFailure guards the flip side
-// of the same bug: if every retry attempt fails, the script must restore
-// EXE from OLDEXE (and relaunch it) instead of leaving the app uninstalled
-// with the new exe never having been placed and the old one gone.
-func TestUpdateHelperScript_RestoresBackupOnTotalFailure(t *testing.T) {
-	if !strings.Contains(updateHelperScript, `move /y "%OLDEXE%" "%EXE%"`) {
-		t.Error("expected the script to restore EXE from OLDEXE when every retry attempt fails")
-	}
-}
-
 // TestCreateNoWindowFlag guards the exact bit values of the two Windows
-// process creation flag constants Apply combines to keep the update helper
-// (and the console commands it runs internally, like ping) from ever
-// flashing a visible cmd.exe window - a real user-reported bug caused by
-// DETACHED_PROCESS alone not being enough to suppress it. These are magic
-// numbers copied from the Windows API (mirrored by hand rather than
-// pulling in golang.org/x/sys/windows), so a typo here would silently
-// reintroduce the flash without any compiler error to catch it.
-// TestUpdateHelperScript_RedirectsStdinForConsoleCommands guards the
-// user-reported cmd.exe window flash: ping and taskkill are the only two
-// lines in the script that spawn a separate console-subsystem .exe, and
-// each needs `<nul` (in addition to the existing `>nul 2>&1`) so a headless
-// cmd.exe (createNoWindow) never has a reason to allocate a fresh, briefly
-// visible console for either of them.
-func TestUpdateHelperScript_RedirectsStdinForConsoleCommands(t *testing.T) {
-	for _, line := range strings.Split(updateHelperScript, "\n") {
-		trimmed := strings.TrimSpace(line)
-		isConsoleCommand := strings.HasPrefix(trimmed, "ping ") || strings.HasPrefix(trimmed, "taskkill ")
-		if isConsoleCommand && !strings.Contains(trimmed, "<nul") {
-			t.Errorf("expected %q to redirect stdin with `<nul` to avoid a fresh console being allocated for it", trimmed)
-		}
-	}
-}
-
+// process creation flag constants Apply combines when launching the update
+// helper. These are magic numbers copied from the Windows API (mirrored by
+// hand rather than pulling in golang.org/x/sys/windows), so a typo here
+// would silently weaken the flags with no compiler error to catch it - the
+// actual console-flash fix now comes from the helper binary itself having
+// no console subsystem at all (cmd/unitevault-updatehelper), not from these
+// flags, but they cost nothing to keep as a second layer.
 func TestCreateNoWindowFlag(t *testing.T) {
 	if detachedProcess != 0x00000008 {
 		t.Errorf("detachedProcess must mirror windows.DETACHED_PROCESS (0x8), got %#x", detachedProcess)

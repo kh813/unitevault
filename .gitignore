@@ -4,6 +4,7 @@
 bin/
 dist/
 *.syso
+/internal/selfupdate/updatehelper_windows_amd64.exe
 
 # Logs & temporary files
 *.log

@@ -8,6 +8,19 @@ import (
 	"runtime"
 )
 
+// ManagedVaultParentDir returns the folder this app moves a Vault into
+// during Vault Migration (spec 1.6.7): ~/Obsidian (Windows:
+// %USERPROFILE%\Obsidian), the same on every OS. Centralized here (rather
+// than each call site joining "Obsidian" onto the home dir itself) so the
+// convention only needs to change in one place.
+func ManagedVaultParentDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "Obsidian"), nil
+}
+
 // ICloudDriveRoot returns this OS's default iCloud Drive folder and whether
 // it currently exists (a reasonable proxy for "iCloud Drive is set up and
 // signed in" - there's no officially documented way to check this more

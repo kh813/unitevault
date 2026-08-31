@@ -289,85 +289,67 @@ func (t *trayApp) maybeShowInstallReminder() {
 	})
 }
 
+// vaultUnderManagedRoot reports whether vaultPath already sits under this
+// app's own managed local folder (bootstrap.ManagedVaultParentDir, spec
+// 1.6.7). This is the general, forward-compatible replacement for
+// detecting "is this Vault at risk from some third-party sync daemon"
+// (spec 1.6.1/3.6.1.6): rather than keeping a growing list of specific
+// known-risky locations (iCloud Drive, iCloud's own Obsidian container,
+// Google Drive Desktop's own sync folder, ...), anything that isn't under
+// the one folder this app itself manages is treated as needing a move -
+// closing the gap for any Vault location this app doesn't (or will never)
+// know to name individually. If the home directory can't even be
+// determined, treats vaultPath as "managed" (false alarm is better than a
+// migration attempt that can't complete anyway).
+func vaultUnderManagedRoot(vaultPath string) bool {
+	root, err := bootstrap.ManagedVaultParentDir()
+	if err != nil {
+		return true
+	}
+	return pathIsUnder(root, vaultPath)
+}
+
 // maybeShowICloudMigrationReminder nags an already-configured user, once
-// per app launch, if their Vault still sits directly inside iCloud Drive -
-// the legacy pre-1.6 architecture (spec 1.6.1/1.6.7, unitevault-todo.md
-// Phase 18). Silently does nothing once the user has dismissed it, if
-// iCloud Drive can't be located at all, or once the Vault is no longer
-// under it (e.g. after a successful migration - no separate "already
-// migrated" flag is needed, since this check alone naturally stops firing).
+// per app launch, if their Vault still sits outside this app's own managed
+// local folder (spec 1.6.1/1.6.7, unitevault-todo.md Phase 18) - most
+// commonly the legacy pre-1.6 architecture of a Vault placed directly
+// inside iCloud Drive, but not limited to it (see vaultUnderManagedRoot).
+// Silently does nothing once the user has dismissed it, or once the Vault
+// is already under the managed folder (e.g. after a successful migration -
+// no separate "already migrated" flag is needed, since this check alone
+// naturally stops firing).
 func (t *trayApp) maybeShowICloudMigrationReminder(cfg *config.Config) {
 	if t.cfgMgr.IsICloudMigrationReminderDismissed() {
 		return
 	}
-	// Checks both the generic iCloud Drive folder (a Vault manually placed
-	// anywhere under it) and Obsidian's own dedicated iCloud container (a
-	// Vault created via Obsidian iOS's "iCloud" toggle lands there instead -
-	// see ObsidianICloudContainerRoot) - either counts as "at risk"
-	// (spec 1.6.1/3.6.1.6).
-	underICloud := false
-	if root, ok := bootstrap.ICloudDriveRoot(); ok && pathIsUnder(root, cfg.VaultPath) {
-		underICloud = true
-	}
-	if root, ok := bootstrap.ObsidianICloudContainerRoot(); ok && pathIsUnder(root, cfg.VaultPath) {
-		underICloud = true
-	}
-	if !underICloud {
+	if vaultUnderManagedRoot(cfg.VaultPath) {
 		return
 	}
 
 	gui.ChoiceN(
-		lang.L("Move Your Vault Out of iCloud Drive?"),
+		lang.L("Move Your Vault to UniteVault's Local Folder?"),
 		lang.L(
-			"Your Obsidian Vault is currently stored directly inside iCloud Drive:\n{{.Vault}}\n\nUniteVault now recommends keeping the Vault in a plain local folder instead, with Google Drive as the sync hub between PCs and a separate iCloud Bridge folder just for iPhone/iPad. This avoids the Vault's own files being edited by both Obsidian and iCloud's sync daemon at the same time.\n\nUniteVault can move it for you now, or you can do this later from Settings > \"Migrate Vault to Local Folder...\".",
+			"Your Obsidian Vault currently isn't in UniteVault's own local folder:\n{{.Vault}}\n\nIf this location is also synced by another service (iCloud Drive, Google Drive Desktop, Dropbox, ...), that service's own sync daemon can edit the same files UniteVault and Obsidian are editing at the same time, which can lead to duplicate or conflicted files.\n\nUniteVault can move it for you now, or you can do this later from Settings > \"Migrate Vault to Local Folder...\".",
 			map[string]string{"Vault": cfg.VaultPath},
 		),
 		[]string{lang.L("Migrate Now (Recommended)"), lang.L("Don't Show This Again")},
 		func(choice int) {
 			switch choice {
 			case 1:
-				t.startICloudMigrationReminderMove(cfg.VaultPath)
+				cfgSnapshot, err := t.cfgMgr.LoadConfig()
+				if err != nil || cfgSnapshot == nil {
+					cfgSnapshot = &config.Config{}
+				}
+				t.confirmAndMigrateVault(cfg.VaultPath, gui.SettingsFormData{
+					VaultPath:       cfg.VaultPath,
+					RcloneRemote:    cfgSnapshot.RcloneRemote,
+					RclonePath:      cfgSnapshot.RclonePath,
+					IntervalSeconds: cfgSnapshot.IntervalSeconds,
+				})
 			case 2:
 				_ = t.cfgMgr.SetICloudMigrationReminderDismissed()
 			}
 			// choice == 0 (dialog's own Cancel) - ask again next launch.
-		},
-	)
-}
-
-// startICloudMigrationReminderMove confirms and kicks off the same move
-// runVaultMigration performs for the manual "Migrate Vault to Local
-// Folder..." button, but starting from the already-known oldPath (spec
-// 1.6.7) instead of a freshly OS-picked one.
-func (t *trayApp) startICloudMigrationReminderMove(oldPath string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		gui.Info(lang.L("Migration Failed"), lang.L("Could not determine your home folder: {{.Err}}", map[string]string{"Err": err.Error()}))
-		return
-	}
-	newPath := filepath.Join(home, "Obsidian", filepath.Base(oldPath))
-
-	cfg, err := t.cfgMgr.LoadConfig()
-	if err != nil || cfg == nil {
-		cfg = &config.Config{}
-	}
-	current := gui.SettingsFormData{
-		VaultPath:       oldPath,
-		RcloneRemote:    cfg.RcloneRemote,
-		RclonePath:      cfg.RclonePath,
-		IntervalSeconds: cfg.IntervalSeconds,
-	}
-
-	gui.ConfirmDanger(
-		lang.L("Migrate Vault"),
-		lang.L(
-			"Move this Vault:\n{{.Old}}\n\nto:\n{{.New}}\n\nUniteVault, Obsidian, and Google Drive sync will all be updated to look for it in the new location. Continue?",
-			map[string]string{"Old": oldPath, "New": newPath},
-		),
-		func(confirmed bool) {
-			if confirmed {
-				t.runVaultMigration(oldPath, newPath, current)
-			}
 		},
 	)
 }
@@ -1198,27 +1180,38 @@ func (t *trayApp) migrateVault(current gui.SettingsFormData) {
 		if !ok {
 			return
 		}
-
-		home, err := os.UserHomeDir()
-		if err != nil {
-			gui.Info(lang.L("Migration Failed"), lang.L("Could not determine your home folder: {{.Err}}", map[string]string{"Err": err.Error()}))
-			return
-		}
-		newPath := filepath.Join(home, "Obsidian", filepath.Base(oldPath))
-
-		gui.ConfirmDanger(
-			lang.L("Migrate Vault"),
-			lang.L(
-				"Move this Vault:\n{{.Old}}\n\nto:\n{{.New}}\n\nUniteVault, Obsidian, and Google Drive sync will all be updated to look for it in the new location. Continue?",
-				map[string]string{"Old": oldPath, "New": newPath},
-			),
-			func(confirmed bool) {
-				if confirmed {
-					t.runVaultMigration(oldPath, newPath, current)
-				}
-			},
-		)
+		t.confirmAndMigrateVault(oldPath, current)
 	})
+}
+
+// confirmAndMigrateVault shows the standard "Migrate Vault" confirmation
+// dialog for moving oldPath into this app's own managed local folder
+// (bootstrap.ManagedVaultParentDir, spec 1.6.7), then runs runVaultMigration
+// if confirmed. Shared by every site that can trigger a Vault move: the
+// manual "Migrate Vault to Local Folder..." button (migrateVault), the
+// existing-user reminder (maybeShowICloudMigrationReminder), and Save
+// Settings auto-migrating a freshly selected Vault that isn't already under
+// the managed folder (see vaultNeedsAutoMigration/vaultUnderManagedRoot).
+func (t *trayApp) confirmAndMigrateVault(oldPath string, current gui.SettingsFormData) {
+	root, err := bootstrap.ManagedVaultParentDir()
+	if err != nil {
+		gui.Info(lang.L("Migration Failed"), lang.L("Could not determine your home folder: {{.Err}}", map[string]string{"Err": err.Error()}))
+		return
+	}
+	newPath := filepath.Join(root, filepath.Base(oldPath))
+
+	gui.ConfirmDanger(
+		lang.L("Migrate Vault"),
+		lang.L(
+			"Move this Vault:\n{{.Old}}\n\nto:\n{{.New}}\n\nUniteVault, Obsidian, and Google Drive sync will all be updated to look for it in the new location. Continue?",
+			map[string]string{"Old": oldPath, "New": newPath},
+		),
+		func(confirmed bool) {
+			if confirmed {
+				t.runVaultMigration(oldPath, newPath, current)
+			}
+		},
+	)
 }
 
 // runVaultMigration does the actual work of migrateVault, once confirmed:
@@ -1331,6 +1324,16 @@ func (t *trayApp) saveSettings(data gui.SettingsFormData) {
 		}
 	}
 
+	// A freshly selected Vault that isn't under this app's own managed local
+	// folder gets moved there automatically, the same way the manual
+	// "Migrate Vault to Local Folder..." button would. Runs instead of the
+	// normal save - confirmAndMigrateVault's own flow reaches
+	// saveSettingsConfirmed once the move completes.
+	if prevErr == nil && vaultNeedsAutoMigration(prevCfg, data) {
+		t.confirmAndMigrateVault(data.VaultPath, data)
+		return
+	}
+
 	proceedPastMultiDeviceCheck := func() {
 		// rclone sync mirrors its destination exactly, deleting anything not
 		// present in the source. If the Vault changed since the last save but
@@ -1419,6 +1422,20 @@ func vaultPathChanging(prevCfg *config.Config, data gui.SettingsFormData) bool {
 // requires shelling out.
 func vaultChangeNeedsRemoteRemoval(prevCfg *config.Config, data gui.SettingsFormData) bool {
 	return vaultPathChanging(prevCfg, data) && strings.TrimSpace(prevCfg.RcloneRemote) != ""
+}
+
+// vaultNeedsAutoMigration reports whether saveSettings should redirect a
+// freshly selected Vault (data.VaultPath) into the same automatic move the
+// manual "Migrate Vault to Local Folder..." button performs, rather than
+// saving it as-is. True for first-time setup or a changed selection
+// (Select Folder is disabled once a remote is configured, so this never
+// fires for an already-configured device's unrelated settings changes)
+// whose path isn't already under bootstrap.ManagedVaultParentDir - see
+// vaultUnderManagedRoot's doc comment for why "outside the managed folder"
+// replaced a growing per-service (iCloud Drive, ...) detection list.
+func vaultNeedsAutoMigration(prevCfg *config.Config, data gui.SettingsFormData) bool {
+	freshSelection := prevCfg == nil || prevCfg.VaultPath == "" || prevCfg.VaultPath != data.VaultPath
+	return freshSelection && !vaultUnderManagedRoot(data.VaultPath)
 }
 
 // buildSaveConfig constructs the config.Config that saveSettingsConfirmed

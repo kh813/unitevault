@@ -64,21 +64,19 @@ ObsidianがVaultファイルへ直接書き込むのと、iCloudの内部デー�
 
 ### 4. Obsidian Vaultを指定
 
-**新規にVaultを作る場合、または既にローカルフォルダでVaultを使っている場合：**
+「Obsidian Vault」セクションの **[ Select Folder... ]** ボタンから、Vaultフォルダを選択します（OS標準のフォルダ選択ダイアログが開きます）。新規にVaultを作る場合・既存のVaultをそのまま使う場合（iCloud Drive上のVault、Google Drive Desktopの同期フォルダ内のVaultなども含む）のどちらでも、このボタン一つで完結します。
 
-「Obsidian Vault」セクションの **[ Select Folder... ]** ボタンから、Vaultフォルダを選択します（OS標準のフォルダ選択ダイアログが開きます）。特にこだわりがなければ `~/Obsidian/Vault`（Windowsは `%USERPROFILE%\Obsidian\Vault`）を新規作成して選ぶのがおすすめです。
-
-**既存のVaultをiCloud Drive上で使っている場合：**
-
-「Obsidian Vault」セクションの **[ Migrate Vault to Local Folder... ]** ボタンを押します。既存のVaultフォルダを選ぶと、以下を自動で行います。
+選んだフォルダがUniteVaultの管理フォルダ（`~/Obsidian/`、Windowsは `%USERPROFILE%\Obsidian\`）の外にある場合、**[ Save Settings ]** を押した時点で確認ダイアログが表示され、承諾すると以下を自動で行います。
 
 1. Vaultフォルダをローカル専用フォルダ（`~/Obsidian/<選択したフォルダ名>`）へ移動
 2. Obsidian自身のVault一覧（`obsidian.json`）をベストエフォートで更新（次回Obsidianを開くと新しい場所が自動的に開きます。失敗した場合はObsidianから手動で開き直すよう案内が出ます）
 3. iCloud Bridgeの配置先（Obsidian自身の専用iCloudコンテナ。Mac・Windowsとも）が検出できれば、内容をそこへシードコピーし、以降iPhone/iPadとの橋渡し（iCloud Bridge）として継続的に同期される状態にする
 
-既に設定済みの端末を起動した際、Vaultパスが今もiCloud Drive配下、またはObsidian専用iCloudコンテナ配下にあると検出された場合は、この移行を提案するダイアログが自動的に表示されます（「Don't Show This Again」でいつでも非表示にできます）。
+既に設定済みの端末を起動した際、Vaultパスが今も管理フォルダの外にあると検出された場合も、同じ移行を提案するダイアログが自動的に表示されます（「Don't Show This Again」でいつでも非表示にできます）。
 
-> iPhone/iPadを使わない場合は、上記3の手順は自動的にスキップされます（iCloud Bridgeの配置先が検出できない、またはVaultが元々ローカルフォルダの場合）。
+> iPhone/iPadを使わない場合は、上記3の手順は自動的にスキップされます（iCloud Bridgeの配置先が検出できない場合）。
+
+> 運用開始後（Google Driveリモート設定済みの状態）にVaultフォルダを別の場所（別ドライブ等）へ移動したい場合は、「Obsidian Vault」セクションの **[ Migrate Vault to Local Folder... ]** ボタンから行えます。この状態ではVaultとリモートの紐付けを誤って切らないよう Select Folder 自体が無効化されているため、Vaultの場所を変える唯一の手段です。
 
 ### 5. Google Driveへの接続
 
@@ -158,7 +156,7 @@ Settingsウィンドウの「Status」セクションから、それぞれ未イ
 ## トラブルシューティング
 
 - **Git/rcloneのインストールを促すダイアログが毎回出る**: 未初期化のままGit/rcloneが未検出の場合、起動のたびに案内ダイアログが表示されます。表示不要な場合は「Don't show this again」にチェックを入れてください。
-- **「Move Your Vault Out of iCloud Drive?」ダイアログが出る**: 現在のVaultパスがiCloud Drive配下、またはObsidian専用iCloudコンテナ配下（iPhone版Obsidianの「iCloudを使う」オプションで作成したVault。Mac・Windowsとも検出対象）にあると検出されました。「Migrate Now」で自動移行するか、「Don't Show This Again」で今後表示しないようにできます（手順4参照）。
+- **「Move Your Vault to UniteVault's Local Folder?」ダイアログが出る**: 現在のVaultパスがUniteVaultの管理フォルダ（`~/Obsidian/`）の外にあると検出されました（iCloud Drive、Obsidian専用iCloudコンテナ、Google Drive Desktopの同期フォルダなど）。「Migrate Now」で自動移行するか、「Don't Show This Again」で今後表示しないようにできます（手順4参照）。
 - **Secondaryとして追加した端末でVaultが空のまま**: 最初の同期サイクル（デフォルト最大60秒）を待つか、メニューの「Sync Now」を実行してください（手順8参照）。
 - **設定をやり直したい**: Settingsウィンドウ内の **[ Reset Configuration ]** ボタンから、ローカルの設定・端末役割情報をクリアして初期状態に戻せます（誤操作防止のため、タスクトレイメニューには配置していません）。
 - **Google Driveの接続をやり直したい（別のGoogleアカウントに変更したい等）**: rcloneセクションの **[ Remove Remote Configuration... ]** ボタン（リモートが設定済みの場合のみ表示）から、確認の上でrclone側の認証情報を削除できます。Google Drive上のバックアップファイル自体は削除されません。削除後、改めて **[ Configure Google Drive Remote... ]** から設定し直せます。
