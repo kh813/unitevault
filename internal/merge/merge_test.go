@@ -3,6 +3,7 @@ package merge_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kh813/unitevault/internal/merge"
@@ -97,6 +98,46 @@ func TestNWayMerge_EmptyBaseFalselyConflictsOnNonOverlappingEdits(t *testing.T) 
 	}
 	if res.HasConflict {
 		t.Fatal("expected the real base to auto-merge non-overlapping edits cleanly")
+	}
+}
+
+// TestNWayMerge_StopsFoldingAfterConflict guards a real, previously-shipped
+// bug: once a pairwise merge in the fold produces a genuine conflict, its
+// raw conflict-marker text (literal "<<<<<<<"/"======="/">>>>>>>" lines)
+// used to get fed into the *next* MergeContents call as if it were
+// ordinary file content. Since that "content" differs wildly from the
+// unchanged base, git merge-file would wrap it in a second, nested layer
+// of conflict markers - corrupting the file with doubled-up garbage
+// instead of a single, normal conflict (reported on a real device: a
+// three-device N-way merge produced a file with two full sets of nested
+// <<<<<<</=======/>>>>>>> markers). The fix stops folding the moment any
+// step conflicts, so a third device's content must never appear in the
+// result and the marker set must never be doubled.
+func TestNWayMerge_StopsFoldingAfterConflict(t *testing.T) {
+	base := "line1\nline2\nline3\n"
+	// devA and devB both change line1 differently relative to the same
+	// base - a genuine, unavoidable conflict on the very first pairwise
+	// merge.
+	devA := merge.DeviceVersion{DeviceID: "devA", Content: "line1 CHANGED BY A\nline2\nline3\n"}
+	devB := merge.DeviceVersion{DeviceID: "devB", Content: "line1 CHANGED BY B\nline2\nline3\n"}
+	devC := merge.DeviceVersion{DeviceID: "devC", Content: "line1\nline2\nline3 CHANGED BY C\n"}
+
+	res, err := merge.NWayMerge(base, []merge.DeviceVersion{devA, devB, devC})
+	if err != nil {
+		t.Fatalf("NWayMerge returned error: %v", err)
+	}
+	if !res.HasConflict {
+		t.Fatalf("expected a genuine conflict between devA and devB, got clean merge:\n%q", res.MergedContent)
+	}
+
+	if strings.Contains(res.MergedContent, "CHANGED BY C") {
+		t.Errorf("expected devC to never be folded in once devA/devB conflicted, got:\n%s", res.MergedContent)
+	}
+
+	for _, marker := range []string{"<<<<<<<", "=======", ">>>>>>>"} {
+		if got := strings.Count(res.MergedContent, marker); got != 1 {
+			t.Errorf("expected exactly one %q marker (a single, un-nested conflict), got %d in:\n%s", marker, got, res.MergedContent)
+		}
 	}
 }
 

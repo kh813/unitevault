@@ -89,7 +89,23 @@ type DeviceVersion struct {
 	BaseHash string
 }
 
-// NWayMerge sequentially merges multiple device versions against a base version (Octopus merge concept)
+// NWayMerge sequentially merges multiple device versions against a base
+// version (Octopus merge concept). Stops folding in further versions the
+// moment any pairwise merge reports a real conflict, returning that result
+// as-is rather than continuing.
+//
+// A real, previously-shipped bug came from continuing to fold further
+// versions in after a conflict: the next MergeContents call would then
+// receive the previous step's raw conflict-marker text (literal
+// "<<<<<<<"/"======="/">>>>>>>" lines) as if it were ordinary file
+// content, and git merge-file - seeing that "content" differ wildly from
+// the unchanged base - would wrap it in a *second*, nested layer of
+// conflict markers, corrupting the file with doubled-up garbage instead of
+// a normal, single conflict. Every device's full content is already
+// recorded separately as a pending conflict regardless of how far the fold
+// got (mergeAndTrackConflicts builds that from the original versions
+// slice, not from this function's intermediate state), so stopping early
+// loses nothing - the user still sees every version to choose from.
 func NWayMerge(baseContent string, versions []DeviceVersion) (MergeResult, error) {
 	if len(versions) == 0 {
 		return MergeResult{MergedContent: baseContent, HasConflict: false}, nil
@@ -98,15 +114,14 @@ func NWayMerge(baseContent string, versions []DeviceVersion) (MergeResult, error
 		return MergeResult{MergedContent: versions[0].Content, HasConflict: false}, nil
 	}
 
-	currentResult := MergeResult{MergedContent: baseContent, HasConflict: false}
-
 	// Merge first version against base
-	res, err := MergeContents(versions[0].Content, baseContent, versions[1].Content)
+	currentResult, err := MergeContents(versions[0].Content, baseContent, versions[1].Content)
 	if err != nil {
 		return MergeResult{}, fmt.Errorf("merge failed between %s and %s: %w", versions[0].DeviceID, versions[1].DeviceID, err)
 	}
-
-	currentResult = res
+	if currentResult.HasConflict {
+		return currentResult, nil
+	}
 
 	// Sequentially fold remaining versions
 	for i := 2; i < len(versions); i++ {
@@ -114,9 +129,9 @@ func NWayMerge(baseContent string, versions []DeviceVersion) (MergeResult, error
 		if err != nil {
 			return MergeResult{}, fmt.Errorf("merge failed incorporating %s: %w", versions[i].DeviceID, err)
 		}
-		currentResult.MergedContent = nextRes.MergedContent
-		if nextRes.HasConflict {
-			currentResult.HasConflict = true
+		currentResult = nextRes
+		if currentResult.HasConflict {
+			return currentResult, nil
 		}
 	}
 
