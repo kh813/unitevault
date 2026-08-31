@@ -10,6 +10,7 @@ import (
 
 	"github.com/kh813/unitevault/internal/scan"
 	"github.com/kh813/unitevault/internal/syncedlog"
+	"github.com/kh813/unitevault/internal/winexec"
 )
 
 // MergeResult holds the output of a 3-way merge operation.
@@ -22,6 +23,7 @@ type MergeResult struct {
 // Returns merged content string and boolean indicating if conflict markers are present.
 func GitMergeFile(fileA, baseFile, fileB string) (MergeResult, error) {
 	cmd := exec.Command("git", "merge-file", "-p", fileA, baseFile, fileB)
+	winexec.HideWindow(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

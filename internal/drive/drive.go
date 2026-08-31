@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/kh813/unitevault/internal/winexec"
 )
 
 // ProgressFunc wraps long-running operations (such as the first-time rclone
@@ -236,6 +238,7 @@ func (c *Client) executeWithRetry(ctx context.Context, args ...string) error {
 	var lastErr error
 	for attempt := 0; attempt <= len(backoffs); attempt++ {
 		cmd := exec.CommandContext(ctx, c.rcloneBinary, args...)
+		winexec.HideWindow(cmd)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 
@@ -283,6 +286,7 @@ func withExcludes(args, excludes []string) []string {
 // FileExists checks if a remote file exists using `rclone lsf <remoteTargetFile>`
 func (c *Client) FileExists(ctx context.Context, remoteTargetFile string) (bool, error) {
 	cmd := exec.CommandContext(ctx, c.rcloneBinary, "lsf", remoteTargetFile)
+	winexec.HideWindow(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -324,6 +328,7 @@ func (c *Client) DeleteFile(ctx context.Context, remoteTargetFile string) error 
 // ListRemotes executes `rclone listremotes` and returns configured remote names without trailing colon.
 func (c *Client) ListRemotes(ctx context.Context) ([]string, error) {
 	cmd := exec.CommandContext(ctx, c.rcloneBinary, "listremotes")
+	winexec.HideWindow(cmd)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
@@ -362,6 +367,7 @@ func (c *Client) IsRemoteConfigured(ctx context.Context, remoteName string) bool
 func (c *Client) CreateGoogleDriveRemote(ctx context.Context, remoteName string) error {
 	target := strings.TrimSuffix(remoteName, ":")
 	cmd := exec.CommandContext(ctx, c.rcloneBinary, "config", "create", target, "drive")
+	winexec.HideWindow(cmd)
 	return cmd.Run()
 }
 
@@ -370,6 +376,7 @@ func (c *Client) CreateGoogleDriveRemote(ctx context.Context, remoteName string)
 func (c *Client) RemoveRemote(ctx context.Context, remoteName string) error {
 	target := strings.TrimSuffix(remoteName, ":")
 	cmd := exec.CommandContext(ctx, c.rcloneBinary, "config", "delete", target)
+	winexec.HideWindow(cmd)
 	return cmd.Run()
 }
 

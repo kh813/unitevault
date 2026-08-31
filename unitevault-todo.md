@@ -289,6 +289,8 @@
 1. **`obsidian.json`更新失敗の警告を、本当に想定外の場合だけに限定。** 実機テストで、iPhone側でiCloud経由に作成しただけで一度もMac版Obsidianで開いたことが無いVaultを移行した際、「Obsidian自身のVault一覧を自動更新できませんでした」という警告が出た。調査の結果、`obsidian.json`にそもそも該当Vaultのエントリが存在しない（＝Obsidianがそのvaultを一度も認識していない）という、正常にあり得る状態が原因と判明——バグではないが、この状態を「ファイルが壊れている」等の本当の異常と同じ扱いで警告していたのは不親切だった。`obsidianconfig.UpdateVaultPath`が「一致するエントリが無い」場合は真のエラーとは区別し、警告を出さないよう修正した。
 2. **移行元がすでにiCloud Bridgeの配置先だった場合、削除せずコピーのみ行うよう変更。** 従来は移行元がBridge配置先そのものであっても常に「移動」し、直後にBridge用として同じ場所へ「シードコピー」し直していた。これはiCloudの同じフォルダを一瞬空にしてから即座に埋め戻す動作であり、v0.0.52の不具合と同種の危険なパターンだと実機テストで指摘を受けた。移行元がBridge配置先そのものかどうかで分岐し、そうであればiCloud側を一切削除せず「コピーのみ」、そうでなければ従来通り「移動してから新規シード（まだ何も無い場所への新規作成なので安全）」とすることで、iCloud側の同一フォルダを削除・再作成する場面自体を無くした。
 
+**追記：Windowsでの一瞬のコンソールウィンドウ表示を全面的に排除（実機報告により発見・修正済み、spec 8.4節）。** 自己更新ヘルパーのコンソール表示は既に修正済みだったが、実機テストで「同期サイクルのたび（`rclone`呼び出し）」「3-way merge発動のたび（`git merge-file`呼び出し）」にも同様の一瞬の表示が起きていることが判明した。原因は、これらの箇所が`CREATE_NO_WINDOW`を一切設定せずに`exec.Command`でコンソールサブシステムの実行ファイルを起動していたため。新設した共通ヘルパー`internal/winexec.HideWindow`（旧`internal/bootstrap`の非公開`hideWindow`を格上げ・統合したもの）を、`internal/drive`のrclone呼び出し全箇所・`internal/merge`のgit呼び出し・`internal/bootstrap`のtasklist/taskkill/winget/Gitインストーラー/iCloud起動用cmd/rundll32、すべてに適用した。意図的にユーザーへ見せる対話的ウィンドウ（rclone configのPowerShellターミナル、Gitインストーラーのフォールバック起動）は対象外とした。
+
 ### 将来のTodo（このPhase群のスコープ外）
 
 - Vaultのデータ量・ファイル数に応じて、Google Drive同期・iCloud Bridge同期それぞれの間隔を自動調整、またはユーザーへ変更を提案する機能

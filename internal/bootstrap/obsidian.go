@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/kh813/unitevault/internal/winexec"
 )
 
 // QuitObsidian best-effort asks Obsidian to quit if it's currently
@@ -46,7 +48,7 @@ func obsidianRunning(ctx context.Context) bool {
 		return exec.CommandContext(ctx, "pgrep", "-x", "Obsidian").Run() == nil
 	case "windows":
 		cmd := exec.CommandContext(ctx, "tasklist", "/FI", "IMAGENAME eq Obsidian.exe", "/NH")
-		hideWindow(cmd)
+		winexec.HideWindow(cmd)
 		out, err := cmd.Output()
 		if err != nil {
 			return false
@@ -69,7 +71,7 @@ func requestObsidianQuit(ctx context.Context) {
 		_ = exec.CommandContext(ctx, "osascript", "-e", `tell application "Obsidian" to quit`).Run()
 	case "windows":
 		cmd := exec.CommandContext(ctx, "taskkill", "/IM", "Obsidian.exe")
-		hideWindow(cmd)
+		winexec.HideWindow(cmd)
 		_ = cmd.Run()
 	}
 }

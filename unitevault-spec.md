@@ -865,6 +865,8 @@ unitevault/                         ← ソースコードリポジトリ（GitH
 
 **失敗時のフォールバック**: ダウンロード・展開・ヘルパー起動のいずれかで失敗した場合、ヘルパープロセスは一切起動されない（＝既存のインストール状態は変化しない）ため、エラーメッセージとともにReleaseページへのリンクを提示し、手動ダウンロードを案内する。自動更新が「中途半端に失敗してアプリが起動できなくなる」状態を作らないことを設計上の必須要件とする。
 
+**Windowsコンソールウィンドウの一瞬の表示（実機報告により全面対応済み）：** 自己更新ヘルパー以外にも、このアプリがWindows上でコンソールサブシステムの外部実行ファイル（`rclone`、`git`、`winget`、`tasklist`/`taskkill`、`cmd.exe`自体等）を起動する箇所では、`CREATE_NO_WINDOW`を設定しない限り同様に一瞬コンソールが表示され得る。実機テストで、**同期サイクルのたびに`rclone`呼び出しで、3-way mergeが発動するたびに`git merge-file`呼び出しで**、それぞれ実際にコンソールが一瞬表示される不具合が見つかった（自己更新ヘルパーの対応だけではカバーしきれていなかった）。共通ヘルパー`internal/winexec.HideWindow(cmd)`（Windows以外では無条件no-op）を新設し、`internal/drive`（`rclone`の全呼び出し：`sync`/`copy`/`lsf`/`listremotes`/`config create`/`config delete`）・`internal/merge`（`git merge-file`）・`internal/bootstrap`（`tasklist`/`taskkill`、`winget`、Gitインストーラー、iCloud起動用の`cmd /c start`、`rundll32`）の全箇所に一律適用した。ユーザーに実際に見せることを意図した対話的ウィンドウ（`LaunchTerminalRcloneConfig`が開くPowerShellターミナル、Gitインストーラーのサイレント失敗時のフォールバック起動）には適用しない。
+
 ### 8.5 簡易i18n（多言語対応）
 
 OSS公開に伴い、UIの文言（ダイアログ・ボタン・ステータス表示等）を多言語対応する。対象は**アプリ独自のUI文言のみ**であり、`unitevault-spec.md`本文や`README.md`等のドキュメント類は対象外（ドキュメントは今後も日本語・英語をそれぞれ別ファイルとして維持する運用とし、自動翻訳の対象にはしない）。

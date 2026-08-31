@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/kh813/unitevault/internal/winexec"
 )
 
 // CheckGitInstalled checks if git is available in PATH or common install directories.
@@ -72,6 +74,7 @@ func AutoInstallGit() error {
 		// 1. Try winget silent install
 		if wingetPath, err := exec.LookPath("winget"); err == nil {
 			cmd := exec.Command(wingetPath, "install", "--id", "Git.Git", "-e", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements", "--silent")
+			winexec.HideWindow(cmd)
 			if err := cmd.Run(); err == nil && CheckGitInstalled() {
 				return nil
 			}
@@ -99,6 +102,7 @@ func AutoInstallGit() error {
 
 		// Execute installer silently or launch
 		instCmd := exec.Command(tempInstaller, "/VERYSILENT", "/NORESTART")
+		winexec.HideWindow(instCmd)
 		if err := instCmd.Run(); err != nil {
 			_ = exec.Command(tempInstaller).Start()
 		}
@@ -179,7 +183,9 @@ func CheckICloudInstalled() bool {
 // something that should surface as an install failure.
 func launchICloud() {
 	if p, ok := findICloudShortcut(); ok {
-		_ = exec.Command("cmd", "/c", "start", "", p).Start()
+		cmd := exec.Command("cmd", "/c", "start", "", p)
+		winexec.HideWindow(cmd)
+		_ = cmd.Start()
 	}
 }
 
@@ -238,6 +244,7 @@ func AutoInstallICloud() error {
 	// diagnosis (e.g. "No Microsoft Store account found") to stdout, not
 	// stderr, so stderr alone would miss it.
 	classicCmd := exec.Command(wingetPath, "install", "--id", "Apple.iCloud", "-e", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements", "--silent")
+	winexec.HideWindow(classicCmd)
 	var classicOutput bytes.Buffer
 	classicCmd.Stdout = &classicOutput
 	classicCmd.Stderr = &classicOutput
@@ -248,6 +255,7 @@ func AutoInstallICloud() error {
 	}
 
 	storeCmd := exec.Command(wingetPath, "install", "--id", icloudMSStoreID, "-e", "--source", "msstore", "--accept-source-agreements", "--accept-package-agreements", "--silent")
+	winexec.HideWindow(storeCmd)
 	storeErr := storeCmd.Run()
 	if storeErr == nil && CheckICloudInstalled() {
 		launchICloud()
@@ -386,6 +394,7 @@ func OpenURL(urlStr string) error {
 	switch runtime.GOOS {
 	case "windows":
 		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", urlStr)
+		winexec.HideWindow(cmd)
 	case "darwin":
 		cmd = exec.Command("open", urlStr)
 	default:
