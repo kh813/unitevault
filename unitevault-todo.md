@@ -272,6 +272,8 @@
 
 **追記：iCloud Bridgeフォルダの配置先を修正（実機検証により発見・修正済み、spec 1.6.3節）。** v0.0.52でVault Migration時に一般のiCloud Drive配下の`Obsidian`フォルダへブリッジをシードコピーするよう実装したが、実機検証で**iPhone版Obsidianからは実際に開けない**ことが判明した。iPhone版Obsidianの「iCloudを使う」オプションでVaultを作成すると、Obsidian自身の専用iCloudコンテナ（Macでは`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/<Vault名>`、一般のiCloud Drive＝`com~apple~CloudDocs`とは別系統）に保存されることが分かったため、Mac側のブリッジ配置先をこちらに変更した（`bootstrap.ObsidianICloudContainerRoot`）。Windowsについては、iCloud for Windowsにアプリ専用コンテナへのアクセス手段が無いことをObsidianコミュニティフォーラムで確認済みのため、従来通り一般のiCloud Drive配下の`Obsidian`フォルダのままとした（`bootstrap.ICloudBridgeParentDir`が両OSの分岐を吸収）。既存ユーザーへの移行案内（`maybeShowICloudMigrationReminder`）も、Mac限定でこの専用コンテナ配下も検出対象に追加した。
 
+**追記：Windowsにも同種のObsidian専用iCloudコンテナが実在することが実機検証で判明、`bootstrap.ICloudBridgeParentDir`を廃止し`ObsidianICloudContainerRoot`に一本化（修正済み）。** 直前の追記で「Windowsにはアプリ専用コンテナが無い」としていたのはObsidianコミュニティフォーラムの情報に基づく推測だったが、誤りだった。ユーザーが実機（Windows PC）で`dir`コマンドを実行し、`C:\Users\<ユーザー名>\iCloudDrive\iCloud~md~obsidian`配下にVaultが直接存在することを確認（Mac側と異なり`Documents`という中間階層は無い）。あわせて、既存の`ICloudDriveRoot`のWindows分岐が使っていた`iCloud Drive`（スペースあり、File Explorerの表示名）というフォルダ名も誤りで、実際のフォルダ名は`iCloudDrive`（スペース無し）であることをWeb検索で確認し修正した（support.apple.com/guide/icloud-windows/set-up-icloud-drive-icw0144825a5）。これにより`ObsidianICloudContainerRoot`はMac・Windowsとも同じロジック（`os.Stat`での存在確認のみ）で解決できるようになり、OS分岐用の`ICloudBridgeParentDir`は不要になったため削除した（`maybeShowICloudMigrationReminder`・`runVaultMigration`とも`ObsidianICloudContainerRoot`を直接呼ぶ）。
+
 ### 将来のTodo（このPhase群のスコープ外）
 
 - Vaultのデータ量・ファイル数に応じて、Google Drive同期・iCloud Bridge同期それぞれの間隔を自動調整、またはユーザーへ変更を提案する機能

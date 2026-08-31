@@ -301,10 +301,10 @@ func (t *trayApp) maybeShowICloudMigrationReminder(cfg *config.Config) {
 		return
 	}
 	// Checks both the generic iCloud Drive folder (a Vault manually placed
-	// anywhere under it) and, on macOS, Obsidian's own dedicated iCloud
-	// container (a Vault created via Obsidian iOS's "iCloud" toggle lands
-	// there instead - see ObsidianICloudContainerRoot) - either counts as
-	// "at risk" (spec 1.6.1/3.6.1.6).
+	// anywhere under it) and Obsidian's own dedicated iCloud container (a
+	// Vault created via Obsidian iOS's "iCloud" toggle lands there instead -
+	// see ObsidianICloudContainerRoot) - either counts as "at risk"
+	// (spec 1.6.1/3.6.1.6).
 	underICloud := false
 	if root, ok := bootstrap.ICloudDriveRoot(); ok && pathIsUnder(root, cfg.VaultPath) {
 		underICloud = true
@@ -1264,7 +1264,7 @@ func (t *trayApp) runVaultMigration(oldPath, newPath string, current gui.Setting
 			))
 		}
 
-		if bridgeParent, ok := bootstrap.ICloudBridgeParentDir(); ok {
+		if bridgeParent, ok := bootstrap.ObsidianICloudContainerRoot(); ok {
 			bridgePath := filepath.Join(bridgeParent, filepath.Base(newPath))
 			if err := bootstrap.SeedICloudBridge(newPath, bridgePath); err != nil {
 				notes = append(notes, lang.L(

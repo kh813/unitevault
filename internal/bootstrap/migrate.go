@@ -24,7 +24,12 @@ func ICloudDriveRoot() (string, bool) {
 
 	var root string
 	if runtime.GOOS == "windows" {
-		root = filepath.Join(home, "iCloud Drive")
+		// The Windows iCloud client's File Explorer sidebar labels this
+		// "iCloud Drive" (with a space), but the actual folder on disk is
+		// "iCloudDrive" (no space) directly under the user's home directory
+		// - confirmed against a real device (support.apple.com/guide/icloud-
+		// windows/set-up-icloud-drive-icw0144825a5).
+		root = filepath.Join(home, "iCloudDrive")
 	} else {
 		root = filepath.Join(home, "Library", "Mobile Documents", "com~apple~CloudDocs")
 	}
@@ -39,15 +44,17 @@ func ICloudDriveRoot() (string, bool) {
 // container - the location its "iCloud" vault-storage option (available
 // when creating a Vault directly in the Obsidian app, including on
 // iPhone/iPad) actually uses - distinct from the generic iCloud Drive
-// folder ICloudDriveRoot returns. Confirmed against a real device: a Vault
-// created via Obsidian iOS's "iCloud" toggle lands on macOS at
-// ~/Library/Mobile Documents/iCloud~md~obsidian/Documents/<vault name>,
-// with vaults sitting directly under "Documents" (no extra "Obsidian"
-// subfolder) - a sibling of, not nested inside, the generic iCloud Drive
-// container. This matters because a Vault placed under the generic iCloud
-// Drive's own self-made "Obsidian" folder (ICloudDriveRoot's convention,
-// used before this was discovered) does not actually show up for opening
-// on iPhone/iPad the way one placed here does.
+// folder ICloudDriveRoot returns. Confirmed against real devices on both
+// platforms: a Vault created via Obsidian iOS's "iCloud" toggle lands on
+// macOS at ~/Library/Mobile Documents/iCloud~md~obsidian/Documents/<vault
+// name> (vaults sit directly under "Documents", no extra "Obsidian"
+// subfolder), and on Windows at
+// C:\Users\<user>\iCloudDrive\iCloud~md~obsidian\<vault name> (no
+// "Documents" subfolder there at all). Both are a sibling of, not nested
+// inside, the generic iCloud Drive container. This matters because a Vault
+// placed under the generic iCloud Drive's own self-made "Obsidian" folder
+// (ICloudDriveRoot's convention, used before this was discovered) does not
+// actually show up for opening on iPhone/iPad the way one placed here does.
 func ObsidianICloudContainerRoot() (string, bool) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -56,45 +63,15 @@ func ObsidianICloudContainerRoot() (string, bool) {
 
 	var root string
 	if runtime.GOOS == "windows" {
-		// iCloud for Windows does not expose per-app iCloud containers the
-		// way macOS's ~/Library/Mobile Documents/ does - only the generic
-		// iCloud Drive folder (ICloudDriveRoot) is available there.
-		return "", false
+		root = filepath.Join(home, "iCloudDrive", "iCloud~md~obsidian")
+	} else {
+		root = filepath.Join(home, "Library", "Mobile Documents", "iCloud~md~obsidian", "Documents")
 	}
-	root = filepath.Join(home, "Library", "Mobile Documents", "iCloud~md~obsidian", "Documents")
 
 	if info, err := os.Stat(root); err == nil && info.IsDir() {
 		return root, true
 	}
 	return "", false
-}
-
-// ICloudBridgeParentDir returns the directory under which this app should
-// place the iCloud Bridge folder (spec 1.6.3) - the Vault's own folder
-// name is joined directly under this, with no further nesting - along
-// with whether iCloud itself is set up at all.
-//
-// macOS: Obsidian's own dedicated iCloud container
-// (ObsidianICloudContainerRoot), confirmed against a real device to be
-// where a Vault created via Obsidian iOS's own "iCloud" toggle actually
-// lands, unlike the generic iCloud Drive folder.
-//
-// Windows: iCloud for Windows has no per-app container equivalent at all
-// (confirmed via Obsidian's own community forum: Windows users needing
-// iCloud access to their Obsidian vaults are told to place them under a
-// self-made "Obsidian" folder inside the generic iCloud Drive folder
-// instead - https://forum.obsidian.md/t/22532), so that convention - a
-// plain subfolder of ICloudDriveRoot, created on demand by the caller if
-// it doesn't exist yet - is kept there.
-func ICloudBridgeParentDir() (string, bool) {
-	if runtime.GOOS == "windows" {
-		root, ok := ICloudDriveRoot()
-		if !ok {
-			return "", false
-		}
-		return filepath.Join(root, "Obsidian"), true
-	}
-	return ObsidianICloudContainerRoot()
 }
 
 // MoveVaultFolder moves the Vault at oldPath to newPath (spec: Vault

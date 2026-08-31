@@ -67,7 +67,7 @@ Primary機        Secondary機       Secondary機
     │
     │ ローカル⇔ローカルミラー（このアプリが管理）
     ▼
-iCloud Bridgeフォルダ（Mac: Obsidian自身の専用iCloudコンテナ／Windows: iCloud Drive配下の`Obsidian`フォルダ。1.6.3節参照）
+iCloud Bridgeフォルダ（Mac・Windowsとも、Obsidian自身の専用iCloudコンテナ。1.6.3節参照）
     │
     │ iCloud（OS標準機能、Apple独自のバージョン管理に依存）
     ▼
@@ -80,10 +80,10 @@ Primary機のみがiCloud Bridgeを持つ（iPhoneとの橋渡しは固定ハブ
 
 > **実装状況：** 実装済み。1.6.7節の「Vault Migration」機能によるiCloud Bridgeフォルダへの初回シードコピーに加え、以下に記す継続的な双方向同期・マージへの組み込み（`unitevault-todo.md`のPhase 15）も実装済み。
 
-**配置場所（重要・実機検証により修正済み）：** 当初はiCloud Driveの一般領域（`ICloudDriveRoot`）配下に自前で作った`Obsidian`フォルダを使う想定だったが、これは**iPhone側のObsidianアプリから実際には開けない**ことが実機検証で判明した。iPhone版Obsidianで「iCloudを使う」オプションを選んでVaultを作成すると、そのVaultはObsidian自身の専用iCloudコンテナに保存され、Macでは`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/<Vault名>`という、一般のiCloud Driveフォルダ（`com~apple~CloudDocs`）とは別系統のパスに現れる（`Documents`直下にVaultが並び、`Obsidian`という余分な階層は無い）。そのため、iCloud Bridgeフォルダの配置先は`bootstrap.ICloudBridgeParentDir()`が返す以下のいずれかとする：
+**配置場所（重要・実機検証により2度修正済み）：** 当初はiCloud Driveの一般領域（`ICloudDriveRoot`）配下に自前で作った`Obsidian`フォルダを使う想定だったが、これは**iPhone側のObsidianアプリから実際には開けない**ことが実機検証で判明した。iPhone版Obsidianで「iCloudを使う」オプションを選んでVaultを作成すると、そのVaultはObsidian自身の専用iCloudコンテナに保存される。実機検証の結果、この専用コンテナはMac・Windowsの両方に存在することが確認できた（`bootstrap.ObsidianICloudContainerRoot()`が両OSに対応、当初はWindowsにはこの専用コンテナが存在しないという誤った想定に基づき`ICloudBridgeParentDir()`という別関数でOS分岐していたが、実機確認が取れたため`ObsidianICloudContainerRoot()`に一本化・削除した）：
 
-- **Mac**：`bootstrap.ObsidianICloudContainerRoot()`（`~/Library/Mobile Documents/iCloud~md~obsidian/Documents`）をそのまま使う。
-- **Windows**：iCloud for Windowsには上記のようなアプリ専用コンテナへのアクセス手段が無い（Obsidianコミュニティフォーラムでも確認済み：https://forum.obsidian.md/t/22532）。そのため、従来通り一般のiCloud Drive（`ICloudDriveRoot`）配下に`Obsidian`フォルダを作る方式のままとする（Windows版Obsidianユーザーへ実際に案内されている回避策と一致）。
+- **Mac**：`~/Library/Mobile Documents/iCloud~md~obsidian/Documents/<Vault名>`。一般のiCloud Driveフォルダ（`com~apple~CloudDocs`）とは別系統のパスで、`Documents`直下にVaultが並び、`Obsidian`という余分な階層は無い。
+- **Windows**：`C:\Users\<ユーザー名>\iCloudDrive\iCloud~md~obsidian\<Vault名>`。Macと同じくWindows版iCloud Driveの一般領域（`com~apple~CloudDocs`相当）とは別系統のパスだが、Macと異なり`Documents`という中間階層は無い。なお`iCloudDrive`はFile Explorerの表示名「iCloud Drive」（スペースあり）とは異なり、実際のフォルダ名にはスペースが無い（`ICloudDriveRoot`もこれに合わせて修正済み）。
 
 iCloud Bridgeフォルダを、**通常のデバイスと同列の「仮想デバイス」**として扱う。具体的には：
 
@@ -141,10 +141,10 @@ iCloud Bridgeフォルダを、**通常のデバイスと同列の「仮想デ�
 2. 移行先を`~/Obsidian/<選択したフォルダ名>`（Windowsは`%USERPROFILE%\Obsidian\<選択したフォルダ名>`）に決定し、確認ダイアログを表示する。`Obsidian`親フォルダが無ければ自動的に作成する。
 3. 確認後、まずObsidianが起動していれば通常のQuit相当の終了要求を送り（`bootstrap.QuitObsidian`）、最大10秒間終了を待つ。Obsidianがそのフォルダを開いたままだとファイルハンドルが開いた状態になり、Windowsではフォルダの移動自体が失敗し得るため。移行対象フォルダが実際にObsidianで開かれているかどうかは個別に確認せず、常にObsidianの終了を試みる（両OSで確実に判定する手段が無く、実運用上は移行対象＝普段Obsidianで開いているフォルダである前提で十分なため）。強制終了はしない（未保存状態を失うリスクより、ロックされたままフォルダ移動が失敗する方を許容する）。終了要求後、フォルダを移行先へ移動する（同一ボリューム内なら`rename`、iCloud Drive等クロスボリュームな場合は再帰コピー後に元フォルダを削除。コピーが失敗した場合は元フォルダを残したまま中断し、データを失わない）。移行先に既にフォルダが存在する場合は、上書き・マージせずエラーで中断する。
 4. Obsidian自身のVault一覧（`obsidian.json`）を、移行元パスに一致するエントリを見つけて移行先パスへ書き換える、ベストエフォート処理を行う（書き換え前に`obsidian.json.bak`としてバックアップを作成する）。該当エントリが見つからない・ファイル形式が想定と異なる等の場合はエラーとして扱い、移行処理自体は中断せず、Obsidian側は手動で開き直すよう案内する。
-5. iCloud Bridgeの配置先（`bootstrap.ICloudBridgeParentDir()`、1.6.3節）が検出できる場合、移行先の内容をその配下の`<フォルダ名>`へ再帰コピーし、`config.ICloudBridgePath`に記録する（`bootstrap.SeedICloudBridge`）。このコピー自体は移行時点の1回限りのシードだが、以降は1.6.3節の継続的な双方向同期（実装済み）に引き継がれる。**Mac側の配置先（Obsidian専用iCloudコンテナ）は、Vault移行元がそもそもそこだった場合（iPhone版Obsidianの「iCloudを使う」オプションで作成したVaultをMac側で移行する、よくあるケース）、手順3で数瞬前に空にしたばかりの、まさに同じパスになる。** その配置先の親フォルダが既に存在する場合、それを`os.MkdirAll`で丸ごと再作成しようとすると（`MkdirAll`自体は既存ディレクトリに対して無害なはずだが）、実機でiCloud自身のコンフリクト処理を誘発し、別名の重複フォルダが作られてしまう不具合が確認された。そのため、親フォルダが既に存在する場合は一切手を加えず（`MkdirAll`を呼ばない）、コピー先の葉フォルダのみを単発の`os.Mkdir`で作成する（親フォルダが無い場合のみ`MkdirAll`で作成する）。
+5. iCloud Bridgeの配置先（`bootstrap.ObsidianICloudContainerRoot()`、1.6.3節。Mac・Windowsとも同じ関数で解決する）が検出できる場合、移行先の内容をその配下の`<フォルダ名>`へ再帰コピーし、`config.ICloudBridgePath`に記録する（`bootstrap.SeedICloudBridge`）。このコピー自体は移行時点の1回限りのシードだが、以降は1.6.3節の継続的な双方向同期（実装済み）に引き継がれる。**この配置先（Obsidian専用iCloudコンテナ）は、Vault移行元がそもそもそこだった場合（iPhone版Obsidianの「iCloudを使う」オプションで作成したVaultを移行する、よくあるケース）、手順3で数瞬前に空にしたばかりの、まさに同じパスになる。** その配置先の親フォルダが既に存在する場合、それを`os.MkdirAll`で丸ごと再作成しようとすると（`MkdirAll`自体は既存ディレクトリに対して無害なはずだが）、実機でiCloud自身のコンフリクト処理を誘発し、別名の重複フォルダが作られてしまう不具合が確認された。そのため、親フォルダが既に存在する場合は一切手を加えず（`MkdirAll`を呼ばない）、コピー先の葉フォルダのみを単発の`os.Mkdir`で作成する（親フォルダが無い場合のみ`MkdirAll`で作成する）。
 6. 移行先パスをVaultパスとして`saveSettingsConfirmed`（既存のSave Settingsと全く同じ処理）へ引き継ぎ、Google Driveリモートが未設定なら設定を促し、初期化（Primary/Secondary判定、初回同期）を行い、常駐同期ループを開始する。
 
-**既存ユーザーへの案内（Phase 18・実装済み）：** 既に設定済みで役割が確定しているデバイスの起動時、`maybeShowICloudMigrationReminder`が現在のVaultパスが(a) iCloud Drive配下（`bootstrap.ICloudDriveRoot()`）、または(b) Mac限定でObsidian専用iCloudコンテナ配下（`bootstrap.ObsidianICloudContainerRoot()`。iPhone版Obsidianの「iCloudを使う」オプションで作成したVaultはこちらに来る）のいずれかにあるかどうかを確認する（`pathIsUnder`。各ルートとの単純な文字列prefix一致ではなく、`filepath.Rel`ベースで判定し、「iCloud Drive2」のような紛らわしい兄弟フォルダを誤検出しない）。該当する場合、「今すぐ移行」「今後表示しない」の2択ダイアログを表示する。「今すぐ移行」は上記の手動フローと全く同じ`runVaultMigration`をそのまま呼び出す（フォルダ選択ダイアログだけを、既に分かっている現在のVaultパスに置き換える）。「今後表示しない」は`config.ConfigManager`にマーカーファイルとして永続化し（`Reset Configuration`でクリアされる）、以後の起動では表示しない。ダイアログ自体をキャンセルした場合は永続化せず、次回起動時にまた案内する。移行が完了すればVaultパスがiCloud Drive配下でなくなるため、この検出は自然に発火しなくなる（別途「移行済みフラグ」は持たない）。
+**既存ユーザーへの案内（Phase 18・実装済み）：** 既に設定済みで役割が確定しているデバイスの起動時、`maybeShowICloudMigrationReminder`が現在のVaultパスが(a) iCloud Drive配下（`bootstrap.ICloudDriveRoot()`）、または(b) Obsidian専用iCloudコンテナ配下（`bootstrap.ObsidianICloudContainerRoot()`。iPhone版Obsidianの「iCloudを使う」オプションで作成したVaultはこちらに来る）のいずれかにあるかどうかを確認する（`pathIsUnder`。各ルートとの単純な文字列prefix一致ではなく、`filepath.Rel`ベースで判定し、「iCloud Drive2」のような紛らわしい兄弟フォルダを誤検出しない）。該当する場合、「今すぐ移行」「今後表示しない」の2択ダイアログを表示する。「今すぐ移行」は上記の手動フローと全く同じ`runVaultMigration`をそのまま呼び出す（フォルダ選択ダイアログだけを、既に分かっている現在のVaultパスに置き換える）。「今後表示しない」は`config.ConfigManager`にマーカーファイルとして永続化し（`Reset Configuration`でクリアされる）、以後の起動では表示しない。ダイアログ自体をキャンセルした場合は永続化せず、次回起動時にまた案内する。移行が完了すればVaultパスがiCloud Drive配下でなくなるため、この検出は自然に発火しなくなる（別途「移行済みフラグ」は持たない）。
 
 **移行前後の`.sync/`整合性について：** `device_id`・役割・iCloud Bridge仮想デバイスID・保留中コンフリクト・Google Drive同期ステータス等は、いずれもVaultフォルダの外側（アプリ自身の設定ディレクトリ）に保存されており、Vaultパスの変更による影響を受けない。Vault配下の`.sync/`（各デバイスのログ・スキャン状態・マニフェスト）は、`MoveVaultFolder`がVaultフォルダ全体をまるごと移動するため、内容ごと新しい場所へそのまま引き継がれる。ログエントリ・スキャン状態はいずれもVaultルートからの相対パスのみを保持しているため、絶対パスの不整合も発生しない。
 
@@ -190,7 +190,7 @@ Google Drive
     │
     │ ローカル⇔ローカルミラー（このアプリが管理、1.6.3節）
     ▼
-[iCloud Bridgeフォルダ]（Mac: Obsidian専用iCloudコンテナ／Windows: iCloud Drive配下。1.6.3節。Primary機のみが持つ、任意設定）
+[iCloud Bridgeフォルダ]（Mac・Windowsとも、Obsidian専用iCloudコンテナ。1.6.3節。Primary機のみが持つ、任意設定）
     │
     │ iCloud（OS標準機能、Apple独自のバージョン管理に依存。1.6.6節）
     ▼
@@ -697,7 +697,7 @@ Vault/                              ← Obsidianが直接扱うVaultルート（
 - `.sync/`（`state/`配下を除く）はGoogle Drive経由でPC間に配布される（1.6.4節：Secondaryが自分の`.sync/`をpush、Primaryが全デバイス分をpullしてマージ、マージ後のVault全体をPrimaryがpublish）。
 - `state/`配下の2ファイルは各デバイスの作業ファイルであり、他デバイスと共有する必要はない。Primary・Secondaryいずれもスキャン・ログ記録を行うため両方が書き込む（3.3節）が、Google Driveへの全Sync/Copy呼び出しから常に`--exclude`される（1.6.4節）ため、他デバイスのpull/pushで上書きされることはない。
 - `PRIMARY_CONFLICT.json`（3.6.1.4節）は**ここには置かない**。理由は6.3節を参照。
-- **iCloud Bridgeフォルダ（1.6.2節・1.6.3節）はVault内ではなく別フォルダ**（Mac: `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/<Vaultフォルダ名>`（Obsidian専用iCloudコンテナ）／Windows: `<iCloud Drive>/Obsidian/<Vaultフォルダ名>`）である。Vault本体の内容がミラーされる点は同じだが、`.sync/`の中身は共有しない：ブリッジ由来の変更はVault本体側の`.sync/log-<bridge-id>.jsonl`へ記録される一方、ブリッジフォルダ自身も独自の`.sync/state/`（`ScanBridgeAndLog`専用のデバウンス・確定状態）を持つ（Vault本体の`.sync/`とは別物で、Vault↔ブリッジ間のミラーからは常に除外される）。
+- **iCloud Bridgeフォルダ（1.6.2節・1.6.3節）はVault内ではなく別フォルダ**（Obsidian専用iCloudコンテナ配下の`<Vaultフォルダ名>`。Mac: `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/<Vaultフォルダ名>`／Windows: `C:\Users\<ユーザー名>\iCloudDrive\iCloud~md~obsidian\<Vaultフォルダ名>`）である。Vault本体の内容がミラーされる点は同じだが、`.sync/`の中身は共有しない：ブリッジ由来の変更はVault本体側の`.sync/log-<bridge-id>.jsonl`へ記録される一方、ブリッジフォルダ自身も独自の`.sync/state/`（`ScanBridgeAndLog`専用のデバウンス・確定状態）を持つ（Vault本体の`.sync/`とは別物で、Vault↔ブリッジ間のミラーからは常に除外される）。
 
 ### 6.2 Google Drive上のバックアップ構成（rcloneのミラー先）
 

@@ -3,7 +3,6 @@ package bootstrap_test
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/kh813/unitevault/internal/bootstrap"
@@ -21,32 +20,11 @@ func TestICloudDriveRoot(t *testing.T) {
 // TestObsidianICloudContainerRoot guards the real, previously-shipped bug
 // this function fixes: the correct destination for reaching iPhone's
 // Obsidian app is its own dedicated iCloud container, not the generic
-// iCloud Drive folder (confirmed against a real device). Also guards that
-// it never reports success on Windows, where iCloud for Windows has no
-// per-app container equivalent at all (confirmed via Obsidian's own
-// community forum).
+// iCloud Drive folder - confirmed against real devices on both platforms.
 func TestObsidianICloudContainerRoot(t *testing.T) {
 	path, ok := bootstrap.ObsidianICloudContainerRoot()
 	if ok && path == "" {
 		t.Error("expected a non-empty path whenever ok is true")
-	}
-	if runtime.GOOS == "windows" && ok {
-		t.Error("expected ObsidianICloudContainerRoot to never report ok on Windows")
-	}
-}
-
-// TestICloudBridgeParentDir guards the per-OS split: macOS should defer to
-// ObsidianICloudContainerRoot directly, while Windows falls back to the
-// older generic-iCloud-Drive-plus-"Obsidian"-subfolder convention (the
-// real-world workaround Windows Obsidian users are told to use, since
-// there's no per-app container to target there).
-func TestICloudBridgeParentDir(t *testing.T) {
-	path, ok := bootstrap.ICloudBridgeParentDir()
-	if ok && path == "" {
-		t.Error("expected a non-empty path whenever ok is true")
-	}
-	if runtime.GOOS == "windows" && ok && filepath.Base(path) != "Obsidian" {
-		t.Errorf("expected the Windows convention to end in an \"Obsidian\" subfolder, got %q", path)
 	}
 }
 
