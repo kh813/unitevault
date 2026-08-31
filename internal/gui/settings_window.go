@@ -285,7 +285,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	)
 
 	// Remote Name / Target Folder Path / Sync Interval all have sensible
-	// defaults that just work (ObsidianVault / the Vault's own folder name /
+	// defaults that just work (Vault / the Vault's own folder name /
 	// 60s) - collapsed by default as "Advanced Options" so the common case
 	// isn't cluttered with fields nobody needs to touch, while still being
 	// one click away for anyone who does want to customize them.
