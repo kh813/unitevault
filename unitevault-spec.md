@@ -271,6 +271,8 @@ Case 5: PrimaryはiCloud Bridgeあり、SecondaryはiCloudなし
 
 **Case 1/2/6についての既知の非効率（実害なし）：** 両端末がiCloud Bridgeを持つ構成では、Primaryがマージ結果をBridgeへ書き込む→Apple自身のiCloud同期でSecondary側のローカルiCloudコンテナにも反映される→Secondary自身のBridgeスキャンがこれを「新しい変更」として検出し、Secondary自身の仮想デバイスID（`icloud_bridge_device_id`、端末ごとに個別）でログに記録→Google Drive経由でPrimaryへ送り返される→Primaryが同一内容を再度マージする、という無駄な往復が発生し得る。データが破損したり失われたりすることはなく、余分なログエントリ・同期トラフィックが発生するのみのため、現時点では対応していない。
 
+**推奨構成：iPhone/iPad連携が必要な場合はCase 5を選ぶ。** Case 5（Bridgeを持つのはPrimaryのみ）は、上記の無駄な往復が発生しない分、Case 1/2/6より単純で効率的であり、複数PC＋iPhone連携をしたい場合の推奨構成とする。**Case 1/2/6になるかどうかは、そのSecondary機に実際にiCloudがインストールされているかではなく、そのSecondary機自身の設定（`config.ICloudBridgePath`）にBridgeパスが記録されているかどうかで決まる**——これは、そのSecondary機で「iCloud上にあったVaultからのMigrate」を一度でも実行した場合にのみセットされる（1.6.7節）。したがって、Secondary機にiCloud自体はインストールされていても、そのSecondary機でMigrateをiCloud由来のVaultに対して実行したことが無ければ、自動的にCase 5のままになる。Case 5を意図的に維持したい場合は、iPhone連携用のBridge設定をPrimary機だけに限定する（Secondary機ではiCloud由来のVaultに対してMigrateを実行しない）のがポイントになる。
+
 ---
 
 ## 3. コンポーネント別仕様

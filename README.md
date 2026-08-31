@@ -76,6 +76,8 @@ ObsidianがVaultファイルへ直接書き込むのと、iCloudの内部デー�
 
 > iPhone/iPadを使わない場合は、上記3の手順は自動的にスキップされます（iCloud Bridgeの配置先が検出できない場合）。
 
+> **複数PC＋iPhone/iPad連携をする場合の推奨：** iCloud Bridgeの設定は、PCのうち1台（Primary機になる予定の端末）だけで行うのがおすすめです。複数のPCで同時にiCloud由来のVaultからMigrateを実行してしまうと、動作自体は問題ありませんが、同じ内容がPC間を無駄に往復してしまいます。
+
 > 運用開始後（Google Driveリモート設定済みの状態）にVaultフォルダを別の場所（別ドライブ等）へ移動したい場合は、「Obsidian Vault」セクションの **[ Migrate Vault to Local Folder... ]** ボタンから行えます。この状態ではVaultとリモートの紐付けを誤って切らないよう Select Folder 自体が無効化されているため、Vaultの場所を変える唯一の手段です。
 
 ### 5. Google Driveへの接続
