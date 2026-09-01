@@ -70,15 +70,16 @@ type SettingsFormData struct {
 	RcloneRemote    string
 	RclonePath      string
 	IntervalSeconds int
-	// SyncMode is "drive" or "icloud" (spec 1.6.10) - deliberately a plain
-	// string rather than config.SyncMode to keep this package independent
-	// of internal/config (see targetPathEntry's comment above for the same
-	// convention elsewhere in this struct). "" means "not yet chosen" (a
-	// brand new, unconfigured device) and is treated identically to
-	// "drive" everywhere this is read, mirroring config.EffectiveSyncMode.
-	// Fixed permanently the first time a Vault is ever saved - see
-	// SettingsHandlers.OnSave and this window's own "locked" rendering
-	// below, keyed off VaultPath already being non-empty.
+	// SyncMode is "drive", "icloud", or "gdrive_desktop" (spec 1.6.10) -
+	// deliberately a plain string rather than config.SyncMode to keep this
+	// package independent of internal/config (see targetPathEntry's
+	// comment above for the same convention elsewhere in this struct). ""
+	// means "not yet chosen" (a brand new, unconfigured device) and is
+	// treated identically to "drive" everywhere this is read, mirroring
+	// config.EffectiveSyncMode. Fixed permanently the first time a Vault
+	// is ever saved - see SettingsHandlers.OnSave and this window's own
+	// "locked" rendering below, keyed off VaultPath already being
+	// non-empty.
 	SyncMode string
 
 	// rclone Details
@@ -130,6 +131,12 @@ type SettingsHandlers struct {
 	// user taps "Resolve Conflicts...". Shown whenever
 	// data.PendingConflictCount > 0 (spec 3.3.2).
 	OnResolveConflicts func(current SettingsFormData)
+	// OnCheckICloudConflicts is called with the form's current values when
+	// the user taps "Check for Conflicts and Merge..." (spec 1.6.10,
+	// iCloud-centric Mode A only) - shown only when data.SyncMode is
+	// "icloud", since this looks for iCloud's own conflict-copy naming
+	// convention specifically.
+	OnCheckICloudConflicts func(current SettingsFormData)
 	// OnSave is called with the current form values when the user taps
 	// "Save Settings".
 	OnSave func(data SettingsFormData)
@@ -173,6 +180,49 @@ func statusLine(label, value, actionLabel string, action func()) fyne.CanvasObje
 	return container.NewHBox(objs...)
 }
 
+// newExclusiveCheckGroup builds a set of mutually-exclusive widget.Check
+// rows (one per option, each immediately followed by its own wrapped
+// description) and returns them as a single VBox - used for Sync Mode's
+// 3-way choice (spec 1.6.10). widget.RadioGroup can't be used here since
+// its per-option label is a canvas.Text, which (per its own doc comment:
+// "No formatting or text parsing will be performed") can't wrap or render
+// a multi-line description under each option. onSelect is called with the
+// newly-selected option's index whenever the selection changes; exactly
+// one option stays checked at all times (clicking the already-selected
+// check back off is refused, mirroring an actual radio group).
+func newExclusiveCheckGroup(labels, descriptions []string, selectedIndex int, onSelect func(index int)) fyne.CanvasObject {
+	checks := make([]*widget.Check, len(labels))
+	rows := make([]fyne.CanvasObject, 0, len(labels)*2)
+	for i := range labels {
+		i := i
+		c := widget.NewCheck(labels[i], nil)
+		c.Checked = i == selectedIndex
+		c.OnChanged = func(checked bool) {
+			if checked {
+				selectedIndex = i
+				for j, other := range checks {
+					if j != i && other.Checked {
+						other.Checked = false
+						other.Refresh()
+					}
+				}
+				onSelect(i)
+			} else if i == selectedIndex {
+				// Refuse to leave nothing selected - setting .Checked
+				// directly (rather than calling SetChecked) and calling
+				// Refresh instead avoids re-entering this same handler.
+				c.Checked = true
+				c.Refresh()
+			}
+		}
+		checks[i] = c
+		desc := widget.NewLabel(descriptions[i])
+		desc.Wrapping = fyne.TextWrapWord
+		rows = append(rows, c, desc)
+	}
+	return container.NewVBox(rows...)
+}
+
 func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne.CanvasObject {
 	if data.IntervalSeconds <= 0 {
 		// Mirrors config.DefaultIntervalSeconds - not imported directly to
@@ -195,64 +245,50 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	if syncMode == "" {
 		syncMode = "drive"
 	}
-	driveModeLabel := lang.L("Google Drive-centric")
-	icloudModeLabel := lang.L("iCloud-centric")
+	syncModeValues := []string{"drive", "icloud", "gdrive_desktop"}
+	syncModeLabels := map[string]string{
+		"drive":          lang.L("Google Drive-centric"),
+		"icloud":         lang.L("iCloud-centric"),
+		"gdrive_desktop": lang.L("Google Drive (desktop app)"),
+	}
+	// Each option's description deliberately leads with the one fact that
+	// actually decides which mode fits: whether the user needs iPhone/iPad
+	// support (only iCloud-centric offers it) or already has this Vault
+	// living inside a folder Google Drive's own desktop app syncs (in
+	// which case this app must stay out of the way entirely, spec 1.6.10 -
+	// running its own rclone-based sync on top of that app's would mean
+	// two independent daemons touching the same files).
+	syncModeDescriptions := map[string]string{
+		"drive":          lang.L("Mac/Windows only (iPhone/iPad won't run Obsidian)"),
+		"icloud":         lang.L("iPhone/iPad will run Obsidian and sync with Mac/Windows - required in this case"),
+		"gdrive_desktop": lang.L("Vault already lives in a folder Google Drive's desktop app syncs (Mac/Windows only, no iPhone/iPad)"),
+	}
 	var syncModeContent fyne.CanvasObject
 	if modeLocked {
-		modeDisplay := driveModeLabel
-		if syncMode == "icloud" {
-			modeDisplay = icloudModeLabel
+		modeDisplay := syncModeLabels[syncMode]
+		if modeDisplay == "" {
+			modeDisplay = syncModeLabels["drive"]
 		}
 		syncModeContent = widget.NewForm(widget.NewFormItem(lang.L("Sync Mode"), widget.NewLabel(modeDisplay)))
 	} else {
-		// Each option is paired with its own description directly below it,
-		// deliberately leading with "iPhone/iPad" rather than burying it
-		// mid-sentence - whether the user's Vault needs to work on
-		// iPhone/iPad is the one fact that actually decides which mode is
-		// required (iCloud-centric) versus merely an option (Google
-		// Drive-centric), so it belongs at the very front of both
-		// descriptions, not just the one that requires it.
-		//
-		// Built from two widget.Check rather than widget.RadioGroup so each
-		// option can carry a wrapped, multi-line description immediately
-		// under it - RadioGroup's own per-option label is a canvas.Text,
-		// which (per its own doc comment: "No formatting or text parsing
-		// will be performed") cannot wrap or render an embedded newline as
-		// two lines.
-		driveCheck := widget.NewCheck(driveModeLabel, nil)
-		icloudCheck := widget.NewCheck(icloudModeLabel, nil)
-		driveDesc := widget.NewLabel(lang.L("Mac/Windows only (iPhone/iPad won't run Obsidian)"))
-		driveDesc.Wrapping = fyne.TextWrapWord
-		icloudDesc := widget.NewLabel(lang.L("iPhone/iPad will run Obsidian and sync with Mac/Windows - required in this case"))
-		icloudDesc.Wrapping = fyne.TextWrapWord
-		driveCheck.Checked = syncMode != "icloud"
-		icloudCheck.Checked = syncMode == "icloud"
-		// Setting .Checked directly (rather than calling SetChecked) and
-		// calling Refresh instead avoids re-entering the other check's own
-		// OnChanged - SetChecked would fire it and risk infinite recursion.
-		driveCheck.OnChanged = func(checked bool) {
-			if checked {
-				syncMode = "drive"
-				icloudCheck.Checked = false
-				icloudCheck.Refresh()
-			} else if syncMode == "drive" {
-				driveCheck.Checked = true
-				driveCheck.Refresh()
+		selectedIndex := 0
+		for i, v := range syncModeValues {
+			if v == syncMode {
+				selectedIndex = i
 			}
 		}
-		icloudCheck.OnChanged = func(checked bool) {
-			if checked {
-				syncMode = "icloud"
-				driveCheck.Checked = false
-				driveCheck.Refresh()
-			} else if syncMode == "icloud" {
-				icloudCheck.Checked = true
-				icloudCheck.Refresh()
-			}
+		labels := make([]string, len(syncModeValues))
+		descriptions := make([]string, len(syncModeValues))
+		for i, v := range syncModeValues {
+			labels[i] = syncModeLabels[v]
+			descriptions[i] = syncModeDescriptions[v]
 		}
+		selector := newExclusiveCheckGroup(labels, descriptions, selectedIndex, func(index int) {
+			syncMode = syncModeValues[index]
+		})
 		hint := widget.NewLabel(lang.L("This can't be changed later without resetting configuration."))
 		hint.Wrapping = fyne.TextWrapWord
-		syncModeContent = container.NewVBox(driveCheck, driveDesc, icloudCheck, icloudDesc, hint)
+		syncModeContent = container.NewVBox(selector, hint)
 	}
 	syncModeCard := widget.NewCard(lang.L("Sync Mode"), "", syncModeContent)
 
@@ -261,10 +297,12 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	vaultEntry.SetText(data.VaultPath)
 	vaultPlaceholder := lang.L("Your Obsidian Vault folder")
 	if !modeLocked {
-		// Mode A's Vault lives inside Obsidian's own iCloud container, not
-		// this app's managed ~/Obsidian/ folder - hinting at that up front
-		// saves a round trip through "Select Folder..." to the wrong place.
-		vaultPlaceholder = lang.L("Your Obsidian Vault folder (for iCloud-centric mode: the Vault folder inside iCloud Drive, e.g. where Obsidian's \"iCloud\" storage option created it)")
+		// Mode A/D's Vault lives inside a folder some other app already
+		// syncs (iCloud Drive, or the user's own Google Drive desktop app),
+		// not this app's managed ~/Obsidian/ folder - hinting at that up
+		// front saves a round trip through "Select Folder..." to the wrong
+		// place.
+		vaultPlaceholder = lang.L("Your Obsidian Vault folder (for iCloud-centric mode: the Vault folder inside iCloud Drive, e.g. where Obsidian's \"iCloud\" storage option created it. For Google Drive (desktop app) mode: the Vault folder inside your Google Drive desktop app's synced folder)")
 	}
 	vaultEntry.SetPlaceHolder(vaultPlaceholder)
 
@@ -421,19 +459,33 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// there, and seeds an iCloud Bridge copy if iCloud Drive is available -
 	// always available (not gated on data.VaultPath), since it's also how
 	// a brand new user with an existing iCloud-resident Vault gets started.
-	// Vault Migration moves a Vault OUT of iCloud into this app's own local
-	// folder - exactly the opposite of what an iCloud-centric (Mode A,
-	// spec 1.6.10) Vault needs, since that mode deliberately keeps the
-	// Vault inside iCloud Drive permanently. Hidden whenever iCloud mode is
-	// selected/locked, mirroring maybeShowICloudMigrationReminder's own
+	// Vault Migration moves a Vault OUT of iCloud (or out of a Google Drive
+	// desktop app's synced folder) into this app's own local folder -
+	// exactly the opposite of what Mode A/D (spec 1.6.10) need, since both
+	// deliberately keep the Vault wherever that other sync mechanism
+	// already placed it permanently. Hidden whenever either mode is
+	// selected/locked, mirroring shouldShowICloudMigrationReminder's own
 	// same-reasoning suppression in main.go.
 	var vaultCardContent []fyne.CanvasObject
 	vaultCardContent = append(vaultCardContent, widget.NewForm(vaultFormItems...))
-	if handlers.OnMigrateVault != nil && syncMode != "icloud" {
+	if handlers.OnMigrateVault != nil && syncMode != "icloud" && syncMode != "gdrive_desktop" {
 		migrateVaultBtn := widget.NewButton(lang.L("Migrate Vault to Local Folder..."), func() {
 			handlers.OnMigrateVault(currentSnapshot())
 		})
 		vaultCardContent = append(vaultCardContent, migrateVaultBtn)
+	}
+	// Check for Conflicts and Merge... (spec 1.6.10, Mode A only): a
+	// manual, on-demand scan for iCloud's own conflict-copy naming
+	// convention ("Name (suffix).ext" alongside "Name.ext") - deliberately
+	// not automatic, so a false-positive match is at worst a surprising
+	// prompt the user can decline rather than a silent background
+	// rewrite. Mode D's own conflict-copy convention isn't handled yet
+	// (spec 1.6.10), so this stays iCloud-only for now.
+	if handlers.OnCheckICloudConflicts != nil && syncMode == "icloud" && modeLocked {
+		checkConflictsBtn := widget.NewButton(lang.L("Check for Conflicts and Merge..."), func() {
+			handlers.OnCheckICloudConflicts(currentSnapshot())
+		})
+		vaultCardContent = append(vaultCardContent, checkConflictsBtn)
 	}
 	vaultCard := widget.NewCard(lang.L("Obsidian Vault"), "", container.NewVBox(vaultCardContent...))
 
@@ -498,9 +550,16 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// outcome, Device role) - conceptually different information, so
 	// splitting along that line (rather than, say, alternating rows) keeps
 	// each column internally consistent.
-	installRows := []fyne.CanvasObject{
-		statusLine(lang.L("Git status:"), lang.L(orDefault(data.GitStatus, "Unknown")), lang.L("Install Git..."), installGit),
-		statusLine(lang.L("rclone status:"), lang.L(orDefault(data.RcloneStatus, "Unknown")), lang.L("Install rclone..."), installRclone),
+	// Mode D (spec 1.6.10) never uses Git or rclone at all - it never
+	// merges (no cross-device coordination happens in this app for that
+	// mode) and never touches Google Drive itself, so neither install
+	// check is meaningful there.
+	var installRows []fyne.CanvasObject
+	if syncMode != "gdrive_desktop" {
+		installRows = append(installRows,
+			statusLine(lang.L("Git status:"), lang.L(orDefault(data.GitStatus, "Unknown")), lang.L("Install Git..."), installGit),
+			statusLine(lang.L("rclone status:"), lang.L(orDefault(data.RcloneStatus, "Unknown")), lang.L("Install rclone..."), installRclone),
+		)
 	}
 	// ICloudStatus is only ever populated on Windows (see SettingsFormData) -
 	// hiding the row entirely elsewhere instead of showing "Not Found" for a
@@ -516,18 +575,21 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		// arrives pre-localized - it must not be wrapped in lang.L again.
 		operationalRows = append(operationalRows, statusLine(lang.L("Google Drive sync:"), data.DriveSyncStatus, "", nil))
 	}
-	// Primary/Secondary applies in both sync modes (spec 1.6.10) - iCloud
-	// mode still elects one, so Google Drive there always gets exactly one
-	// canonical publisher instead of every device racing to overwrite the
-	// same backup.
-	deviceRoleValue := lang.L(orDefault(data.DeviceRole, "N/A"))
-	if data.MultiDeviceStatus != "" {
-		// MultiDeviceStatus is already localized (built via lang.L in
-		// main.go), so it must not be wrapped in lang.L again - only the
-		// surrounding template here needs its own localization.
-		deviceRoleValue = lang.L("{{.Role}} ({{.Status}})", map[string]string{"Role": deviceRoleValue, "Status": data.MultiDeviceStatus})
+	// Primary/Secondary applies to both remaining sync modes (spec
+	// 1.6.10) - iCloud mode still elects one, so Google Drive there always
+	// gets exactly one canonical publisher instead of every device racing
+	// to overwrite the same backup. Mode D has no such concept at all (no
+	// cross-device coordination happens in this app for that mode).
+	if syncMode != "gdrive_desktop" {
+		deviceRoleValue := lang.L(orDefault(data.DeviceRole, "N/A"))
+		if data.MultiDeviceStatus != "" {
+			// MultiDeviceStatus is already localized (built via lang.L in
+			// main.go), so it must not be wrapped in lang.L again - only the
+			// surrounding template here needs its own localization.
+			deviceRoleValue = lang.L("{{.Role}} ({{.Status}})", map[string]string{"Role": deviceRoleValue, "Status": data.MultiDeviceStatus})
+		}
+		operationalRows = append(operationalRows, statusLine(lang.L("Device role:"), deviceRoleValue, promoteToPrimaryLabel, promoteToPrimary))
 	}
-	operationalRows = append(operationalRows, statusLine(lang.L("Device role:"), deviceRoleValue, promoteToPrimaryLabel, promoteToPrimary))
 	statusRows := []fyne.CanvasObject{
 		container.NewGridWithColumns(2, container.NewVBox(installRows...), container.NewVBox(operationalRows...)),
 	}
@@ -614,7 +676,15 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// while scrolling for an expanded accordion still works exactly the
 	// same (that's evaluated against the window's actual on-screen size at
 	// layout time, independent of this MinSize hint).
-	topContent := container.NewVBox(statusCard, syncModeCard, vaultCard, rcloneCard)
+	// Mode D (spec 1.6.10) never touches rclone/Google Drive at all - the
+	// user's own Google Drive desktop app handles sync entirely, so the
+	// whole rclone card (remote status, target folder, sync interval) has
+	// nothing to configure and would only be confusing here.
+	topCards := []fyne.CanvasObject{statusCard, syncModeCard, vaultCard}
+	if syncMode != "gdrive_desktop" {
+		topCards = append(topCards, rcloneCard)
+	}
+	topContent := container.NewVBox(topCards...)
 	scroll := container.NewVScroll(topContent)
 	scroll.SetMinSize(topContent.MinSize())
 

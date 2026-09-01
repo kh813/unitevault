@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// SyncMode selects which of the three sync modes (spec 1.6.10) this device
+// SyncMode selects which of the four sync modes (spec 1.6.10) this device
 // uses. Chosen once at setup and not changed afterward (v1) - see
 // Config.SyncMode's own doc comment.
 type SyncMode string
@@ -27,10 +27,27 @@ const (
 	// SyncModeICloud is spec 1.6.10's "A" mode: Vault lives directly in
 	// Obsidian's iCloud container (bootstrap.ObsidianICloudContainerRoot),
 	// with Apple's own iCloud sync responsible for consistency across
-	// Mac/Windows/iPhone - this app never merges or elects a Primary in
-	// this mode, it only mirrors the current content to Google Drive as a
-	// one-way backup (engine.RunICloudModeCycle).
+	// Mac/Windows/iPhone. This app still elects a Primary/Secondary
+	// exactly like SyncModeDrive does (so Google Drive gets exactly one
+	// canonical publisher, not every device racing to overwrite the same
+	// backup) but never merges anything itself - content consistency
+	// across devices is entirely iCloud's job (engine.runICloudModeCycle).
 	SyncModeICloud SyncMode = "icloud"
+	// SyncModeGDriveDesktop is spec 1.6.10's "D" mode: Vault lives inside
+	// a folder already synced by the user's own Google Drive desktop app
+	// (Google's native sync client, not this app's rclone-based one) -
+	// that app alone is responsible for consistency across every Mac/
+	// Windows PC signed into the same account. This app does nothing at
+	// all in this mode (no rclone sync/copy, no Primary/Secondary
+	// election, no merge, engine.runGDriveDesktopModeCycle is a no-op) -
+	// running this app's own rclone-based sync on top of the Google Drive
+	// desktop app's sync would mean two independent daemons touching the
+	// same files, the exact risk spec 1.6.1 moved Vault out of iCloud
+	// Drive to avoid in the first place, now recurring for Google Drive.
+	// No iPhone/iPad story exists for this mode (Obsidian has no native
+	// Google Drive storage option the way it does for iCloud) - a user
+	// wanting that should use SyncModeICloud instead.
+	SyncModeGDriveDesktop SyncMode = "gdrive_desktop"
 )
 
 // Config represents the local application configuration (~/.unitevault/config.json)
@@ -309,6 +326,13 @@ type PendingConflict struct {
 	// than keep nagging about a conflict that no longer exists.
 	WrittenHash string                   `json:"written_hash"`
 	Versions    []PendingConflictVersion `json:"versions"`
+	// ExtraFileToRemove, if non-empty, is a Vault-relative path to delete
+	// once this conflict is resolved (spec 1.6.10's manual "Check for
+	// Conflicts and Merge..." action, Mode A only): the iCloud-created
+	// conflict-copy file itself, once its content has been folded into
+	// RelPath. Empty for an ordinary multi-device conflict (spec 3.3.2),
+	// which has no such companion file to clean up.
+	ExtraFileToRemove string `json:"extra_file_to_remove,omitempty"`
 }
 
 // PendingConflictsPath returns the path to pending_conflicts.json.

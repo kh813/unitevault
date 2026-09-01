@@ -894,6 +894,76 @@ func TestBuildSettingsContent_SyncMode_HidesMigrateVaultButton(t *testing.T) {
 	if hasButton(icloud, "Migrate Vault to Local Folder...") {
 		t.Error("expected no Migrate Vault button for an iCloud-mode device")
 	}
+
+	gdrive := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "gdrive_desktop"}, SettingsHandlers{
+		OnMigrateVault: func(SettingsFormData) {},
+	})
+	if hasButton(gdrive, "Migrate Vault to Local Folder...") {
+		t.Error("expected no Migrate Vault button for a Google Drive desktop-app-mode device")
+	}
+}
+
+// TestBuildSettingsContent_SyncMode_ChecksForICloudConflictsOnlyInICloudMode
+// guards spec 1.6.10's manual "Check for Conflicts and Merge..." action:
+// it only makes sense for iCloud-centric Mode A (it looks for iCloud's own
+// conflict-copy naming convention specifically), and only once a Vault is
+// actually configured (modeLocked) - showing it mid first-time-setup,
+// before any Vault exists to scan, would be premature.
+func TestBuildSettingsContent_SyncMode_ChecksForICloudConflictsOnlyInICloudMode(t *testing.T) {
+	newTestWindow()
+
+	icloudLocked := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "icloud"}, SettingsHandlers{
+		OnCheckICloudConflicts: func(SettingsFormData) {},
+	})
+	if !hasButton(icloudLocked, "Check for Conflicts and Merge...") {
+		t.Error("expected the Check for Conflicts button for a locked iCloud-mode device")
+	}
+
+	driveLocked := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "drive"}, SettingsHandlers{
+		OnCheckICloudConflicts: func(SettingsFormData) {},
+	})
+	if hasButton(driveLocked, "Check for Conflicts and Merge...") {
+		t.Error("expected no Check for Conflicts button for a Drive-mode device")
+	}
+
+	gdriveLocked := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "gdrive_desktop"}, SettingsHandlers{
+		OnCheckICloudConflicts: func(SettingsFormData) {},
+	})
+	if hasButton(gdriveLocked, "Check for Conflicts and Merge...") {
+		t.Error("expected no Check for Conflicts button for a Google Drive desktop-app-mode device")
+	}
+
+	icloudUnlocked := buildSettingsContent(SettingsFormData{SyncMode: "icloud"}, SettingsHandlers{
+		OnCheckICloudConflicts: func(SettingsFormData) {},
+	})
+	if hasButton(icloudUnlocked, "Check for Conflicts and Merge...") {
+		t.Error("expected no Check for Conflicts button before a Vault is actually configured")
+	}
+}
+
+// TestBuildSettingsContent_GDriveDesktopMode_HidesUnusedSections guards
+// spec 1.6.10's Mode D: since this app never touches rclone/Git or elects
+// a Primary/Secondary in this mode (the user's own Google Drive desktop
+// app handles sync entirely), the rclone card and the Git/rclone/Device
+// role status rows must not be shown - they'd have nothing meaningful to
+// display and would only suggest configuration this mode doesn't need.
+func TestBuildSettingsContent_GDriveDesktopMode_HidesUnusedSections(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "gdrive_desktop"}, SettingsHandlers{})
+
+	if hasFormItemText(content, "Remote Status") || hasButton(content, "Configure Google Drive Remote...") {
+		t.Error("expected the rclone card to be hidden entirely in Mode D")
+	}
+	if hasLabelText(content, "Git status:") {
+		t.Error("expected no 'Git status' row in Mode D")
+	}
+	if hasLabelText(content, "rclone status:") {
+		t.Error("expected no 'rclone status' row in Mode D")
+	}
+	if hasLabelText(content, "Device role:") {
+		t.Error("expected no 'Device role' row in Mode D")
+	}
 }
 
 // TestBuildSettingsContent_SyncMode_ShowsDeviceRoleRowInBothModes guards
@@ -929,8 +999,8 @@ func TestBuildSettingsContent_SyncMode_SelectorShownForFirstTimeSetup(t *testing
 
 	content := buildSettingsContent(SettingsFormData{}, SettingsHandlers{})
 
-	if findCheck(content, "Google Drive-centric") == nil || findCheck(content, "iCloud-centric") == nil {
-		t.Fatal("expected both sync mode options for an unconfigured device")
+	if findCheck(content, "Google Drive-centric") == nil || findCheck(content, "iCloud-centric") == nil || findCheck(content, "Google Drive (desktop app)") == nil {
+		t.Fatal("expected all three sync mode options for an unconfigured device")
 	}
 }
 
@@ -948,6 +1018,23 @@ func TestBuildSettingsContent_SyncMode_LockedOnceVaultIsConfigured(t *testing.T)
 	}
 	if !hasFormItemText(content, "Sync Mode") {
 		t.Error("expected a read-only 'Sync Mode' row once locked")
+	}
+}
+
+// TestBuildSettingsContent_SyncMode_LockedGDriveDesktopShowsCorrectLabel
+// guards that Mode D's locked display shows its own label rather than
+// silently falling back to the Drive-mode default (the fallback exists
+// only for pre-Mode-D-or-A legacy configs whose SyncMode is "").
+func TestBuildSettingsContent_SyncMode_LockedGDriveDesktopShowsCorrectLabel(t *testing.T) {
+	newTestWindow()
+
+	content := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "gdrive_desktop"}, SettingsHandlers{})
+
+	if !hasLabelText(content, "Google Drive (desktop app)") {
+		t.Error("expected the locked Sync Mode row to show 'Google Drive (desktop app)'")
+	}
+	if hasLabelText(content, "Google Drive-centric") {
+		t.Error("expected the locked Sync Mode row to NOT show the Drive-centric label for gdrive_desktop mode")
 	}
 }
 
@@ -990,6 +1077,30 @@ func TestBuildSettingsContent_SyncMode_SelectingICloudRoundTrips(t *testing.T) {
 
 	if saved.SyncMode != "icloud" {
 		t.Errorf("expected SyncMode 'icloud' after selecting it, got %q", saved.SyncMode)
+	}
+}
+
+// TestBuildSettingsContent_SyncMode_SelectingGDriveDesktopRoundTrips is
+// TestBuildSettingsContent_SyncMode_SelectingICloudRoundTrips's counterpart
+// for Mode D.
+func TestBuildSettingsContent_SyncMode_SelectingGDriveDesktopRoundTrips(t *testing.T) {
+	newTestWindow()
+
+	var saved SettingsFormData
+	content := buildSettingsContent(SettingsFormData{}, SettingsHandlers{
+		OnSave: func(d SettingsFormData) { saved = d },
+	})
+
+	gdriveCheck := findCheck(content, "Google Drive (desktop app)")
+	if gdriveCheck == nil {
+		t.Fatal("expected a Google Drive (desktop app) option")
+	}
+	test.Tap(gdriveCheck)
+
+	test.Tap(findButton(t, content, "Save Settings"))
+
+	if saved.SyncMode != "gdrive_desktop" {
+		t.Errorf("expected SyncMode 'gdrive_desktop' after selecting it, got %q", saved.SyncMode)
 	}
 }
 

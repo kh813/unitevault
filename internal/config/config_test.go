@@ -24,6 +24,7 @@ func TestConfig_EffectiveSyncMode(t *testing.T) {
 		{name: "zero-value config (pre-SyncMode save)", cfg: &config.Config{}, want: config.SyncModeDrive},
 		{name: "explicit drive mode", cfg: &config.Config{SyncMode: config.SyncModeDrive}, want: config.SyncModeDrive},
 		{name: "explicit icloud mode", cfg: &config.Config{SyncMode: config.SyncModeICloud}, want: config.SyncModeICloud},
+		{name: "explicit gdrive_desktop mode", cfg: &config.Config{SyncMode: config.SyncModeGDriveDesktop}, want: config.SyncModeGDriveDesktop},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

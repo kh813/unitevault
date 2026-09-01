@@ -132,8 +132,11 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	if cfg.EffectiveSyncMode() == config.SyncModeICloud {
+	switch cfg.EffectiveSyncMode() {
+	case config.SyncModeICloud:
 		return e.runICloudModeCycle(ctx, cfg)
+	case config.SyncModeGDriveDesktop:
+		return e.runGDriveDesktopModeCycle(ctx, cfg)
 	}
 
 	deviceID, err := e.cfgMgr.GetDeviceID()
@@ -501,6 +504,20 @@ func (e *SyncEngine) runICloudModeCycle(ctx context.Context, cfg *config.Config)
 	return nil
 }
 
+// runGDriveDesktopModeCycle implements spec 1.6.10's Mode D: the Vault
+// lives inside a folder the user's own Google Drive desktop app already
+// syncs, so that app alone is responsible for consistency across every
+// Mac/Windows PC signed into the same account - this app does nothing at
+// all here. Running this app's own rclone-based sync on top of it would
+// mean two independent daemons touching the same files, the exact risk
+// spec 1.6.1 moved Vault out of iCloud Drive to avoid in the first place.
+// A no-op (rather than simply never calling RunCycle for this mode) so
+// RunCycle's shared per-cycle bookkeeping - if any is ever added that
+// should still run in every mode - has one obvious place to go.
+func (e *SyncEngine) runGDriveDesktopModeCycle(ctx context.Context, cfg *config.Config) error {
+	return nil
+}
+
 // applySingleDeviceChange handles a path exactly one device has ever logged
 // a change for - the "1台のみが分岐点から変更している場合は、自動的にそ
 // の変更を採用する" rule (spec 3.3). If that lone device is selfDeviceID
@@ -699,6 +716,14 @@ func ResolvePendingConflict(cfgMgr *config.ConfigManager, vaultPath string, conf
 
 	if err := merge.ApplyResolution(syncedlog.NewLogManager(vaultPath), vaultPath, conflict.RelPath, content, resolverDeviceID, resolverLabel); err != nil {
 		return err
+	}
+
+	if conflict.ExtraFileToRemove != "" {
+		// Best-effort: the resolution above already succeeded and is the
+		// part that actually matters - a leftover conflict-copy file the
+		// user can also just delete manually is a much smaller problem
+		// than failing the whole resolution over it.
+		_ = os.Remove(filepath.Join(vaultPath, conflict.ExtraFileToRemove))
 	}
 
 	remaining, err := cfgMgr.LoadPendingConflicts()

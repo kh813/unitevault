@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -321,15 +322,21 @@ func vaultUnderManagedRoot(vaultPath string) bool {
 // shouldShowICloudMigrationReminder is maybeShowICloudMigrationReminder's
 // decision, factored out as a pure predicate so it's testable without
 // needing a real gui.mainWindow (gui.ChoiceN would otherwise be reached).
+// syncModeManagesOwnVaultLocation reports whether mode deliberately keeps
+// the Vault wherever some *other* sync mechanism already places it
+// (Apple's iCloud for SyncModeICloud, the user's own Google Drive desktop
+// app for SyncModeGDriveDesktop) rather than under this app's own managed
+// local folder (spec 1.6.10). Vault Migration, and the reminder that
+// offers it, exist only to catch a legacy/misplaced Vault for
+// SyncModeDrive - firing them in either of these other modes would offer
+// to move the Vault out of the exact location its cross-device sync
+// depends on.
+func syncModeManagesOwnVaultLocation(mode config.SyncMode) bool {
+	return mode == config.SyncModeICloud || mode == config.SyncModeGDriveDesktop
+}
+
 func shouldShowICloudMigrationReminder(cfgMgr *config.ConfigManager, cfg *config.Config) bool {
-	// iCloud-centric (Mode A, spec 1.6.10) deliberately keeps the Vault
-	// inside iCloud Drive forever - that's the whole point of the mode, not
-	// a legacy pre-1.6 layout this reminder exists to catch. Without this
-	// check, every iCloud-mode device would see this reminder on every
-	// launch and, if accepted, "Migrate Now" would move the Vault out of
-	// iCloud into UniteVault's local folder - breaking the very
-	// cross-device sync the user chose this mode for.
-	if cfg.EffectiveSyncMode() == config.SyncModeICloud {
+	if syncModeManagesOwnVaultLocation(cfg.EffectiveSyncMode()) {
 		return false
 	}
 	if cfgMgr.IsICloudMigrationReminderDismissed() {
@@ -397,6 +404,15 @@ func (t *trayApp) runDaemonLoop(ctx context.Context, cfg *config.Config) {
 	}
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()
+
+	// Run the first cycle immediately rather than waiting for the ticker's
+	// first tick (up to a full interval - 60s by default) - otherwise every
+	// app launch/restart sits idle that long before anything happens at
+	// all, which is most visible right after a fresh Primary/Secondary
+	// election (spec 3.6.1.1/1.6.10): the tray/menu-bar Status label and
+	// Settings > Status's Device role both stay stuck on their pre-role
+	// "unknown" state until this first cycle actually runs and saves one.
+	t.runCycleGuarded(ctx, eng, false)
 
 	for {
 		select {
@@ -621,6 +637,7 @@ func engineLogPath() string {
 func (t *trayApp) buildFormData() gui.SettingsFormData {
 	cfg, _ := t.cfgMgr.LoadConfig()
 	role, _ := t.cfgMgr.LoadRole()
+	gdriveDesktopMode := cfg.EffectiveSyncMode() == config.SyncModeGDriveDesktop
 
 	// engine.RunCycle only ever runs the rclone sync step (and records its
 	// outcome) on a Primary device - a Secondary never attempts it (in
@@ -628,9 +645,14 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 	// mode too, exactly like Drive mode, so Google Drive always has one
 	// canonical publisher), so showing its (possibly stale, or simply
 	// absent) sync status would be misleading rather than just showing why
-	// there isn't one.
-	driveSyncStatus := lang.L("Never synced yet")
-	if role == "" {
+	// there isn't one. Mode D never touches Google Drive at all (its own
+	// desktop app handles sync), so it has no status to show or hide
+	// behind an explanation - leaving this "" hides the row entirely (see
+	// settings_window.go).
+	var driveSyncStatus string
+	if gdriveDesktopMode {
+		// leave empty
+	} else if role == "" {
 		driveSyncStatus = lang.L("N/A (not configured yet)")
 		role = "N/A"
 	} else if role == "secondary" {
@@ -645,6 +667,8 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 		} else {
 			driveSyncStatus = lang.L("Last sync failed ({{.Time}}): {{.Error}}", map[string]string{"Time": displayTime, "Error": st.Error})
 		}
+	} else {
+		driveSyncStatus = lang.L("Never synced yet")
 	}
 
 	gitStatus := "Not Found"
@@ -836,16 +860,17 @@ func (t *trayApp) reopenSettingsGUI(current gui.SettingsFormData) {
 
 func (t *trayApp) showSettingsGUI(data gui.SettingsFormData) {
 	gui.ShowSettingsWindow(data, gui.SettingsHandlers{
-		OnInstallGit:       t.installGit,
-		OnInstallRclone:    t.installRclone,
-		OnInstallICloud:    t.installICloud,
-		OnConfigureRemote:  t.configureRemote,
-		OnRemoveRemote:     t.removeRemote,
-		OnPromoteToPrimary: t.promoteToPrimary,
-		OnMigrateVault:     t.migrateVault,
-		OnResolveConflicts: t.resolveConflicts,
-		OnSave:             t.saveSettings,
-		OnReset:            t.performReset,
+		OnInstallGit:           t.installGit,
+		OnInstallRclone:        t.installRclone,
+		OnInstallICloud:        t.installICloud,
+		OnConfigureRemote:      t.configureRemote,
+		OnRemoveRemote:         t.removeRemote,
+		OnPromoteToPrimary:     t.promoteToPrimary,
+		OnMigrateVault:         t.migrateVault,
+		OnResolveConflicts:     t.resolveConflicts,
+		OnCheckICloudConflicts: t.checkICloudConflicts,
+		OnSave:                 t.saveSettings,
+		OnReset:                t.performReset,
 	})
 }
 
@@ -1191,6 +1216,65 @@ func (t *trayApp) resolveNextConflict(vaultPath, deviceID, label string, pending
 	)
 }
 
+// checkICloudConflicts handles the Obsidian Vault section's "Check for
+// Conflicts and Merge..." button (spec 1.6.10, iCloud-centric Mode A
+// only) - a manual, on-demand scan for iCloud's own conflict-copy naming
+// convention ("Name (suffix).ext" alongside "Name.ext"). Deliberately not
+// run automatically: a false-positive match is at worst a surprising
+// prompt the user can decline here, never a silent background rewrite.
+func (t *trayApp) checkICloudConflicts(current gui.SettingsFormData) {
+	vaultPath := strings.TrimSpace(current.VaultPath)
+	if vaultPath == "" {
+		return
+	}
+
+	go func() {
+		release, ok := t.tryBeginExclusiveOp()
+		if !ok {
+			gui.Info(lang.L("Sync In Progress"), lang.L("A sync is currently running. Please wait for it to finish, then try again."))
+			return
+		}
+
+		var result engine.ICloudConflictCheckResult
+		err := gui.RunWithProgress(
+			lang.L("Checking for Conflicts"),
+			lang.L("Scanning your Vault for iCloud conflict copies..."),
+			func() error {
+				var checkErr error
+				result, checkErr = engine.CheckAndMergeICloudConflictCopies(t.cfgMgr, vaultPath)
+				return checkErr
+			},
+		)
+		release()
+		if err != nil {
+			gui.Info(lang.L("Check Failed"), lang.L("Could not check for conflicts: {{.Err}}", map[string]string{"Err": err.Error()}))
+			return
+		}
+
+		if result.AutoMerged == 0 && result.NeedsReview == 0 && len(result.Failed) == 0 {
+			gui.Info(lang.L("No Conflicts Found"), lang.L("No iCloud conflict copies were found in your Vault."))
+			return
+		}
+
+		gui.Info(lang.L("Conflict Check Complete"), lang.L(
+			"Auto-merged (no overlap): {{.AutoMerged}}\nNeeds your review: {{.NeedsReview}}\nCould not be checked: {{.Failed}}",
+			map[string]string{
+				"AutoMerged":  strconv.Itoa(result.AutoMerged),
+				"NeedsReview": strconv.Itoa(result.NeedsReview),
+				"Failed":      strconv.Itoa(len(result.Failed)),
+			},
+		))
+
+		if result.NeedsReview > 0 {
+			// Walk straight into the same review flow "Resolve Conflicts..."
+			// itself uses - these are now ordinary PendingConflicts.
+			t.resolveConflicts(current)
+		} else {
+			t.reopenSettingsGUI(current)
+		}
+	}()
+}
+
 // migrateVault handles the Obsidian Vault section's "Migrate Vault to
 // Local Folder..." button (spec 1.6, "Vault Migration"). Lets the user
 // pick an existing Vault folder (typically one living inside iCloud
@@ -1498,11 +1582,12 @@ func vaultChangeNeedsRemoteRemoval(prevCfg *config.Config, data gui.SettingsForm
 // vaultUnderManagedRoot's doc comment for why "outside the managed folder"
 // replaced a growing per-service (iCloud Drive, ...) detection list.
 func vaultNeedsAutoMigration(prevCfg *config.Config, data gui.SettingsFormData) bool {
-	// Mode A's Vault (spec 1.6.10) lives permanently inside Obsidian's own
-	// iCloud container - auto-migrating it into ~/Obsidian/ the way an
-	// unmanaged Mode B/C Vault gets moved would fight the very iCloud sync
-	// this mode relies on, so it must never fire here.
-	if lockedSyncMode(prevCfg, data) == config.SyncModeICloud {
+	// Mode A/D's Vault (spec 1.6.10) lives permanently wherever iCloud or
+	// the user's Google Drive desktop app already placed it - auto-
+	// migrating it into ~/Obsidian/ the way an unmanaged Mode B/C Vault
+	// gets moved would fight the very sync mechanism these modes rely on,
+	// so it must never fire here.
+	if syncModeManagesOwnVaultLocation(lockedSyncMode(prevCfg, data)) {
 		return false
 	}
 	freshSelection := prevCfg == nil || prevCfg.VaultPath == "" || prevCfg.VaultPath != data.VaultPath
@@ -1628,80 +1713,105 @@ func (t *trayApp) saveSettingsConfirmed(data gui.SettingsFormData) {
 		}
 		defer release()
 
-		driveClient := drive.NewClient(engineLogPath())
+		prevCfg, _ := t.cfgMgr.LoadConfig()
+		mode := lockedSyncMode(prevCfg, data)
 
-		if !driveClient.IsRemoteConfigured(context.Background(), data.RcloneRemote) {
-			choiceCh := make(chan int, 1)
-			gui.Choice(
-				lang.L("Configure Google Drive Remote"),
-				lang.L("Google Drive remote '{{.Remote}}' is not configured yet.\n\nChoose how you'd like to set it up:", map[string]string{"Remote": data.RcloneRemote}),
-				lang.L("New Setup (Recommended)"),
-				lang.L("Existing / CLI Config"),
-				func(choice int) { choiceCh <- choice },
-			)
+		// Mode D (spec 1.6.10): the Vault's cross-device consistency is
+		// entirely the user's own Google Drive desktop app's job - this
+		// app never touches Google Drive itself in this mode (no rclone
+		// remote, no Primary/Secondary election), so none of the usual
+		// "ensure a remote is configured, then initialize" work applies.
+		gdriveDesktopMode := mode == config.SyncModeGDriveDesktop
 
-			switch <-choiceCh {
-			case 1:
-				err := gui.RunWithProgress(
-					lang.L("Google Drive Setup"),
-					lang.L("Opening your browser for Google Drive authentication...\nPlease grant permissions, then return here."),
-					func() error { return driveClient.CreateGoogleDriveRemote(context.Background(), data.RcloneRemote) },
+		var driveClient *drive.Client
+		if !gdriveDesktopMode {
+			driveClient = drive.NewClient(engineLogPath())
+
+			if !driveClient.IsRemoteConfigured(context.Background(), data.RcloneRemote) {
+				choiceCh := make(chan int, 1)
+				gui.Choice(
+					lang.L("Configure Google Drive Remote"),
+					lang.L("Google Drive remote '{{.Remote}}' is not configured yet.\n\nChoose how you'd like to set it up:", map[string]string{"Remote": data.RcloneRemote}),
+					lang.L("New Setup (Recommended)"),
+					lang.L("Existing / CLI Config"),
+					func(choice int) { choiceCh <- choice },
 				)
-				if err != nil || !driveClient.IsRemoteConfigured(context.Background(), data.RcloneRemote) {
-					gui.Info(lang.L("Setup Failed"), lang.L("Automatic setup did not complete. Launching a terminal for manual configuration; please retry Save afterwards."))
+
+				switch <-choiceCh {
+				case 1:
+					err := gui.RunWithProgress(
+						lang.L("Google Drive Setup"),
+						lang.L("Opening your browser for Google Drive authentication...\nPlease grant permissions, then return here."),
+						func() error { return driveClient.CreateGoogleDriveRemote(context.Background(), data.RcloneRemote) },
+					)
+					if err != nil || !driveClient.IsRemoteConfigured(context.Background(), data.RcloneRemote) {
+						gui.Info(lang.L("Setup Failed"), lang.L("Automatic setup did not complete. Launching a terminal for manual configuration; please retry Save afterwards."))
+						_ = bootstrap.LaunchTerminalRcloneConfig(driveClient.GetBinaryPath())
+						return
+					}
+				case 2:
 					_ = bootstrap.LaunchTerminalRcloneConfig(driveClient.GetBinaryPath())
+					gui.Info(lang.L("Terminal Launched"), lang.L("Complete the rclone configuration in the opened terminal window, then press Save Settings again."))
+					return
+				default:
 					return
 				}
-			case 2:
-				_ = bootstrap.LaunchTerminalRcloneConfig(driveClient.GetBinaryPath())
-				gui.Info(lang.L("Terminal Launched"), lang.L("Complete the rclone configuration in the opened terminal window, then press Save Settings again."))
-				return
-			default:
-				return
 			}
 		}
 
-		prevCfg, _ := t.cfgMgr.LoadConfig()
 		newCfg := buildSaveConfig(prevCfg, data)
 		if err := t.cfgMgr.SaveConfig(newCfg); err != nil {
 			gui.Info(lang.L("Save Failed"), lang.L("Failed to save configuration: {{.Err}}", map[string]string{"Err": err.Error()}))
 			return
 		}
 
-		remoteTarget := fmt.Sprintf("%s:%s", data.RcloneRemote, data.RclonePath)
-
-		// Primary/Secondary election (spec 3.6.1.1) applies in both sync
-		// modes: iCloud-centric (Mode A) still needs exactly one device
-		// publishing to Google Drive, so downstream consumers of that
-		// backup (e.g. feeding it to an external analysis tool) always see
-		// one canonical, unambiguous copy rather than whichever of several
-		// independently-writing devices happened to sync last (spec
-		// 1.6.10). InitializeNode's Secondary path never reads Vault
-		// content back from Drive - only bookkeeping (PRIMARY_MARKER.json,
-		// an empty per-device log file) - so it's just as safe to run here
-		// as it always was for Drive mode.
 		var newRole string
-		hostname, _ := os.Hostname()
-		bootstrapper := bootstrap.NewBootstrapper(t.cfgMgr, driveClient)
-		err := gui.RunWithProgress(
-			lang.L("Initializing UniteVault"),
-			lang.L("Determining Primary/Secondary role and syncing initial state with Google Drive..."),
-			func() error {
-				var initErr error
-				newRole, initErr = bootstrapper.InitializeNode(context.Background(), data.VaultPath, remoteTarget, hostname)
-				return initErr
-			},
-		)
-		if err != nil {
-			gui.Info(lang.L("Initialization Failed"), lang.L("UniteVault could not finish initializing: {{.Err}}", map[string]string{"Err": err.Error()}))
-			return
+		var remoteTarget string
+		if gdriveDesktopMode {
+			newRole = lang.L("N/A (Google Drive app handles sync)")
+		} else {
+			remoteTarget = fmt.Sprintf("%s:%s", data.RcloneRemote, data.RclonePath)
+
+			// Primary/Secondary election (spec 3.6.1.1) applies in both
+			// remaining sync modes: iCloud-centric (Mode A) still needs
+			// exactly one device publishing to Google Drive, so downstream
+			// consumers of that backup (e.g. feeding it to an external
+			// analysis tool) always see one canonical, unambiguous copy
+			// rather than whichever of several independently-writing
+			// devices happened to sync last (spec 1.6.10). InitializeNode's
+			// Secondary path never reads Vault content back from Drive -
+			// only bookkeeping (PRIMARY_MARKER.json, an empty per-device
+			// log file) - so it's just as safe to run here as it always
+			// was for Drive mode.
+			hostname, _ := os.Hostname()
+			bootstrapper := bootstrap.NewBootstrapper(t.cfgMgr, driveClient)
+			err := gui.RunWithProgress(
+				lang.L("Initializing UniteVault"),
+				lang.L("Determining Primary/Secondary role and syncing initial state with Google Drive..."),
+				func() error {
+					var initErr error
+					newRole, initErr = bootstrapper.InitializeNode(context.Background(), data.VaultPath, remoteTarget, hostname)
+					return initErr
+				},
+			)
+			if err != nil {
+				gui.Info(lang.L("Initialization Failed"), lang.L("UniteVault could not finish initializing: {{.Err}}", map[string]string{"Err": err.Error()}))
+				return
+			}
 		}
 
 		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Active ({{.Role}})", map[string]string{"Role": newRole}))
-		gui.Info(lang.L("UniteVault Configured"), lang.L(
-			"Settings saved successfully!\n\nVault: {{.Vault}}\nRemote Target: {{.Target}}\nSync Interval: {{.Interval}} seconds\nRole: {{.Role}}",
-			map[string]any{"Vault": data.VaultPath, "Target": remoteTarget, "Interval": data.IntervalSeconds, "Role": newRole},
-		))
+		if gdriveDesktopMode {
+			gui.Info(lang.L("UniteVault Configured"), lang.L(
+				"Settings saved successfully!\n\nVault: {{.Vault}}\nSync Interval: {{.Interval}} seconds\n\nGoogle Drive's own desktop app handles syncing this Vault across your devices - UniteVault won't sync it itself.",
+				map[string]any{"Vault": data.VaultPath, "Interval": data.IntervalSeconds},
+			))
+		} else {
+			gui.Info(lang.L("UniteVault Configured"), lang.L(
+				"Settings saved successfully!\n\nVault: {{.Vault}}\nRemote Target: {{.Target}}\nSync Interval: {{.Interval}} seconds\nRole: {{.Role}}",
+				map[string]any{"Vault": data.VaultPath, "Target": remoteTarget, "Interval": data.IntervalSeconds, "Role": newRole},
+			))
+		}
 		gui.HideWindow()
 
 		t.startDaemonLoop(newCfg)

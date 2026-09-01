@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/lang"
@@ -106,6 +107,12 @@ func TestTryBeginExclusiveOp_SerializesAccess(t *testing.T) {
 // one forever (see the trayApp.daemonMu doc comment).
 func TestStartDaemonLoop_CancelsPreviousLoop(t *testing.T) {
 	tr := newTestTrayApp(t)
+	// runDaemonLoop now runs its first cycle immediately (not just on the
+	// ticker's first tick), which calls gui.SetMenuItemLabel - needs real
+	// menu items set, matching TestRunCycleGuarded_*'s own setup, or that
+	// call panics on a nil tr.status/tr.menu.
+	tr.status = fyne.NewMenuItem("", nil)
+	tr.menu = fyne.NewMenu("", tr.status)
 
 	var oldCancelled bool
 	tr.daemonMu.Lock()
@@ -126,6 +133,26 @@ func TestStartDaemonLoop_CancelsPreviousLoop(t *testing.T) {
 		t.Fatal("expected a new daemonCancel to be installed")
 	}
 	newCancel() // stop the real loop goroutine startDaemonLoop just spawned
+
+	// runDaemonLoop's immediate first cycle (see its own doc comment) isn't
+	// gated on ctx, so it still runs (and still touches cfg.VaultPath,
+	// under t.TempDir()) even though the loop was cancelled above -
+	// without waiting for it to actually finish, it can still be running
+	// when this test returns and t.TempDir()'s cleanup tries to remove the
+	// same tree out from under it. A short grace period lets the goroutine
+	// actually get scheduled and acquire cycleMu; the bounded poll after
+	// it then waits for that cycle to release cycleMu (i.e. finish) no
+	// matter how long the real rclone/network calls inside it take, up to
+	// a generous timeout.
+	time.Sleep(20 * time.Millisecond)
+	deadline := time.Now().Add(5 * time.Second)
+	for !tr.cycleMu.TryLock() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the daemon loop's background cycle to finish")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	tr.cycleMu.Unlock()
 }
 
 func TestStopDaemonLoop_CancelsAndClears(t *testing.T) {
@@ -478,6 +505,18 @@ func TestVaultNeedsAutoMigration(t *testing.T) {
 			data:    gui.SettingsFormData{VaultPath: unmanagedPath, SyncMode: "icloud"},
 			want:    false,
 		},
+		{
+			name:    "first-time setup, gdrive_desktop mode selected, outside the managed folder",
+			prevCfg: &config.Config{},
+			data:    gui.SettingsFormData{VaultPath: unmanagedPath, SyncMode: "gdrive_desktop"},
+			want:    false,
+		},
+		{
+			name:    "already-locked to gdrive_desktop mode, outside the managed folder",
+			prevCfg: &config.Config{VaultPath: unmanagedPath, SyncMode: config.SyncModeGDriveDesktop},
+			data:    gui.SettingsFormData{VaultPath: unmanagedPath, SyncMode: "gdrive_desktop"},
+			want:    false,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -515,6 +554,13 @@ func TestLockedSyncMode(t *testing.T) {
 			prevCfg: &config.Config{VaultPath: "/v", SyncMode: config.SyncModeDrive},
 			data:    gui.SettingsFormData{SyncMode: "icloud"},
 			want:    config.SyncModeDrive,
+		},
+		{name: "first-ever save, gdrive_desktop selected", prevCfg: nil, data: gui.SettingsFormData{SyncMode: "gdrive_desktop"}, want: config.SyncModeGDriveDesktop},
+		{
+			name:    "already locked to gdrive_desktop, form somehow carries drive",
+			prevCfg: &config.Config{VaultPath: "/v", SyncMode: config.SyncModeGDriveDesktop},
+			data:    gui.SettingsFormData{SyncMode: "drive"},
+			want:    config.SyncModeGDriveDesktop,
 		},
 	}
 	for _, c := range cases {
@@ -607,6 +653,14 @@ func TestShouldShowICloudMigrationReminder(t *testing.T) {
 		cfg := &config.Config{VaultPath: unmanagedPath, SyncMode: config.SyncModeICloud}
 		if shouldShowICloudMigrationReminder(tr.cfgMgr, cfg) {
 			t.Error("expected no reminder for an iCloud-mode device - its Vault belongs in iCloud by design")
+		}
+	})
+
+	t.Run("gdrive_desktop mode, unmanaged Vault - suppressed regardless", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		cfg := &config.Config{VaultPath: unmanagedPath, SyncMode: config.SyncModeGDriveDesktop}
+		if shouldShowICloudMigrationReminder(tr.cfgMgr, cfg) {
+			t.Error("expected no reminder for a gdrive_desktop-mode device - its Vault belongs in the Google Drive desktop app's synced folder by design")
 		}
 	})
 
@@ -734,6 +788,13 @@ func TestBuildSaveConfig(t *testing.T) {
 			data:         gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60},
 			wantBridge:   "",
 			wantSyncMode: config.SyncModeICloud,
+		},
+		{
+			name:         "first-ever save, gdrive_desktop mode selected",
+			prevCfg:      nil,
+			data:         gui.SettingsFormData{VaultPath: "/vaults/A", RcloneRemote: "ObsidianVault", RclonePath: "Vault", IntervalSeconds: 60, SyncMode: "gdrive_desktop"},
+			wantBridge:   "",
+			wantSyncMode: config.SyncModeGDriveDesktop,
 		},
 	}
 	for _, c := range cases {

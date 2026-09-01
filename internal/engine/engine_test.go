@@ -262,6 +262,53 @@ func TestSyncEngine_RunCycle_ICloudMode_SkipsSyncWhenSupersededByAnotherPrimary(
 	}
 }
 
+// TestSyncEngine_RunCycle_GDriveDesktopMode_DoesNothing guards spec
+// 1.6.10's Mode D: the Vault already lives inside a folder the user's own
+// Google Drive desktop app syncs, so this app must never touch rclone, log
+// files, or role election in this mode - running its own sync on top of
+// the Google Drive desktop app's would mean two independent daemons
+// touching the same files.
+func TestSyncEngine_RunCycle_GDriveDesktopMode_DoesNothing(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+	if err := os.MkdirAll(vaultPath, 0755); err != nil {
+		t.Fatalf("failed to create vault dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(vaultPath, "note.md"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("failed to seed a note: %v", err)
+	}
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:       vaultPath,
+		RcloneRemote:    "ObsidianVault",
+		RclonePath:      "MyVault",
+		IntervalSeconds: 120,
+		SyncMode:        config.SyncModeGDriveDesktop,
+	})
+
+	mock := newMockDriveRunner()
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	if mock.syncCalled {
+		t.Error("expected Mode D to never call rclone Sync")
+	}
+	if len(mock.copyCalls) != 0 {
+		t.Errorf("expected Mode D to never call rclone Copy either, got %+v", mock.copyCalls)
+	}
+	if role, err := cfgMgr.LoadRole(); err != nil || role != "" {
+		t.Errorf("expected Mode D to never elect a Primary/Secondary role, got role=%q, err=%v", role, err)
+	}
+	if status, err := cfgMgr.LoadDriveSyncStatus(); err != nil || status != nil {
+		t.Errorf("expected no drive sync status to ever be recorded in Mode D, got %v, err %v", status, err)
+	}
+}
+
 // failingDriveRunner is mockDriveRunner with Sync forced to fail, for
 // exercising RunCycle's drive-sync-failure path.
 type failingDriveRunner struct {

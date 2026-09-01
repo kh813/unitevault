@@ -1,14 +1,21 @@
 # UniteVault
 
-Obsidian Vault（Markdownファイル群）を Mac / Windows（複数台可）/ iPhone・iPad 間で安全に利用するための同期・バックアップツールです。利用形態に応じて**3つの同期モード**（iCloud中心・Google Drive中心｜複数PC・Google Drive中心｜単一PC）からセットアップ時に1つを選びます。判断基準はシンプルで、**iPhone/iPadでObsidianを使うかどうか**です。詳しくは下記「[対応する端末構成パターン](#対応する端末構成パターン)」を参照してください。
+Obsidian Vault（Markdownファイル群）を Mac / Windows（複数台可）/ iPhone・iPad 間で安全に利用するための同期・バックアップツールです。利用形態に応じて**4つの同期モード**（iCloud中心・Google Drive中心｜複数PC・Google Drive中心｜単一PC・Google Drive中心｜デスクトップアプリ利用）からセットアップ時に1つを選びます。判断基準はシンプルで、**iPhone/iPadでObsidianを使うか**、そして**Vaultが既にGoogle Driveデスクトップアプリの同期フォルダ内にあるか**です。詳しくは下記「[対応する端末構成パターン](#対応する端末構成パターン)」を参照してください。
 
-> **Vaultフォルダの置き場所は、選ぶ同期モードによって異なります。** iPhone/iPadと連携しない**B・Cモード（Google Drive中心）**では、PC上のローカル専用フォルダに置きます（推奨: `~/Obsidian/Vault`）。iCloud Drive上に直接置く必要はありません（むしろ非推奨です。下記「なぜB・CモードではVaultをiCloudの外に置くのか」参照）。既にVaultをiCloud Drive上で使っていてB・Cモードを選ぶ場合は、初回起動時に案内ダイアログが表示されるか、Settings画面の **[ Migrate Vault to Local Folder... ]** ボタンから、ローカルフォルダへの移行（Obsidianの設定更新込み）を自動で行えます（手順5参照）。逆に**Aモード（iCloud中心）**では、VaultはObsidian専用のiCloudコンテナ内に置いたままにします（iPhone/iPadとの一貫性をAppleのiCloudに任せるため、あえてこの場所を使います）。
+> **Vaultフォルダの置き場所は、選ぶ同期モードによって異なります。** iPhone/iPadと連携せず、Google Driveデスクトップアプリも使わない**B・Cモード（Google Drive中心）**では、PC上のローカル専用フォルダに置きます（推奨: `~/Obsidian/Vault`）。iCloud Drive上に直接置く必要はありません（むしろ非推奨です。下記「なぜB・CモードではVaultをiCloudの外に置くのか」参照）。既にVaultをiCloud Drive上で使っていてB・Cモードを選ぶ場合は、初回起動時に案内ダイアログが表示されるか、Settings画面の **[ Migrate Vault to Local Folder... ]** ボタンから、ローカルフォルダへの移行（Obsidianの設定更新込み）を自動で行えます（手順5参照）。**Aモード（iCloud中心）**では、VaultはObsidian専用のiCloudコンテナ内に置いたままにします（iPhone/iPadとの一貫性をAppleのiCloudに任せるため、あえてこの場所を使います）。**Dモード（Google Drive・デスクトップアプリ利用）**では、Vaultは既にあるGoogle Driveデスクトップアプリの同期フォルダ内に置いたままにします（PC間の一貫性をそのアプリに任せるため）。
+
+## このアプリの目的
+
+UniteVaultは、**Obsidianの有償同期サービス（Obsidian Sync）を回避する目的のツールではありません**。会社のセキュリティポリシーなどにより利用できるクラウドストレージサービスが制限されている環境でも、その環境で許可されているクラウドストレージ（iCloud、Google Driveなど）を使ってObsidianを日常的に活用できるようにすることが目的です。
+
+現在の実装は、作成者が実機で検証できる**iCloudとGoogle Drive向けに初期実装**しています。ただし、Google Driveとの同期には[rclone](https://rclone.org/)を利用しているため、rcloneが対応している他のクラウドストレージ（Dropbox、OneDriveなど多数）にも、将来的に同期対象を広げられる可能性があります。
 
 ## 特徴
 
-- **3つの同期モードから選択**: iPhone/iPadと連携したい場合はiCloud中心モード（Aモード）、PC間のみの同期でよければGoogle Drive中心モード（複数PC＝Bモード／単一PC＝Cモード）を選べます。セットアップ時に1つ選ぶと、以降は変更するのに設定リセットが必要です
+- **4つの同期モードから選択**: iPhone/iPadと連携したい場合はiCloud中心モード（Aモード）、Google Driveデスクトップアプリの同期フォルダに既にVaultがある場合はGoogle Drive（デスクトップアプリ）モード（Dモード）、それ以外はGoogle Drive中心モード（複数PC＝Bモード／単一PC＝Cモード）を選べます。セットアップ時に1つ選ぶと、以降は変更するのに設定リセットが必要です
 - **B・Cモード：独自ログと3-way merge**: 複数端末が同じファイルを編集した場合の競合を、`git merge-file`を使って自動検出・マージ。PC間の同期・共有ハブはGoogle Driveが担います
 - **Aモード：iCloudにすべて任せる**: Mac/Windows/iPhone/iPad間の内容の一貫性はAppleのiCloudが担うため、3-way merge・Vault Migrationは不要です。ただしGoogle Driveへの公開はPrimary機のみが行います（Bモードと同じPrimary/Secondary固定ハブ方式）——Google Driveを外部ツール（分析用途等）が読み込む単一の正本として使えるようにするためです
+- **Dモード：Google Driveデスクトップアプリにすべて任せる**: PC間の内容の一貫性はGoogle Driveデスクトップアプリ自身が担うため、このアプリは何もしません（rclone同期もPrimary/Secondaryもいずれも無し）。このアプリ自身の同期をGoogle Driveデスクトップアプリの同期に重ねて動かすと、同じファイルを2つの独立した同期デーモンが同時に触ることになるため、あえて手を出しません
 - **単一ウィンドウの設定画面**: メニューバー（Mac）／タスクトレイ（Windows）に常駐し、Settings画面から設定・状態確認・Google Drive接続をすべて行えます
 - **OS標準のファイル監視 + 定期フルスキャン**: 常駐プロセスとして、変更検出を軽量化しつつ、監視の取りこぼしも定期フルスキャンで補います
 - **Git / rclone 自動インストール**: 未インストールでもSettings画面のボタンから自動取得できます（いつ・どちらが必要かは後述）
@@ -18,21 +25,22 @@ Obsidian Vault（Markdownファイル群）を Mac / Windows（複数台可）/ 
 
 - **macOS**（Apple Silicon）または **Windows 10/11**
 - Obsidian Vault（新規でも、既存のものでも可）
-- Google アカウント（すべてのモードで、バックアップ・PC間同期に使用）
+- Google アカウント（A・B・Cモードで、バックアップ・PC間同期に使用。Dモードのみ、このアプリ自体はGoogleアカウントを必要としません）
 - iPhone/iPadでもObsidianを使いたい場合は、**iCloud中心モード（Aモード）を選びます**（iCloud、WindowsではiCloud for Windowsが必要）。PC間のみで良ければiCloudは不要です
-- Git・rcloneは事前インストール不要です（後述の手順内でアプリが自動的にインストールを案内します）
+- 既にGoogle Driveデスクトップアプリの同期フォルダ内にVaultがある場合は、**Google Drive（デスクトップアプリ）モード（Dモード）を選びます**（Google Driveデスクトップアプリ自体は各PCに導入済みであることが前提です）
+- Git・rcloneは事前インストール不要です（後述の手順内でアプリが自動的にインストールを案内します。Dモードではそもそも使いません）
 
-iPhone/iPad側は追加インストール不要です。Aモードを選んだ場合、通常のiCloud同期のみで完結します。
+iPhone/iPad側は追加インストール不要です。Aモードを選んだ場合、通常のiCloud同期のみで完結します。Dモードにはそもそも、iPhone/iPad連携という概念自体がありません。
 
 ### なぜB・CモードではVaultをiCloudの外に置くのか
 
-ObsidianがVaultファイルへ直接書き込むのと、iCloudの内部デーモンによる同期・独自コンフリクト処理が、同じファイルに対して同時に働き得ることが分かっています。データが失われることはありませんが（iCloud側はオフライン分岐時に両方のバージョンを「ファイル名 2.md」のような別名で保持します）、このアプリの3-way mergeとは別に、意図しない重複ファイルが残る可能性があります。B・Cモードはこのリスクを避けるため、Vault本体を常にiCloudの外（ローカル専用フォルダ）に置きます。
+ObsidianがVaultファイルへ直接書き込むのと、iCloudの内部デーモンによる同期・独自コンフリクト処理が、同じファイルに対して同時に働き得ることが分かっています。データが失われることはありませんが（iCloud側はオフライン分岐時に両方のバージョンを「ファイル名 2.md」のような別名で保持します）、このアプリの3-way mergeとは別に、意図しない重複ファイルが残る可能性があります。B・Cモードはこのリスクを避けるため、Vault本体を常にiCloudの外（ローカル専用フォルダ）に置きます。同じ理由で、Dモードでこのアプリ自身のrclone同期を動かさないのも、Google Driveデスクトップアプリという別の同期デーモンとの競合を避けるためです。
 
 Aモードは、iPhone/iPadとの連携を優先し、このリスクを承知の上で選ぶモードです（利用者の明示的な選択として、1.6.10節でこの設計判断を説明しています）。詳しい経緯は [unitevault-spec.md](unitevault-spec.md) の1.6.1節・1.6.10節・3.6.1.6節を参照してください。
 
 ## 対応する端末構成パターン
 
-上記3つの同期モードが、それぞれどんな構成になるかを図で示します（Settings画面でのモード選択手順は後述の「[はじめての方向け・セットアップ手順](#はじめての方向け・セットアップ手順)」を参照）。
+上記4つの同期モードが、それぞれどんな構成になるかを図で示します（Settings画面でのモード選択手順は後述の「[はじめての方向け・セットアップ手順](#はじめての方向け・セットアップ手順)」を参照）。
 
 ### Aモード：iCloud中心（iPhone/iPad と同期する場合は必須）
 
@@ -51,6 +59,8 @@ flowchart LR
 ```
 
 Mac/Windows間・iPhone/iPad間の内容の一貫性はすべてAppleのiCloudに任せるため、3-way mergeは行いません。ただしGoogle Driveへの公開はBモードと同じPrimary/Secondary固定ハブ方式で、**Primaryのみ**が行います（詳細: spec 1.6.10節）。複数端末が独立に書き込むと、Google Drive上のバックアップがどちらの端末の状態を反映しているか分からなくなる（iCloudの収束前に片方が上書きしてしまう等）ため、書き込み元を常に1台に固定しています。
+
+iCloudは、同じファイルをオフラインで別々に編集するなど、自動で統合できない変更を検出すると、`ノート名 (Macの競合コピー).md`や`ノート名 (1).md`のような別名の複製ファイルを作成することがあります。Aモードでは、Settings画面の「Obsidian Vault」セクションにある **[ Check for Conflicts and Merge... ]** ボタンから、このような複製ファイルを検出して元ファイルとマージできます（手動実行のみ、バックグラウンドでは自動的に行いません）。詳細は下記「iCloudの競合コピーが作られた場合」を参照してください。
 
 ### Bモード：Google Drive中心・複数PC（iPhone/iPad連携なし）
 
@@ -74,6 +84,20 @@ flowchart LR
 ```
 
 Bモードの縮退形です。Secondaryが存在しないため、実質的に一方向バックアップと同じ動きになります。
+
+### Dモード：Google Drive中心・デスクトップアプリ利用（iPhone/iPad連携なし）
+
+```mermaid
+flowchart LR
+    PC1["Mac または Windows"]
+    PC2["Mac または Windows<br/>（複数台可）"]
+    DRIVE[("Googleドライブ<br/>デスクトップアプリの<br/>同期フォルダ（Vault本体）")]
+
+    PC1 <-->|Obsidian直接編集| DRIVE
+    PC2 <-->|Obsidian直接編集| DRIVE
+```
+
+Vaultが既にGoogle Driveデスクトップアプリの同期フォルダ内にあり、PC間の内容の一貫性をそのアプリ自身に任せる構成です。UniteVaultはこのモードでは**何もしません**（rclone同期もPrimary/Secondaryの選出も行いません）。UniteVault自身のrclone同期をGoogle Driveデスクトップアプリの同期に重ねて動かすと、同じファイルを2つの独立した同期デーモンが同時に触ることになり、意図しない重複ファイルや競合が起きかねないため、あえて手を出さない設計です（詳細: spec 1.6.10節）。
 
 ### （既存ユーザー向け参考）Aモード実装前の代替構成
 
@@ -127,12 +151,13 @@ flowchart LR
 
 ### 4. 同期モードを選ぶ
 
-「Sync Mode」セクションに、2つの選択肢がチェックボックスで表示されます（初回セットアップ時のみ表示され、**一度保存すると変更するには後述の「Reset Configuration」が必要**です）。
+「Sync Mode」セクションに、3つの選択肢がチェックボックスで表示されます（初回セットアップ時のみ表示され、**一度保存すると変更するには後述の「Reset Configuration」が必要**です）。
 
 - **Google Drive-centric**（Google Drive中心）: 「Mac/Windowsのみ（iPhone/iPadでObsidianを使わない場合）」— Bモード（複数PC）・Cモード（単一PC）に相当します
 - **iCloud-centric**（iCloud中心）: 「iPhone/iPadでObsidianを使い、Windows/Macと同期する場合（この場合は必須）」— Aモードに相当します
+- **Google Drive (desktop app)**（Google Drive・デスクトップアプリ）: 「Vaultが既にGoogle Driveデスクトップアプリの同期フォルダ内にある場合（Mac/Windowsのみ、iPhone/iPad非対応）」— Dモードに相当します
 
-どちらを選ぶべきかは、上記「[対応する端末構成パターン](#対応する端末構成パターン)」の図と判断基準（iPhone/iPadでObsidianを使うかどうか）を参照してください。デフォルトは Google Drive-centric（Bモード）です。
+どちらを選ぶべきかは、上記「[対応する端末構成パターン](#対応する端末構成パターン)」の図と判断基準（iPhone/iPadでObsidianを使うか、Vaultが既にGoogle Driveデスクトップアプリの同期フォルダ内にあるか）を参照してください。デフォルトは Google Drive-centric（Bモード）です。
 
 ### 5. Obsidian Vaultを指定
 
@@ -154,9 +179,11 @@ flowchart LR
 
 **iCloud-centric（Aモード）を選んだ場合：** Vaultフォルダには、Obsidian自身の「iCloud」ストレージオプションが作成した、iCloud Drive内のフォルダを選びます（Mac: `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/<Vault名>`、Windows: `%USERPROFILE%\iCloudDrive\iCloud~md~obsidian\<Vault名>`）。まだObsidianでVaultを作っていない場合は、先にObsidian側で「iCloud」を保存場所に選んでVaultを作成してから、ここで同じフォルダを選んでください。この場合、上記のVault Migrationは一切発生しません（Vaultは常にこの場所のままです）。
 
+**Google Drive (desktop app)（Dモード）を選んだ場合：** Vaultフォルダには、Google Driveデスクトップアプリの同期フォルダ内にある（または新規に作る）Vaultフォルダを選びます。固定の推奨パスは無く、Google Driveデスクトップアプリの設定次第です（例: Mac の `~/Library/CloudStorage/GoogleDrive-<アカウント>/マイドライブ/...`、Windows の `G:\マイドライブ\...` など、環境により異なります）。この場合もVault Migrationは一切発生しません。
+
 ### 6. Google Driveへの接続
 
-「rclone」セクションの **[ Configure Google Drive Remote... ]** ボタンを押します（すべてのモードで必要です。iCloud-centricでもGoogle Driveへのバックアップは行われます）。
+**Google Drive-centric・iCloud-centricの場合：** 「rclone」セクションの **[ Configure Google Drive Remote... ]** ボタンを押します（iCloud-centricでもGoogle Driveへのバックアップは行われます）。
 
 1. 「New Setup (Recommended)」を選択します
 2. ブラウザが自動的に開くので、Googleアカウントでログインし、アクセスを許可します
@@ -166,16 +193,19 @@ flowchart LR
 
 Remote Name・Sync Interval はデフォルト値のままで問題ありません。**Google Drive Target Folder Pathは選択したVaultフォルダ名が自動的に入力される**ので、通常は変更不要です（後述のVault変更時の注意も参照）。
 
+**Google Drive (desktop app)（Dモード）の場合：** この手順自体がありません。「rclone」セクション自体がSettings画面に表示されないため、そのまま次の手順に進んでください。
+
 ### 7. 保存
 
 **[ Save Settings ]** を押します。自動的に以下が行われます。
 
 - 設定の保存（選んだ同期モードはこの時点で確定し、以降変更できません）
-- **Primary / Secondary の自動判定**: Google Drive上に他端末の初期化情報（`PRIMARY_MARKER.json`）が無ければこの端末が Primary、既にあれば Secondary になります。手動で選ぶ必要はありません。両モードで行われますが、役割の中身は異なります。
+- **Primary / Secondary の自動判定**（Google Drive-centric・iCloud-centricのみ）: Google Drive上に他端末の初期化情報（`PRIMARY_MARKER.json`）が無ければこの端末が Primary、既にあれば Secondary になります。手動で選ぶ必要はありません。両モードで行われますが、役割の中身は異なります。
   - **Google Drive-centricの場合：** Primaryはマージ処理・Google Drive/iCloud Bridge同期を担当、Secondaryは編集＋Google Driveへの変更のpush/pullのみ。
   - **iCloud-centricの場合：** Primaryは現在のiCloud管理下Vaultの内容をそのままGoogle Driveへ公開するのみ（マージ処理は無し、内容の一貫性自体はiCloudが担うため）。SecondaryはGoogle Driveに対して一切何もしません（iCloudが自分のVaultを最新に保つのに任せるだけ）。
+  - **Google Drive (desktop app)の場合：** Primary/Secondaryの判定自体がありません。全端末が対等です。
 
-保存が完了すると要約ダイアログが表示され、Settingsウィンドウは閉じます。以降はバックグラウンドで自動的に同期サイクル（デフォルト60秒間隔の共通ティック）が実行されます。Google Drive-centricのPrimaryの場合、Google Drive同期とiCloud Bridge同期は同じティックで両方実行されるのではなく、両方設定されていればティックごとに交互に1つずつ実行されます（実効間隔はおよそこの値の2倍）。片方だけ設定されていれば毎ティック実行されます。iCloud-centricのPrimaryの場合は毎ティック、Google Driveへの公開のみが実行されます。iCloud-centricのSecondaryは、いずれのモードでも同期サイクル自体はバックグラウンドで動き続けますが、何も実行することがありません。
+保存が完了すると要約ダイアログが表示され、Settingsウィンドウは閉じます。以降はバックグラウンドで自動的に同期サイクル（デフォルト60秒間隔の共通ティック）が実行されます。Google Drive-centricのPrimaryの場合、Google Drive同期とiCloud Bridge同期は同じティックで両方実行されるのではなく、両方設定されていればティックごとに交互に1つずつ実行されます（実効間隔はおよそこの値の2倍）。片方だけ設定されていれば毎ティック実行されます。iCloud-centricのPrimaryの場合は毎ティック、Google Driveへの公開のみが実行されます。Secondaryは、いずれのモードでも同期サイクル自体はバックグラウンドで動き続けますが、何も実行することがありません。**Google Drive (desktop app)の場合、全端末が常にこれと同じ（何も実行しない）状態です**——Vaultの同期はGoogle Driveデスクトップアプリ自身が行います。
 
 ### 8. 日常的な使い方
 
@@ -187,7 +217,7 @@ Remote Name・Sync Interval はデフォルト値のままで問題ありませ�
 - **Check for Update...**: 新しいバージョンがGitHub Releasesに公開されていないか確認し、あればダウンロード・自動適用・再起動まで行う（下記参照）
 - **Quit UniteVault**: 終了
 
-**両モードとも：** Primary端末（最初にセットアップした端末がなりますが、Settingsから他の端末へ手動で引き継ぐこともできます）は、Google Driveへの公開を担う役割のため、**定期的に起動しておく**ことを推奨します（起動していない間は、そのバックアップが更新されません。Google Drive-centricの場合は、さらに他端末の変更のマージも止まります）。Secondaryは起動していなくても、他端末の同期そのものには影響しません。
+**Google Drive-centric・iCloud-centricの場合：** Primary端末（最初にセットアップした端末がなりますが、Settingsから他の端末へ手動で引き継ぐこともできます）は、Google Driveへの公開を担う役割のため、**定期的に起動しておく**ことを推奨します（起動していない間は、そのバックアップが更新されません。Google Drive-centricの場合は、さらに他端末の変更のマージも止まります）。Secondaryは起動していなくても、他端末の同期そのものには影響しません。**Google Drive (desktop app)の場合：** UniteVault自体はいつ起動していても・していなくても同期に影響しません（Vaultの同期はGoogle Driveデスクトップアプリが常に行っています）。
 
 ### 9. 2台目以降のPCを追加する
 
@@ -203,7 +233,11 @@ Remote Name・Sync Interval はデフォルト値のままで問題ありませ�
 
 **iCloud-centric（Aモード）の場合：** 追加するPCも同じiCloudアカウントにサインインしていれば、そのPC上のiCloud Drive内に同じVaultフォルダが既に存在するはずです（Apple自身のiCloud同期による）。手順5ではそのフォルダを選び、手順6では1台目と同じGoogleアカウント・同じリモート名を使ってください（B・Cモードと違い、Vaultの中身は既にiCloudから届いているため、「新規に空のフォルダを選ぶ」手順は不要です）。保存すると、Google Drive上に既に `PRIMARY_MARKER.json` が存在するため、自動的に **Secondary** として初期化されます（Google Driveへは何もしませんが、iCloud自体は通常どおり同期され続けます）。
 
+**Google Drive (desktop app)（Dモード）の場合：** 追加するPCも同じGoogle Driveアカウントでデスクトップアプリにサインインしていれば、そのPC上に同じVaultフォルダが既に存在するはずです（Google Driveデスクトップアプリ自身の同期による）。手順5ではそのフォルダを選んでください。手順6（Google Driveへの接続）自体がこのモードには無いので、そのままスキップして手順7で保存すれば完了です。Primary/Secondaryの判定自体が無いため、特別な確認事項はありません。
+
 ### 10. Vaultを変更する場合の注意
+
+> この節はGoogle Drive-centric・iCloud-centricのみ該当します。Google Drive (desktop app)モードはrclone自体を使わないため関係ありません。
 
 Google Driveへのバックアップ公開は`rclone sync`（同期先を同期元と完全一致させるミラー転送）で行われます。そのため、**同期するVaultを別のフォルダに切り替える際、Google Drive Target Folder Pathを前と同じにしたままにすると、次回の同期で以前のVaultのバックアップファイルが削除され、新しいVaultの内容で上書きされます**。
 
@@ -215,10 +249,10 @@ Google Driveへのバックアップ公開は`rclone sync`（同期先を同期�
 
 ## Git と rclone、それぞれいつ必要になるか
 
-Settingsウィンドウの「Status」セクションから、それぞれ未インストールの場合はワンクリックでインストールできます（自動インストールに失敗した場合は公式ダウンロードページへの案内が表示されます）。ただし、実際に必要となる条件は異なります。
+Settingsウィンドウの「Status」セクションから、それぞれ未インストールの場合はワンクリックでインストールできます（自動インストールに失敗した場合は公式ダウンロードページへの案内が表示されます）。ただし、実際に必要となる条件は異なります。**Google Drive (desktop app)モード（Dモード）では、GitもrcloneもSettings画面に表示すらされません**（このモードでは一切使わないため）。
 
 - **Git**: Google Drive-centric（B・Cモード）で、編集端末が **2台以上** あり、同じファイルが競合編集された場合の自動マージにのみ使われます。**Windows/Mac 1台だけでObsidianを使い、Google Driveへバックアップするだけ**（Cモード）や、**iCloud-centric（Aモード、内容の一貫性をAppleのiCloudに任せるため、このアプリ自身は3-way mergeを行わない）** であれば、Gitは一度も使われません。ただし将来的に端末を追加する可能性に備え、初回セットアップ時にインストールしておくことを推奨します（未インストールのままでも動作は継続できます）。
-- **rclone**: すべてのモードで、Google Driveへのバックアップに必須です。加えてGoogle Drive-centricでは複数端末構成でのPrimary/Secondary判定にも使われるため、**バックアップ機能を使わない「同期のみ」構成は現状サポートしていません**。Google Drive-centricのSecondaryにとってGoogle Driveは他端末の変更を受け取る唯一の経路であるため、未設定のままだとSettings画面に **⚠ Google Drive not configured** という警告が表示されます。
+- **rclone**: Google Drive-centric・iCloud-centricで、Google Driveへのバックアップに必須です。加えてGoogle Drive-centricでは複数端末構成でのPrimary/Secondary判定にも使われるため、**バックアップ機能を使わない「同期のみ」構成は現状サポートしていません**。Google Drive-centricのSecondaryにとってGoogle Driveは他端末の変更を受け取る唯一の経路であるため、未設定のままだとSettings画面に **⚠ Google Drive not configured** という警告が表示されます。
 
 詳細な設計根拠は [unitevault-spec.md](unitevault-spec.md) の3.6.3.1節を参照してください。
 
@@ -234,11 +268,29 @@ Settingsウィンドウの「Status」セクションから、それぞれ未イ
 
 ---
 
+## iCloudの競合コピーが作られた場合
+
+**Aモード（iCloud中心）のみ該当します。**
+
+iCloudは、複数端末で同じファイルをオフライン中に別々に編集するなど、自動で統合できない変更を検出すると、そのファイルを上書きする代わりに、`ノート名 (Macの競合コピー).md`や`ノート名 (1).md`のような、**括弧付きの接尾辞が付いた別名の複製ファイル**を作成することがあります（元の`ノート名.md`はそのまま残ります）。
+
+これに気づいたら、Settings画面の「Obsidian Vault」セクションにある **[ Check for Conflicts and Merge... ]** ボタンを押してください（Aモードの端末でVaultが設定済みの場合のみ表示されます）。
+
+- Vault内を走査し、この命名パターンに一致し、かつ元ファイルが実在するペアのみを対象にします（`Meeting (draft).md`のような、括弧を使った正規のノート名で元ファイルが無いものは対象になりません）。
+- 内容が完全に一致している場合は、複製ファイルを自動的に削除するだけで完了します。
+- 内容に差異がある場合は、既存の「Resolve Conflicts...」と同じ画面・操作感で、どちらの内容を残すか選べます（選ぶと、複製ファイルも自動的に削除されます）。
+- **自動実行はしません**（同期サイクル中に勝手に行われることはありません）。ボタンを押した時だけ実行される、手動操作です。
+
+このチェックは常に実行しておく必要はなく、iCloud側で競合コピーが実際に作られたのに気づいたときだけ実行すれば十分です。Bモード・Cモード・Dモードにはこの機能はありません（Bモード・Cモードは元々このアプリ自身が競合を検出・マージするため発生せず、Dモードは今のところ対応していません）。
+
+---
+
 ## トラブルシューティング
 
 - **Git/rcloneのインストールを促すダイアログが毎回出る**: 未初期化のままGit/rcloneが未検出の場合、起動のたびに案内ダイアログが表示されます。表示不要な場合は「Don't show this again」にチェックを入れてください。
-- **「Move Your Vault to UniteVault's Local Folder?」ダイアログが出る**: Google Drive-centric（B・Cモード）を選んだ端末で、現在のVaultパスがUniteVaultの管理フォルダ（`~/Obsidian/`）の外にあると検出されました（iCloud Drive、Obsidian専用iCloudコンテナ、Google Drive Desktopの同期フォルダなど）。「Migrate Now」で自動移行するか、「Don't Show This Again」で今後表示しないようにできます（手順5参照）。iCloud-centricを選んだ端末ではこのダイアログは出ません（Vaultを意図的にiCloud内に置き続けるモードのため）。
+- **「Move Your Vault to UniteVault's Local Folder?」ダイアログが出る**: Google Drive-centric（B・Cモード）を選んだ端末で、現在のVaultパスがUniteVaultの管理フォルダ（`~/Obsidian/`）の外にあると検出されました（iCloud Drive、Obsidian専用iCloudコンテナ、Google Drive Desktopの同期フォルダなど）。「Migrate Now」で自動移行するか、「Don't Show This Again」で今後表示しないようにできます（手順5参照）。iCloud-centric・Google Drive (desktop app)を選んだ端末ではこのダイアログは出ません（どちらもVaultを意図的にその場所へ置き続けるモードのため）。
 - **Secondaryとして追加した端末でVaultが空のまま**: 最初の同期サイクル（デフォルト最大60秒）を待つか、メニューの「Sync Now」を実行してください（手順9参照。Google Drive-centricのみ該当）。
+- **Google Drive (desktop app)モードで、Settings画面にGit/rcloneのStatus・rcloneセクション・Device roleが表示されない**: 想定通りの動作です。このモードではGit・rcloneのいずれも使わず（同期はGoogle Driveデスクトップアプリ自身が行う）、Primary/Secondaryの区別も存在しないため、これらの項目自体を表示しません。
 - **同期モードを選び間違えた**: モードは保存すると変更できません。**[ Reset Configuration ]**（下記参照）でローカル設定をクリアしてから、Settingsウィンドウを開き直して選び直してください（Vault本体やGoogle Drive上のバックアップファイル自体は削除されません）。
 - **設定をやり直したい**: Settingsウィンドウ内の **[ Reset Configuration ]** ボタンから、ローカルの設定・端末役割情報（選んだ同期モードを含む）をクリアして初期状態に戻せます（誤操作防止のため、タスクトレイメニューには配置していません）。
 - **Google Driveの接続をやり直したい（別のGoogleアカウントに変更したい等）**: rcloneセクションの **[ Remove Remote Configuration... ]** ボタン（リモートが設定済みの場合のみ表示）から、確認の上でrclone側の認証情報を削除できます。Google Drive上のバックアップファイル自体は削除されません。削除後、改めて **[ Configure Google Drive Remote... ]** から設定し直せます。
@@ -273,7 +325,7 @@ GUIを使わず、常駐デーモンとして手動で動かしたい場合は�
 
 CLIを使う場合もGitのインストールは事前に必須です（`init`/`run`は起動時にGit未検出だとエラー終了します。rcloneは未検出でも自動ダウンロードされます）。
 
-`init`は常にGoogle Drive-centric（B・Cモード）で初期化します。iCloud-centric（Aモード）を使いたい場合は、GUIのSettingsウィンドウから同期モードを選んでください。
+`init`は常にGoogle Drive-centric（B・Cモード）で初期化します。iCloud-centric（Aモード）やGoogle Drive (desktop app)（Dモード）を使いたい場合は、GUIのSettingsウィンドウから同期モードを選んでください。
 
 ## ドキュメント
 

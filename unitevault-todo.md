@@ -199,12 +199,12 @@
 
 ### Phase 14：設定・データモデルの拡張
 
-- [ ] Vaultのデフォルト置き場所をローカル専用フォルダに変更（Mac: `~/Obsidian/Vault`、Windows: `%USERPROFILE%\Obsidian\Vault`）。iCloud配下に置く運用は禁止しない（自己責任で可）が、推奨・デフォルトではなくする
+- [x] Vaultのデフォルト置き場所をローカル専用フォルダに変更（Mac: `~/Obsidian/Vault`、Windows: `%USERPROFILE%\Obsidian\Vault`）。`bootstrap.ManagedVaultParentDir`として実装済み。iCloud配下に置く運用も禁止しない（自己責任、B・Cモードのまま使う分には非推奨の案内が出る）
 - [x] `config.Config`に新フィールド追加：`ICloudBridgePath`（任意。空文字列＝iPhone連携なし・Google Drive同期のみ）
-- [ ] `config.Config`に新フィールド追加：`TickIntervalSeconds`（デフォルト60秒）。既存の`IntervalSeconds`は「Google Drive同期・iCloud Bridge同期それぞれの実効間隔」の目安表示用に意味を変更するか、廃止して`TickIntervalSeconds`に一本化するかを実装時に決定する
-- [ ] iCloud Bridge用の仮想デバイスIDの生成・永続化（`icloud_bridge_device_id`、本体の`device_id`とは別に1つ、Primary機のみが持つ）— Phase 15（継続的なブリッジ同期）着手時に実施。現時点のVault Migration機能は初回シードコピーのみで、継続的な仮想デバイスとしての扱いはまだ無い
+- [x] ~~`config.Config`に新フィールド追加：`TickIntervalSeconds`~~ → **不採用、別方式で解決済み。** 実装時、フィールドを分けるのではなく既存の`IntervalSeconds`（共通ティック間隔）1つのまま、Primary側でGoogle Drive同期とiCloud Bridge同期をティックごとに交互実行する方式（`primaryExternalTasks`、1.6.5節）を採用した。これにより新フィールドを追加する必要自体が無くなった
+- [x] iCloud Bridge用の仮想デバイスIDの生成・永続化（`icloud_bridge_device_id`、本体の`device_id`とは別に1つ）：`config.ConfigManager.GetOrCreateBridgeDeviceID`として実装済み（Phase 15参照。当初想定の「Primary機のみ」から、その後Bridge読み取りをSecondaryにも拡張したため、両役割で使われる）
 - [x] **Vault Migration機能を先行実装**（Settings画面の「Migrate Vault to Local Folder...」ボタン）：既存Vaultフォルダの選択（OS標準ダイアログ）→ ローカル標準フォルダへの移動（`bootstrap.MoveVaultFolder`、同一ボリューム内はrename、クロスボリュームはcopy+delete）→ Obsidian自身のvault一覧（`obsidian.json`）のベストエフォート更新（`internal/obsidianconfig`、更新前にバックアップ作成）→ iCloud Driveが検出できればブリッジフォルダへの初回シードコピー（`bootstrap.ICloudDriveRoot`/`CopyDirRecursive`）→ 既存の`saveSettingsConfirmed`（remote未設定なら設定を促す・`InitializeNode`・デーモンループ起動）へ引き継ぎ、という一連の流れとして実装済み。**ただし、iCloud Bridgeは今のところ「移行時の初回シードコピー」のみ**で、その後の継続的な双方向同期・マージへの組み込みは未実装（Phase 15で行う）
-- [ ] **コンパイル確認**：実施済み（Vault Migration機能の追加分について。Phase 14の残り項目は引き続き未着手）
+- [x] **コンパイル確認**：実施済み（Vault Migration機能の追加分について。Phase 14の残り項目は、以降のPhaseで完了・不採用いずれかとして決着した）
 
 ### Phase 15：iCloud Bridge機構の実装（継続的な双方向同期。実装済み）
 
@@ -263,7 +263,7 @@
 - [x] 新機構全体の統合テスト（`internal/engine/integration_test.go`、Google Drive同期のみ／iCloud Bridge／両方、の3パターン）：実際にファイルシステムを操作する（呼び出し記録のみのモックではない）偽のGoogle Driveリモート（`fsDriveRunner`）を新設し、複数の実`SyncEngine`インスタンス間で実際にコンテンツが収束することを検証。**このテストの作成中に、既存の呼び出し記録型モックでは検出できなかった重大なバグを2件発見・修正した：**
   - `mergeAndTrackConflicts`が「変更したデバイスが1台のみ」のパスを常にスキップしていたため、Secondary（またはiCloud Bridge仮想デバイス）だけが行った変更がPrimaryのVaultへ一切反映されないバグ（`applySingleDeviceChange`で修正。詳細は3.3節参照）。Google Drive中心方式ではこれがSecondaryの変更をPrimaryへ伝える唯一の経路だったため、実害のあるバグだった。
   - `MirrorVaultToBridge`が「Vaultに存在しない」というだけでBridge側のファイルを削除していたため、iPhoneが作ったばかりでまだデバウンス確定していない新規ファイルが、確定前のミラー実行で誤って削除され、二度とVaultへ届かないバグ（ブリッジ自身の確定済みスキャン状態にあるパスのみ削除するよう修正。詳細は1.6.3節参照）。
-- [ ] Windows/Macでの実機検証：自動テストではカバーできない、実際のGoogle Driveアカウント・複数の実機・iPhoneを使った検証はまだ行っていない。
+- [x] Windows/Macでの実機検証：Phase 19時点では未実施だったが、その後の実機テスト（実際のMac/Windows複数台・Google Driveアカウント・iPhone）を通じて、本ファイル各所の「追記」に記録した通り多数の実害バグを発見・修正済み（N-way mergeの入れ子破損、Secondaryのpullレース、Windows cmd.exeフラッシュ、Vault MigrationのiCloud競合、AモードのPrimary/Secondary設計変更等）。
 - [x] **コンパイル確認・フルテスト**：`go build ./...` → `go vet ./...` → `go test ./...`、Windowsクロスコンパイル確認、いずれも成功。
 
 **追記：ブックキーピング用ディレクトリを`_sync/`から`.sync/`へ改名（実装済み、spec 1.6.9節）。** 実機での動作確認中、Obsidianのファイルエクスプローラーに`_sync`フォルダがそのまま見えてしまい、ユーザーが誤って操作しかねないという指摘を受けて対応。Obsidianは`.obsidian`や`.git`同様、ドット始まりのフォルダをデフォルトで自動的に隠す（ユーザー側で何も設定不要）ため、`internal/syncdir`パッケージで名前を一元管理し、`.sync`へ変更した。旧`_sync/`からの自動移行処理は、この時点でテスト環境のデバイスしか使っていなかった（実運用データが無かった）ため、コード量を抑える判断で実装しなかった（ユーザー指示により、実装済みだった移行コード一式を削除）。
@@ -310,23 +310,41 @@
 - 両端末がiCloud Bridgeを持つ構成（spec 2.1節Case 1/2/6）で発生する、Secondary経由の無駄な同一内容の往復（Primaryが公開→AppleのiCloud同期でSecondaryへ反映→Secondary自身のBridgeスキャンが「新しい変更」として誤検出→Google Drive経由でPrimaryへ送り返し）を抑制する機能（実害はないため優先度は低い）
 - 同期モード（Phase 20・spec 1.6.10節）を、セットアップ後に切り替える機能（v1では非対応、切り替えたい場合はReset Configurationからのやり直しで対応）
 
-## Phase 20：マルチモード方式への発展（設計フェーズ）
+## Phase 20：マルチモード方式への発展（A・B・C・D全モード実装済み）
 
 **背景：** Phase 14〜19（1.6節）で構築した「Google Drive中心＋iCloud Bridge」の統合方式は、実機テストを重ねるうちに、「PC間同期」と「iPhone/iPad連携」を単一の仕組みで両立させようとすること自体が複雑さ・不具合の主な発生源になっていることが判明した（N-way mergeの入れ子破損、Secondaryのpullレース、Bridgeの読み書き非対称性による無駄な往復、`~/Obsidian/`とiCloud上のVaultのどちらを開けばいいか分からない利用者の混乱、等）。ユーザーからの提案により、セットアップ時に3つの同期モード（A：iCloud中心、B：Google Drive中心・複数PC、C：Google Drive中心・単一PC）から1つを選ぶ方式へ発展させることにした。設計の詳細はspec 1.6.10節・2.1節・3.1節を参照。
 
 - [x] セットアップ画面（Settings Window / Setup Wizard）にモード選択UIを追加
 - [x] Aモード（iCloud中心）の実装：
   - [x] Vault Migration・iCloud Bridge関連の仕組み（`ManagedVaultParentDir`・`SeedICloudBridge`・`MirrorVaultToBridge`・`ScanBridgeAndLog`等）を経由しない、専用の同期エンジンを実装する（`engine.runICloudModeCycle`。Bモードと同じPrimary/Secondary選出を再利用し、Primaryのみが`rclone sync`でGoogle Driveへ公開する——設計変更の経緯は下記「追記」参照）
-  - [ ] iCloudが作成する`ファイル名 (conflicted copy).md`／`ファイル名 2.md`を検出し、元ファイルと3-way mergeする機能（既存の`internal/merge`を再利用可能）——正規のユーザーノート命名（例:「Chapter 2.md」）と区別できないため、誤検出時に無関係なファイルを壊しかねない。検出ヒューリスティックが固まるまで着手しない（ユーザーへの相談待ち）
+  - [x] iCloudが作成する競合コピーを検出し、元ファイルとマージする機能（`engine.FindICloudConflictCopies`・`engine.CheckAndMergeICloudConflictCopies`、既存の`internal/merge`を再利用）。Settings画面の「Check for Conflicts and Merge...」ボタン（Aモードのみ）から手動実行。詳細・経緯はspec 1.6.10節参照
 - [x] B・Cモードは既存の実装をそのまま使う（追加実装なし、確認済み）
 - [x] モード間の切り替えはv1では非対応（将来のTodo参照）。`cmd/unitevault/main.go`の`lockedSyncMode`が、一度保存されたSyncModeを以後のSaveで上書きさせないことで永続化層でも強制している
-- [ ] README等のユーザーガイドへの詳しい手順の追記は、実装が一段落してから行う（ユーザー指示）
+- [x] Dモード（Google Drive中心・デスクトップアプリ利用）の実装：
+  - [x] `config.SyncModeGDriveDesktop`を追加し、専用の同期エンジンを実装する（`engine.runGDriveDesktopModeCycle`。rclone sync/copy・Primary/Secondary選出のいずれも行わない、完全な無処理）
+  - [x] Settings画面のモード選択を2択→3択に変更（`gui.newExclusiveCheckGroup`、N択に一般化）
+  - [x] Dモードでは、rclone・Gitともに一切不要なため、Statusセクションのインストール状況・Device role行・rcloneセクション自体を非表示にする
+  - [x] Vault Migration・Vault移行リマインダーはAモードと同じ理由で非表示（`syncModeManagesOwnVaultLocation`ヘルパーでA/D共通化）
+  - [x] `saveSettingsConfirmed`で、rcloneリモート設定必須のフロー・Primary/Secondary初期化（`InitializeNode`）をいずれもスキップする
+- [x] README等のユーザーガイドへの詳しい手順の追記は、実装が一段落してから行う（ユーザー指示）→ 実施済み。README.mdをマルチモード構成（対応する端末構成パターンの図、セットアップ手順1〜10のモード別分岐、トラブルシューティング、Git/rclone必要性）に全面対応させた
 
 **追記（実装済み）：** Settings画面にモード選択（RadioGroup、初回セットアップ時のみ表示、Vault保存済みなら以後は読み取り専用ラベル表示に切り替え）を追加した。`gui.SettingsFormData.SyncMode`（"drive"/"icloud"の平文字列、`internal/gui`をconfigパッケージから独立に保つ既存方針を踏襲）で受け渡し、`main.go`の`buildFormData`/`buildSaveConfig`/`lockedSyncMode`/`vaultNeedsAutoMigration`/`saveSettingsConfirmed`を対応させた。AモードではVault Migrationへの自動誘導（`vaultNeedsAutoMigration`）のみ明示的にスキップする（Vaultを意図的にiCloud内に置き続けるモードのため）。
 
 **追記（設計変更・実機テストにより発見、spec 1.6.10節に反映済み）：** 上記の初版実装では、AモードもPrimary/Secondaryの区別なく「各PCが独立してGoogle Driveへバックアップする」設計にしていた（`saveSettingsConfirmed`・`runICloudModeCycle`ともPrimary/Secondary初期化を明示的にスキップ）。これはGoogle Driveを「誰も読み返さない、純粋なバックアップ先」とみなす前提の上でのみ安全だったが、ユーザーから「Google Drive上のバックアップをGemini等の外部分析ツールに読み込ませたい」という実際の利用要件を指摘され、この前提が崩れていることが判明した。複数端末が同じ場所へ独立に書き込むと、iCloudの収束が完了する前に片方が先にpublishした場合、Google Drive上の内容がどちらの端末の状態を反映しているか分からなくなる（`rclone sync`は完全一致ミラーのため、新しい内容が古い内容で上書き・削除されることすらある）。対応として、AモードにもBモードと同じPrimary/Secondary選出（`bootstrap.InitializeNode`・`VerifyPrimaryStatus`・`PRIMARY_MARKER.json`）を導入し、`engine.runICloudModeCycle`はPrimaryの時だけGoogle Driveへ公開するよう変更した（Secondaryは何もしない）。あわせて、Settings画面でAモードでも「Device role」欄・「Promote to Primary...」を表示するよう戻した（初版実装時に「Primary/Secondaryが存在しないモードなので表示すると紛らわしい」という理由で非表示にしていたが、その前提自体が変わったため）。
 
 なお、初版実装時の判断（`saveSettingsConfirmed`でのInitializeNode呼び出しスキップ）には誤解があった：`bootstrap.initAsSecondary`は実際にはGoogle Driveから何もpull/コピーしない（`PRIMARY_MARKER.json`とローカルの空ログファイルを用意するだけ）ため、Secondary初期化自体はAモードでも元々安全だった。今回の再導入にあたり、この誤解も併せて訂正した。
+
+**追記（実機テストにより発見・修正済み）：** 上記のPrimary/Secondary再選出を実機で確認した際、アップデート直後にSettings画面を開くとDevice roleが「該当なし」のまま（実際にはPrimary/Secondaryが選出されているにもかかわらず）と報告された。調査の結果、これは表示ロジックのバグではなく、`cmd/unitevault/main.go`の`runDaemonLoop`（アプリ起動時の常駐ループ）が、起動直後には同期サイクルを実行せず、**設定された同期間隔（デフォルト60秒）が経過して初めて最初のサイクルを実行する**という、以前から存在した実装（`engine.RunDaemon`自体は「起動直後に1回即実行する」という設計だが、実際にアプリが使っているのはそれとは別に手書きされた`runDaemonLoop`で、そちらには即時実行が無かった）によるタイミングの問題だった。Bモード・Cモードでは通常roleが前回セッションからディスクに残っているため目立たなかったが、今回のようにroleがまだ確定していない状態（Aモードへの初回移行、新規セットアップ等）で顕在化する。`runDaemonLoop`にも起動直後の即時1サイクル実行を追加して修正した。
+
+**追記（新モード追加：Dモード「Google Drive中心・デスクトップアプリ利用」、実装済み）：** ユーザーから、Mac/WindowsにGoogle Driveデスクトップアプリを導入済みで、Vaultをその同期フォルダ内に置いてObsidianで開いている場合、このアプリ自身のrclone同期は行わないでほしいという要望があった。理由はAモードの設計変更と全く同じクラスのリスク——Google Driveデスクトップアプリ自身の同期デーモンと、このアプリのrcloneベース同期が同じファイルに対して同時に働くと、1.6.1節でVaultをiCloudの外に出した理由と同じ問題が再発する。ただしAモードと違い、Vault本体が既にGoogle Drive上の実体そのものであるため、「Google Driveへ改めて公開する」手順自体が不要——ユーザーからも「iCloud同期と同じで、GoogleDriveの同期機能の実装に任せる」「iPhoneとの同期はしない前提（必要ならAモードを使う）」という方針が示され、Dモードとして新規実装した。`engine.runGDriveDesktopModeCycle`は完全な無処理（rclone・Primary/Secondaryのいずれも扱わない）で、SettingsのSync Mode選択も2択から3択（`newExclusiveCheckGroup`にN択対応で一般化）に拡張した。
+
+**追記（Aモードのconflicted copy自動マージ機能、実装済み）：** 当初は「iCloudの競合コピー命名規則がユーザーの正規ノート名（例:「Chapter 2.md」）と区別できず、誤検出のリスクがある」という理由で実装を見送っていたが、ユーザー自身がiCloudの実際の挙動を追加調査し、実際の命名規則は`ファイル名 (Macの競合コピー).md`／`ファイル名 (1).md`という**括弧付き**の接尾辞であること（当初懸念していた括弧無しの「ファイル名 2.md」形式ではない）を確認した上で、「自動でマージする必要はなく、手動で「競合有無のチェックとマージ」を実行すればよい」という方針を提案してくれたため、実装に着手した。
+
+- 検出（`engine.FindICloudConflictCopies`）：Vaultを`internal/scan`で走査し、`Name (suffix).ext`型のファイル名で、かつ同じフォルダに元ファイル`Name.ext`が実在するペアのみを対象にする——命名パターンだけでなく「元ファイルが実在する」ことも条件にすることで、括弧を使った正規のノート名（例:「Meeting (draft).md」、対応する「Meeting.md」が無い）を誤検出しない。
+- マージ（`engine.CheckAndMergeICloudConflictCopies`）：Aモードは Vault内容を逐一ログ管理していないため、真の共通祖先（base）が存在しない。そこで`internal/merge.MergeContents`をbase空文字列で呼び出す方式にした——実際に動作を確認したところ、共通の接頭辞・接尾辞部分は無変更のまま保持され、実際に異なる箇所のみがコンフリクトマーカーで囲まれる、実用上十分な精度の結果が得られた（完全一致の場合はマーカー無しでクリーンにマージされることも確認済み）。
+- 結果の反映：内容が完全一致していた場合は複製ファイルを自動削除するのみ。差異がある場合は、既存の真の競合（3.3.2節）と全く同じ`config.PendingConflict`／Settings画面の「Resolve Conflicts...」の仕組みに乗せる（新しいUIを追加しなかった）。解決時に複製ファイル自体も削除できるよう、`PendingConflict`に`ExtraFileToRemove`フィールドを新設し、`engine.ResolvePendingConflict`で参照するようにした。
+- 手動トリガー（Settings画面「Obsidian Vault」セクションの「Check for Conflicts and Merge...」ボタン、Aモードかつ設定済みの端末のみ表示）にしたことで、上記の誤検出防止に加え、万一の誤検出があっても「ユーザーが気づいて中止できる一度きりの確認プロンプト」で済み、バックグラウンドでの無断書き換えにはならない設計にした。
+- 対象はAモードのみ。Dモード（Google Driveデスクトップアプリ）側の競合コピー命名規則は未調査のため、今回は対応しない（ユーザーの明示的な指示）。
 
 ---
 
