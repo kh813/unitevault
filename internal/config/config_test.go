@@ -154,6 +154,35 @@ func TestConfigManager_InstallReminderDismissed(t *testing.T) {
 	}
 }
 
+// TestConfigManager_DisclaimerAccepted guards the first-launch disclaimer
+// gate's persistence, and specifically that ResetConfig does NOT clear
+// it - unlike the dismissible reminders (Install Reminder, iCloud
+// Migration Reminder), this is a one-time, permanent acknowledgment per
+// install, not tied to sync configuration state, so resetting sync
+// settings must never make the disclaimer reappear.
+func TestConfigManager_DisclaimerAccepted(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := config.NewConfigManagerWithDir(tempDir)
+
+	if cm.IsDisclaimerAccepted() {
+		t.Fatal("expected the disclaimer to not be accepted initially")
+	}
+
+	if err := cm.SetDisclaimerAccepted(); err != nil {
+		t.Fatalf("failed to set disclaimer accepted: %v", err)
+	}
+	if !cm.IsDisclaimerAccepted() {
+		t.Fatal("expected the disclaimer to be accepted after SetDisclaimerAccepted")
+	}
+
+	if err := cm.ResetConfig(); err != nil {
+		t.Fatalf("ResetConfig failed: %v", err)
+	}
+	if !cm.IsDisclaimerAccepted() {
+		t.Error("expected ResetConfig to NOT clear disclaimer acceptance")
+	}
+}
+
 func TestConfigManager_ICloudMigrationReminderDismissed(t *testing.T) {
 	tempDir := t.TempDir()
 	cm := config.NewConfigManagerWithDir(tempDir)

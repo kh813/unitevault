@@ -388,41 +388,23 @@ func findOnlyDialogButton(t *testing.T) *widget.Button {
 	return found
 }
 
-// stubInfo replaces infoFunc for the duration of the test.
-func stubInfo(t *testing.T, fn func(title, message string) error) {
-	t.Helper()
-	orig := infoFunc
-	infoFunc = fn
-	t.Cleanup(func() { infoFunc = orig })
-}
-
-// TestInfo_CallsNativeDialogInvoker guards that Info delegates to the OS native dialog
-// without altering the main Settings window's visible state.
-func TestInfo_CallsNativeDialogInvoker(t *testing.T) {
+// TestInfo_ShowsAsOverlayOnSharedWindow guards a real, previously-shipped
+// bug: Info used to shell out to zenity for a separate OS-native dialog
+// window with no parent/owner relationship to the shared window, so it
+// could render behind an already-open, already-focused Settings window
+// (e.g. after "Remove rclone Remote..." completes while Settings is open).
+// It must instead show as an overlay on the same shared window Settings
+// itself uses, exactly like Confirm/Choice/ChoiceN - an overlay on that
+// window can't end up behind it, since it isn't a separate window at all.
+func TestInfo_ShowsAsOverlayOnSharedWindow(t *testing.T) {
 	newTestWindow()
 	windowVisible = false
 
-	called := make(chan struct{})
-	var gotTitle, gotMessage string
-	stubInfo(t, func(title, message string) error {
-		gotTitle, gotMessage = title, message
-		close(called)
-		return nil
-	})
-
 	Info("Up to Date", "You're running the latest version.")
 
-	select {
-	case <-called:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for infoFunc to be called")
-	}
+	findDialogLabel(t, "You're running the latest version.")
 
-	if gotTitle != "Up to Date" || gotMessage != "You're running the latest version." {
-		t.Errorf("unexpected args: title=%q, message=%q", gotTitle, gotMessage)
-	}
-
-	if windowVisible {
-		t.Error("expected windowVisible to remain unchanged when Info is triggered")
+	if !windowVisible {
+		t.Error("expected Info to show the shared window so its overlay has somewhere to render")
 	}
 }

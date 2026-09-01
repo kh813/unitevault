@@ -10,7 +10,6 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/lang"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -131,12 +130,6 @@ type SettingsHandlers struct {
 	// user taps "Resolve Conflicts...". Shown whenever
 	// data.PendingConflictCount > 0 (spec 3.3.2).
 	OnResolveConflicts func(current SettingsFormData)
-	// OnCheckICloudConflicts is called with the form's current values when
-	// the user taps "Check for Conflicts and Merge..." (spec 1.6.10,
-	// iCloud-centric Mode A only) - shown only when data.SyncMode is
-	// "icloud", since this looks for iCloud's own conflict-copy naming
-	// convention specifically.
-	OnCheckICloudConflicts func(current SettingsFormData)
 	// OnSave is called with the current form values when the user taps
 	// "Save Settings".
 	OnSave func(data SettingsFormData)
@@ -168,16 +161,30 @@ func ShowSettingsWindow(data SettingsFormData, handlers SettingsHandlers) {
 	})
 }
 
+// statusLine renders one Status card row. The value uses container.NewBorder
+// (matching this file's own vaultRow pattern) rather than NewHBox: some
+// values are dynamic, unbounded-length text (e.g. an rclone error message in
+// the Google Drive sync row) - inside an HBox that has no width cap, such a
+// value forces the whole row, and therefore the Settings window itself
+// (ShowSettingsWindow sizes the window from content.MinSize()), wider than
+// the desktop - a real, previously-shipped bug on Windows. Border's center
+// slot fills only the width left over from the fixed-width label/button on
+// either side and wraps within it instead.
 func statusLine(label, value, actionLabel string, action func()) fyne.CanvasObject {
-	objs := []fyne.CanvasObject{
-		widget.NewLabelWithStyle(label, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel(value),
-		layout.NewSpacer(),
-	}
+	valueLabel := widget.NewLabel(value)
+	valueLabel.Wrapping = fyne.TextWrapWord
+
+	var trailing fyne.CanvasObject
 	if action != nil {
-		objs = append(objs, widget.NewButton(actionLabel, action))
+		trailing = widget.NewButton(actionLabel, action)
 	}
-	return container.NewHBox(objs...)
+
+	return container.NewBorder(
+		nil, nil,
+		widget.NewLabelWithStyle(label, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		trailing,
+		valueLabel,
+	)
 }
 
 // newExclusiveCheckGroup builds a set of mutually-exclusive widget.Check
@@ -473,19 +480,6 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			handlers.OnMigrateVault(currentSnapshot())
 		})
 		vaultCardContent = append(vaultCardContent, migrateVaultBtn)
-	}
-	// Check for Conflicts and Merge... (spec 1.6.10, Mode A only): a
-	// manual, on-demand scan for iCloud's own conflict-copy naming
-	// convention ("Name (suffix).ext" alongside "Name.ext") - deliberately
-	// not automatic, so a false-positive match is at worst a surprising
-	// prompt the user can decline rather than a silent background
-	// rewrite. Mode D's own conflict-copy convention isn't handled yet
-	// (spec 1.6.10), so this stays iCloud-only for now.
-	if handlers.OnCheckICloudConflicts != nil && syncMode == "icloud" && modeLocked {
-		checkConflictsBtn := widget.NewButton(lang.L("Check for Conflicts and Merge..."), func() {
-			handlers.OnCheckICloudConflicts(currentSnapshot())
-		})
-		vaultCardContent = append(vaultCardContent, checkConflictsBtn)
 	}
 	vaultCard := widget.NewCard(lang.L("Obsidian Vault"), "", container.NewVBox(vaultCardContent...))
 

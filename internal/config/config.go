@@ -185,6 +185,34 @@ func (cm *ConfigManager) InstallReminderDismissedPath() string {
 	return filepath.Join(cm.configDir, "install_reminder_dismissed")
 }
 
+// DisclaimerAcceptedPath returns the path to the marker file recording that
+// this device's user has acknowledged the first-launch no-warranty
+// disclaimer (independent/unofficial software, no data-loss liability -
+// README's own "License" section carries the same text, but most people
+// never read that before running a downloaded app). Deliberately never
+// cleared by ResetConfig - unlike the dismissible reminders above, this is
+// a one-time, permanent acknowledgment per install, not tied to sync
+// configuration state.
+func (cm *ConfigManager) DisclaimerAcceptedPath() string {
+	return filepath.Join(cm.configDir, "disclaimer_accepted")
+}
+
+// IsDisclaimerAccepted reports whether this device's user has already
+// acknowledged the first-launch disclaimer.
+func (cm *ConfigManager) IsDisclaimerAccepted() bool {
+	_, err := os.Stat(cm.DisclaimerAcceptedPath())
+	return err == nil
+}
+
+// SetDisclaimerAccepted persists that the first-launch disclaimer has been
+// acknowledged, so it never needs to be shown again on this device.
+func (cm *ConfigManager) SetDisclaimerAccepted() error {
+	if err := cm.EnsureDir(); err != nil {
+		return err
+	}
+	return os.WriteFile(cm.DisclaimerAcceptedPath(), []byte("1"), 0644)
+}
+
 // DriveSyncStatus records the outcome of the most recent Google Drive
 // backup attempt (the rclone sync step of a Primary device's sync cycle),
 // so the Settings window can show it without needing a live connection to

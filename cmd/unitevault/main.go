@@ -90,6 +90,12 @@ type trayApp struct {
 	cfgMgr *config.ConfigManager
 	menu   *fyne.Menu
 	status *fyne.MenuItem
+	// checkConflicts is the tray menu's "Check for Conflicts and Merge..."
+	// item (spec 1.6.10, iCloud-centric Mode A only) - kept as a field so
+	// refreshCheckConflictsMenuItem can toggle its enabled state whenever the
+	// sync mode or Vault path could have changed, rather than only ever
+	// deciding it once at startup.
+	checkConflicts *fyne.MenuItem
 
 	icloudNoticeShown bool
 
@@ -131,6 +137,23 @@ func (t *trayApp) tryBeginExclusiveOp() (release func(), ok bool) {
 	return t.cycleMu.Unlock, true
 }
 
+// refreshCheckConflictsMenuItem enables the tray menu's "Check for
+// Conflicts and Merge..." item only when it could actually find anything:
+// iCloud-centric Mode A (spec 1.6.10) with a Vault already configured.
+// Rather than hiding the item outright when irrelevant, it's greyed out
+// (matching mStatus's own always-present-but-disabled convention) so the
+// menu's shape stays stable across sync modes. Call this whenever the sync
+// mode or Vault path could have changed - startup, after Save Settings, and
+// after Reset Configuration - since (unlike the Settings window's own
+// removed "Check for Conflicts..." button, which recomputed this every time
+// Settings was opened) the tray menu has no natural point to recompute it
+// lazily on open.
+func (t *trayApp) refreshCheckConflictsMenuItem() {
+	cfg, err := t.cfgMgr.LoadConfig()
+	enabled := err == nil && cfg != nil && cfg.VaultPath != "" && cfg.EffectiveSyncMode() == config.SyncModeICloud
+	gui.SetMenuItemEnabled(t.menu, t.checkConflicts, enabled)
+}
+
 func runTrayMode() {
 	appIcon := fyne.NewStaticResource("unitevault-icon.png", trayIconColorPNG)
 	gui.InitApp(appIcon)
@@ -167,6 +190,12 @@ func runTrayMode() {
 	mStatus.Disabled = true
 	mSyncNow := fyne.NewMenuItem(lang.L("Sync Now"), nil)
 	mSettings := fyne.NewMenuItem(lang.L("Settings..."), nil)
+	// Starts disabled; refreshCheckConflictsMenuItem enables it once startup
+	// has actually determined the sync mode - see that method's doc comment
+	// for why this lives in the tray menu rather than the Settings window
+	// (its previous home).
+	mCheckConflicts := fyne.NewMenuItem(lang.L("Check for Conflicts and Merge..."), nil)
+	mCheckConflicts.Disabled = true
 	mCheckUpdate := fyne.NewMenuItem(lang.L("Check for Update..."), nil)
 	mAbout := fyne.NewMenuItem(lang.L("About UniteVault..."), nil)
 	mQuit := fyne.NewMenuItem(lang.L("Quit UniteVault"), nil)
@@ -181,16 +210,18 @@ func runTrayMode() {
 		fyne.NewMenuItemSeparator(),
 		mSyncNow,
 		mSettings,
+		mCheckConflicts,
 		mCheckUpdate,
 		mAbout,
 		fyne.NewMenuItemSeparator(),
 		mQuit,
 	)
 
-	t := &trayApp{ctx: ctx, cancel: cancel, cfgMgr: cfgMgr, menu: menu, status: mStatus}
+	t := &trayApp{ctx: ctx, cancel: cancel, cfgMgr: cfgMgr, menu: menu, status: mStatus, checkConflicts: mCheckConflicts}
 
 	mSyncNow.Action = func() { go t.syncNow() }
 	mSettings.Action = func() { t.openSettingsGUI() }
+	mCheckConflicts.Action = func() { t.checkICloudConflicts(t.buildFormData()) }
 	mCheckUpdate.Action = func() { go t.checkForUpdate() }
 	mAbout.Action = func() {
 		gui.Info(lang.L("About UniteVault"), lang.L("UniteVault v{{.Version}}", map[string]string{"Version": bootstrap.AppVersion}))
@@ -210,8 +241,17 @@ func runTrayMode() {
 // startup loads local config and either opens Settings (first run / not yet
 // configured) or starts the daemon sync loop. Runs on its own goroutine so it
 // never blocks the Fyne event loop with I/O or the (potentially slow) initial
-// sync cycle.
+// sync cycle. Gated on the first-launch disclaimer (see
+// showDisclaimerGate) - nothing else in the app runs until the user has
+// explicitly agreed to it, on every device, once.
 func (t *trayApp) startup() {
+	if !t.cfgMgr.IsDisclaimerAccepted() {
+		t.showDisclaimerGate(t.startup)
+		return
+	}
+
+	t.refreshCheckConflictsMenuItem()
+
 	cfg, err := t.cfgMgr.LoadConfig()
 	if err != nil || cfg.VaultPath == "" {
 		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Not Initialized"))
@@ -228,6 +268,36 @@ func (t *trayApp) startup() {
 	}
 	t.startDaemonLoop(cfg)
 	t.maybeShowICloudMigrationReminder(cfg)
+}
+
+// showDisclaimerGate blocks first use behind an explicit "I Agree" -
+// unlike the dismissible reminders elsewhere in this file (Install
+// Reminder, iCloud Migration Reminder), declining doesn't just skip a
+// suggestion, it quits the app entirely: UniteVault is independent,
+// unofficial software that moves/merges/syncs the user's own Vault files
+// automatically, and the same no-warranty terms already documented in
+// README.md's "License" section are easy to never see before running a
+// downloaded app. onAgreed runs (on the Fyne main thread, via gui.Choice)
+// once the user accepts, continuing whatever startup() was doing.
+func (t *trayApp) showDisclaimerGate(onAgreed func()) {
+	gui.Choice(
+		lang.L("UniteVault Disclaimer"),
+		lang.L("UniteVault is an independent, unofficial tool - it is not made, endorsed, or supported by Obsidian.\n\nIt is provided \"as is\", with no warranty of any kind. The author is not liable for any data loss, file corruption, or other damage that may result from using it.\n\nThis software moves, merges, and synchronizes your Vault files automatically. Please keep your own backups, especially while you're still getting familiar with it.\n\nBy clicking \"I Agree\", you acknowledge and accept these terms."),
+		lang.L("I Agree"),
+		lang.L("Quit"),
+		func(choice int) {
+			if choice == 1 {
+				_ = t.cfgMgr.SetDisclaimerAccepted()
+				onAgreed()
+				return
+			}
+			// Declined (explicit "Quit", or the dialog closed/cancelled
+			// without an explicit choice) - must not proceed into any
+			// sync/file-modifying behavior at all.
+			t.cancel()
+			gui.Quit()
+		},
+	)
 }
 
 // startDaemonLoop (re)starts the periodic sync cycle for cfg, first
@@ -617,6 +687,7 @@ func (t *trayApp) performResetConfirmed() {
 	_ = t.cfgMgr.ResetConfig()
 	t.icloudNoticeShown = false
 	gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Not Initialized"))
+	t.refreshCheckConflictsMenuItem()
 	t.openSettingsGUI()
 }
 
@@ -868,7 +939,6 @@ func (t *trayApp) showSettingsGUI(data gui.SettingsFormData) {
 		OnPromoteToPrimary:     t.promoteToPrimary,
 		OnMigrateVault:         t.migrateVault,
 		OnResolveConflicts:     t.resolveConflicts,
-		OnCheckICloudConflicts: t.checkICloudConflicts,
 		OnSave:                 t.saveSettings,
 		OnReset:                t.performReset,
 	})
@@ -1216,12 +1286,14 @@ func (t *trayApp) resolveNextConflict(vaultPath, deviceID, label string, pending
 	)
 }
 
-// checkICloudConflicts handles the Obsidian Vault section's "Check for
-// Conflicts and Merge..." button (spec 1.6.10, iCloud-centric Mode A
-// only) - a manual, on-demand scan for iCloud's own conflict-copy naming
-// convention ("Name (suffix).ext" alongside "Name.ext"). Deliberately not
-// run automatically: a false-positive match is at worst a surprising
-// prompt the user can decline here, never a silent background rewrite.
+// checkICloudConflicts handles the tray menu's "Check for Conflicts and
+// Merge..." item (spec 1.6.10, iCloud-centric Mode A only; see
+// refreshCheckConflictsMenuItem for why it lives there rather than in the
+// Settings window, its previous home) - a manual, on-demand scan for
+// iCloud's own conflict-copy naming convention ("Name (suffix).ext"
+// alongside "Name.ext"). Deliberately not run automatically: a
+// false-positive match is at worst a surprising prompt the user can decline
+// here, never a silent background rewrite.
 func (t *trayApp) checkICloudConflicts(current gui.SettingsFormData) {
 	vaultPath := strings.TrimSpace(current.VaultPath)
 	if vaultPath == "" {
@@ -1801,6 +1873,7 @@ func (t *trayApp) saveSettingsConfirmed(data gui.SettingsFormData) {
 		}
 
 		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Active ({{.Role}})", map[string]string{"Role": newRole}))
+		t.refreshCheckConflictsMenuItem()
 		if gdriveDesktopMode {
 			gui.Info(lang.L("UniteVault Configured"), lang.L(
 				"Settings saved successfully!\n\nVault: {{.Vault}}\nSync Interval: {{.Interval}} seconds\n\nGoogle Drive's own desktop app handles syncing this Vault across your devices - UniteVault won't sync it itself.",

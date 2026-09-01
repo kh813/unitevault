@@ -155,6 +155,38 @@ func TestStartDaemonLoop_CancelsPreviousLoop(t *testing.T) {
 	tr.cycleMu.Unlock()
 }
 
+// TestRefreshCheckConflictsMenuItem_EnabledOnlyForICloudModeWithVault guards
+// the tray menu's "Check for Conflicts and Merge..." item (spec 1.6.10,
+// moved here from the Settings window): it should only ever be actionable
+// in iCloud-centric Mode A, once a Vault is actually configured to scan.
+func TestRefreshCheckConflictsMenuItem_EnabledOnlyForICloudModeWithVault(t *testing.T) {
+	tr := newTestTrayApp(t)
+	tr.checkConflicts = fyne.NewMenuItem("Check for Conflicts and Merge...", nil)
+	tr.menu = fyne.NewMenu("", tr.checkConflicts)
+
+	// No config saved yet at all.
+	tr.refreshCheckConflictsMenuItem()
+	if !tr.checkConflicts.Disabled {
+		t.Error("expected the item to stay disabled before any Vault is configured")
+	}
+
+	if err := tr.cfgMgr.SaveConfig(&config.Config{VaultPath: "/tmp/vault", SyncMode: config.SyncModeDrive}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	tr.refreshCheckConflictsMenuItem()
+	if !tr.checkConflicts.Disabled {
+		t.Error("expected the item to stay disabled in Drive mode, which has no iCloud conflict-copy convention to scan for")
+	}
+
+	if err := tr.cfgMgr.SaveConfig(&config.Config{VaultPath: "/tmp/vault", SyncMode: config.SyncModeICloud}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	tr.refreshCheckConflictsMenuItem()
+	if tr.checkConflicts.Disabled {
+		t.Error("expected the item to be enabled once iCloud mode has a configured Vault")
+	}
+}
+
 func TestStopDaemonLoop_CancelsAndClears(t *testing.T) {
 	tr := newTestTrayApp(t)
 

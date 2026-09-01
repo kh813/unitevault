@@ -9,17 +9,26 @@ import (
 	"github.com/ncruces/zenity"
 )
 
-// infoFunc displays an OS native alert dialog. Stored as a var for testing.
-var infoFunc = func(title, message string) error {
-	return zenity.Info(message, zenity.Title(title))
-}
-
-// Info shows a standalone OS-native informational/alert dialog.
-// Safe to call from any goroutine.
+// Info shows an informational/alert dialog as an overlay on the shared
+// window (see ensureWindowVisible), the same pattern Confirm/Choice/ChoiceN
+// use. It used to shell out to zenity for a separate OS-native dialog
+// window instead - a real, previously-shipped bug on Windows: that
+// separate window has no parent/owner relationship with the shared window,
+// so nothing tells the window manager to keep it above an already-focused
+// Settings window, and it could render behind it (e.g. after "Remove
+// rclone Remote..." completes while Settings is open). An overlay on the
+// same window Settings itself uses can't end up behind it, since it isn't
+// a different window at all. Safe to call from any goroutine.
 func Info(title, message string) {
-	go func() {
-		_ = infoFunc(title, message)
-	}()
+	fyne.Do(func() {
+		wasHidden := ensureWindowVisible()
+		d := dialog.NewInformation(title, message, mainWindow)
+		if wasHidden {
+			d.SetOnClosed(hideWindowNow)
+		}
+		d.Show()
+		mainWindow.RequestFocus()
+	})
 }
 
 // Confirm shows a Yes/No confirmation dialog. Fyne dialogs are non-blocking,

@@ -86,6 +86,24 @@ func newTestWindow() {
 	windowVisible = false
 }
 
+// TestStatusLine_LongValueWraps guards a real, previously-shipped bug on
+// Windows: a Status card row used container.NewHBox with no width cap on
+// its value label, so a long dynamic value (e.g. an rclone error message in
+// the Google Drive sync row) forced the whole row - and therefore the
+// Settings window itself, sized from content.MinSize() in
+// ShowSettingsWindow - wider than the desktop. The value must wrap instead
+// of forcing the row's MinSize to the value's full unwrapped width.
+func TestStatusLine_LongValueWraps(t *testing.T) {
+	longValue := "Last sync failed (2026-08-26 10:00): connection reset by peer while uploading 000-Templates/Very Long Note Title That Goes On And On And On.md to the configured Google Drive remote"
+
+	row := statusLine("Google Drive sync:", longValue, "", nil)
+
+	unwrappedWidth := widget.NewLabel(longValue).MinSize().Width
+	if row.MinSize().Width >= unwrappedWidth {
+		t.Errorf("expected the row's MinSize width (%v) to be well under the long value's unwrapped natural width (%v) - looks like it isn't wrapping", row.MinSize().Width, unwrappedWidth)
+	}
+}
+
 // hasFormItemText reports whether any widget.Form in the content tree has a
 // field labeled exactly text (widget.FormItem.Text isn't a CanvasObject, so
 // walkObjects can't see it - this walks the *widget.Form nodes directly).
@@ -900,44 +918,6 @@ func TestBuildSettingsContent_SyncMode_HidesMigrateVaultButton(t *testing.T) {
 	})
 	if hasButton(gdrive, "Migrate Vault to Local Folder...") {
 		t.Error("expected no Migrate Vault button for a Google Drive desktop-app-mode device")
-	}
-}
-
-// TestBuildSettingsContent_SyncMode_ChecksForICloudConflictsOnlyInICloudMode
-// guards spec 1.6.10's manual "Check for Conflicts and Merge..." action:
-// it only makes sense for iCloud-centric Mode A (it looks for iCloud's own
-// conflict-copy naming convention specifically), and only once a Vault is
-// actually configured (modeLocked) - showing it mid first-time-setup,
-// before any Vault exists to scan, would be premature.
-func TestBuildSettingsContent_SyncMode_ChecksForICloudConflictsOnlyInICloudMode(t *testing.T) {
-	newTestWindow()
-
-	icloudLocked := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "icloud"}, SettingsHandlers{
-		OnCheckICloudConflicts: func(SettingsFormData) {},
-	})
-	if !hasButton(icloudLocked, "Check for Conflicts and Merge...") {
-		t.Error("expected the Check for Conflicts button for a locked iCloud-mode device")
-	}
-
-	driveLocked := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "drive"}, SettingsHandlers{
-		OnCheckICloudConflicts: func(SettingsFormData) {},
-	})
-	if hasButton(driveLocked, "Check for Conflicts and Merge...") {
-		t.Error("expected no Check for Conflicts button for a Drive-mode device")
-	}
-
-	gdriveLocked := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "gdrive_desktop"}, SettingsHandlers{
-		OnCheckICloudConflicts: func(SettingsFormData) {},
-	})
-	if hasButton(gdriveLocked, "Check for Conflicts and Merge...") {
-		t.Error("expected no Check for Conflicts button for a Google Drive desktop-app-mode device")
-	}
-
-	icloudUnlocked := buildSettingsContent(SettingsFormData{SyncMode: "icloud"}, SettingsHandlers{
-		OnCheckICloudConflicts: func(SettingsFormData) {},
-	})
-	if hasButton(icloudUnlocked, "Check for Conflicts and Merge...") {
-		t.Error("expected no Check for Conflicts button before a Vault is actually configured")
 	}
 }
 

@@ -317,7 +317,7 @@
 - [x] セットアップ画面（Settings Window / Setup Wizard）にモード選択UIを追加
 - [x] Aモード（iCloud中心）の実装：
   - [x] Vault Migration・iCloud Bridge関連の仕組み（`ManagedVaultParentDir`・`SeedICloudBridge`・`MirrorVaultToBridge`・`ScanBridgeAndLog`等）を経由しない、専用の同期エンジンを実装する（`engine.runICloudModeCycle`。Bモードと同じPrimary/Secondary選出を再利用し、Primaryのみが`rclone sync`でGoogle Driveへ公開する——設計変更の経緯は下記「追記」参照）
-  - [x] iCloudが作成する競合コピーを検出し、元ファイルとマージする機能（`engine.FindICloudConflictCopies`・`engine.CheckAndMergeICloudConflictCopies`、既存の`internal/merge`を再利用）。Settings画面の「Check for Conflicts and Merge...」ボタン（Aモードのみ）から手動実行。詳細・経緯はspec 1.6.10節参照
+  - [x] iCloudが作成する競合コピーを検出し、元ファイルとマージする機能（`engine.FindICloudConflictCopies`・`engine.CheckAndMergeICloudConflictCopies`、既存の`internal/merge`を再利用）。タスクトレイ／メニューバーの「Check for Conflicts and Merge...」（Aモードのみ）から手動実行。詳細・経緯はspec 1.6.10節参照
 - [x] B・Cモードは既存の実装をそのまま使う（追加実装なし、確認済み）
 - [x] モード間の切り替えはv1では非対応（将来のTodo参照）。`cmd/unitevault/main.go`の`lockedSyncMode`が、一度保存されたSyncModeを以後のSaveで上書きさせないことで永続化層でも強制している
 - [x] Dモード（Google Drive中心・デスクトップアプリ利用）の実装：
@@ -343,8 +343,33 @@
 - 検出（`engine.FindICloudConflictCopies`）：Vaultを`internal/scan`で走査し、`Name (suffix).ext`型のファイル名で、かつ同じフォルダに元ファイル`Name.ext`が実在するペアのみを対象にする——命名パターンだけでなく「元ファイルが実在する」ことも条件にすることで、括弧を使った正規のノート名（例:「Meeting (draft).md」、対応する「Meeting.md」が無い）を誤検出しない。
 - マージ（`engine.CheckAndMergeICloudConflictCopies`）：Aモードは Vault内容を逐一ログ管理していないため、真の共通祖先（base）が存在しない。そこで`internal/merge.MergeContents`をbase空文字列で呼び出す方式にした——実際に動作を確認したところ、共通の接頭辞・接尾辞部分は無変更のまま保持され、実際に異なる箇所のみがコンフリクトマーカーで囲まれる、実用上十分な精度の結果が得られた（完全一致の場合はマーカー無しでクリーンにマージされることも確認済み）。
 - 結果の反映：内容が完全一致していた場合は複製ファイルを自動削除するのみ。差異がある場合は、既存の真の競合（3.3.2節）と全く同じ`config.PendingConflict`／Settings画面の「Resolve Conflicts...」の仕組みに乗せる（新しいUIを追加しなかった）。解決時に複製ファイル自体も削除できるよう、`PendingConflict`に`ExtraFileToRemove`フィールドを新設し、`engine.ResolvePendingConflict`で参照するようにした。
-- 手動トリガー（Settings画面「Obsidian Vault」セクションの「Check for Conflicts and Merge...」ボタン、Aモードかつ設定済みの端末のみ表示）にしたことで、上記の誤検出防止に加え、万一の誤検出があっても「ユーザーが気づいて中止できる一度きりの確認プロンプト」で済み、バックグラウンドでの無断書き換えにはならない設計にした。
+- 手動トリガー（タスクトレイ／メニューバーの「Check for Conflicts and Merge...」、Aモードかつ設定済みの端末のみ選択可能・それ以外はグレーアウト）にしたことで、上記の誤検出防止に加え、万一の誤検出があっても「ユーザーが気づいて中止できる一度きりの確認プロンプト」で済み、バックグラウンドでの無断書き換えにはならない設計にした。もともとSettings画面の「Obsidian Vault」セクションのボタンだったが、後述の追記（Windows実機での不具合報告3件への対応）でタスクトレイ／メニューバーへ移動した。
 - 対象はAモードのみ。Dモード（Google Driveデスクトップアプリ）側の競合コピー命名規則は未調査のため、今回は対応しない（ユーザーの明示的な指示）。
+
+---
+
+## Phase 21：初回起動時の免責事項ダイアログ（実装済み）
+
+**背景：** spec 1.6.10節のマルチモード対応・Aモードのconflicted copy自動マージ機能まで実装が完了し、仕様として書き出した機能は一通り実装できた状態になった。ユーザーから「数日間ドッグフーディングして問題なければ0.1.0として公開したい」という意向が示され、その際「ファイル消失の責任は負わない、といった免責事項を初回起動時に表示した方がいいか」という相談があった。MITライセンス本文・README.mdの「ライセンス」節には既に無保証・免責の文言があったが、ダウンロードしてすぐ実行する利用者がREADMEを事前に読むとは限らないため、実際に目にする形で明示すべきと判断し、実装した。
+
+- [x] `config.ConfigManager`に`DisclaimerAccepted`関連のメソッド（`IsDisclaimerAccepted`・`SetDisclaimerAccepted`・`DisclaimerAcceptedPath`）を追加。マーカーファイル`disclaimer_accepted`の有無で判定する、既存のInstall Reminder等と同じパターン。**ただし`ResetConfig`ではクリアしない**（同期設定のやり直しと無保証への同意は無関係な事項のため、既存の2つのリマインダーとは意図的に扱いを変えた）
+- [x] `cmd/unitevault/main.go`の`startup()`冒頭に同意チェックを追加し、未同意なら`showDisclaimerGate`（`gui.Choice`による**明示的な同意ゲート**）を表示してそれ以降の処理（Settings画面表示・デーモンループ起動等）を一切実行しない。**[ I Agree ]** で同意を記録して`startup()`をやり直し、**[ Quit ]**（またはダイアログを閉じる）でアプリを終了する
+- [x] README.md（ライセンス節・手順3）・spec.md（8.6節新設・6.4節のファイル一覧）に反映
+- [x] テスト追加（`TestConfigManager_DisclaimerAccepted`：ResetConfigでクリアされないことも含めて確認）・ビルド/vet/テスト・Windowsクロスコンパイルすべて確認済み
+
+なお、表示方法（ソフトな「Don't show this again」形式のリマインダーか、明示的な同意ゲートか）はユーザーに選択してもらい、**明示的な同意ゲート**を選んだ。
+
+---
+
+## Phase 22：Windows実機での不具合3件への対応（実装済み）
+
+**背景：** v0.0.65リリース後のWindows実機テストで、ユーザーから同時に3件の不具合報告があった。いずれも実際にWindows環境でSettingsを操作した際に発見されたもの。
+
+- [x] **Settings画面がデスクトップの横幅からはみ出る：** 原因は`settings_window.go`の`statusLine`関数が各行を`container.NewHBox`で組んでおり、値ラベル（例：Google Drive同期状態のrcloneエラーメッセージなど、長さが可変・無制限のテキスト）に幅の制約が一切ないこと。HBoxは各子要素を自身のMinSize（折り返しなしの1行分の幅）で並べるため、長いエラーメッセージ1つがあるだけで行全体、ひいてはウィンドウ全体（`ShowSettingsWindow`は`content.MinSize()`からウィンドウサイズを決定）がデスクトップより幅広くなってしまっていた。この既存ファイル自身の`vaultRow`（`container.NewBorder(nil, nil, nil, selectFolderBtn, vaultEntry)`）と同じBorderレイアウトパターンに`statusLine`を書き換え、値ラベルに`Wrapping = fyne.TextWrapWord`を設定することで解決。Border の中央領域は左右の固定幅要素を差し引いた残り幅にのみレイアウトされるため、長い値は折り返され、ウィンドウ自体の幅を押し広げなくなる。回帰防止テスト`TestStatusLine_LongValueWraps`を追加。
+- [x] **「競合の確認とマージ」をSettingsではなくメニューに表示してほしい：** Settings画面「Obsidian Vault」セクションの「Check for Conflicts and Merge...」ボタンを削除し、タスクトレイ／メニューバーの新規メニュー項目として同じ操作を提供するよう変更（`cmd/unitevault/main.go`の`runTrayMode`）。表示自体は常時行い、AモードかつVault設定済みの場合のみ有効、それ以外はグレーアウト（`fyne.MenuItem.Disabled`、`gui.SetMenuItemEnabled`という汎用ヘルパーを新設）。有効/無効の再判定（`refreshCheckConflictsMenuItem`）はsync modeやVaultパスが変わりうるタイミング（起動時・Save Settings成功後・Reset Configuration後）に呼び出す。
+- [x] **rclone remote削除後などの結果報告ダイアログがSettingsウィンドウの裏に表示される：** 原因は`gui.Info`（多数の操作結果報告で共通に使われるヘルパー）がzenity経由でOSネイティブの別プロセス・別ウィンドウとしてダイアログを表示していたこと。この別ウィンドウはSettingsウィンドウ（`mainWindow`）と親子関係を持たないため、OS側がSettingsより手前に表示する保証がなかった。`Confirm`/`Choice`/`ChoiceN`が既に使っている「`mainWindow`のCanvas上へのオーバーレイとして表示する」パターン（`dialog.NewInformation` + `ensureWindowVisible`）に統一し、同じウィンドウの上に重ねて表示されるようにしたため、別ウィンドウとしての裏表問題が原理的に発生しなくなった。「操作結果を報告する他のダイアログも同様」というユーザー報告の通り、`gui.Info`はアプリ全体で共通に使われているため、この1箇所の修正で全ての結果報告ダイアログに適用される。回帰防止テスト`TestInfo_ShowsAsOverlayOnSharedWindow`を追加。
+- [x] README.md（Aモードの説明・「iCloudの競合コピーが作られた場合」節）・spec.md（1.6.10節）・todo.mdの既存記述を、ボタンの新しい場所（タスクトレイ／メニューバー）に合わせて更新
+- [x] ビルド/vet/テスト・Windowsクロスコンパイルすべて確認済み
 
 ---
 

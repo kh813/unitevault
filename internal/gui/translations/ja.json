@@ -1,4 +1,8 @@
 {
+  "UniteVault Disclaimer": "UniteVaultの免責事項",
+  "UniteVault is an independent, unofficial tool - it is not made, endorsed, or supported by Obsidian.\n\nIt is provided \"as is\", with no warranty of any kind. The author is not liable for any data loss, file corruption, or other damage that may result from using it.\n\nThis software moves, merges, and synchronizes your Vault files automatically. Please keep your own backups, especially while you're still getting familiar with it.\n\nBy clicking \"I Agree\", you acknowledge and accept these terms.": "UniteVaultは非公式の独立したツールであり、Obsidianが作成・承認・サポートしているものではありません。\n\n本ソフトウェアは「現状のまま」提供され、いかなる保証もありません。本ソフトウェアの利用によって生じたデータの消失・ファイルの破損・その他の損害について、作者は一切の責任を負いません。\n\n本ソフトウェアは、あなたのVaultファイルを自動的に移動・マージ・同期します。特に使い始めのうちは、ご自身でバックアップを取っておくことを強くお勧めします。\n\n「同意する」を押すことで、これらの内容に同意したものとみなされます。",
+  "I Agree": "同意する",
+  "Quit": "終了",
   "UniteVault Settings": "UniteVaultの設定",
   "Your Obsidian Vault folder": "Obsidian Vaultのフォルダ",
   "Your Obsidian Vault folder (for iCloud-centric mode: the Vault folder inside iCloud Drive, e.g. where Obsidian's \"iCloud\" storage option created it. For Google Drive (desktop app) mode: the Vault folder inside your Google Drive desktop app's synced folder)": "Obsidian Vaultのフォルダ（iCloud中心モードの場合: iCloud Drive内のVaultフォルダ。例えばObsidianの「iCloud」ストレージオプションが作成した場所。Google Drive（デスクトップアプリ）モードの場合: Google Driveデスクトップアプリの同期フォルダ内のVaultフォルダ）",

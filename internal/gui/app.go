@@ -162,6 +162,19 @@ func SetMenuItemLabel(menu *fyne.Menu, item *fyne.MenuItem, label string) {
 	})
 }
 
+// SetMenuItemEnabled enables or disables a tray menu item and refreshes the
+// menu so the change is reflected immediately - used for actions that only
+// make sense in some configurations (e.g. "Check for Conflicts and
+// Merge...", relevant only in iCloud-centric Mode A) instead of hiding them
+// outright, so the menu's shape stays stable across sync modes. Safe to call
+// from any goroutine.
+func SetMenuItemEnabled(menu *fyne.Menu, item *fyne.MenuItem, enabled bool) {
+	fyne.Do(func() {
+		item.Disabled = !enabled
+		menu.Refresh()
+	})
+}
+
 // ensureWindowVisible shows the shared window if it isn't already, and
 // reports whether it *was* hidden. Dialogs (Info/Confirm/Choice/...) are
 // attached as an overlay on mainWindow's canvas, so if the window itself is
