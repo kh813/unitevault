@@ -421,9 +421,15 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// there, and seeds an iCloud Bridge copy if iCloud Drive is available -
 	// always available (not gated on data.VaultPath), since it's also how
 	// a brand new user with an existing iCloud-resident Vault gets started.
+	// Vault Migration moves a Vault OUT of iCloud into this app's own local
+	// folder - exactly the opposite of what an iCloud-centric (Mode A,
+	// spec 1.6.10) Vault needs, since that mode deliberately keeps the
+	// Vault inside iCloud Drive permanently. Hidden whenever iCloud mode is
+	// selected/locked, mirroring maybeShowICloudMigrationReminder's own
+	// same-reasoning suppression in main.go.
 	var vaultCardContent []fyne.CanvasObject
 	vaultCardContent = append(vaultCardContent, widget.NewForm(vaultFormItems...))
-	if handlers.OnMigrateVault != nil {
+	if handlers.OnMigrateVault != nil && syncMode != "icloud" {
 		migrateVaultBtn := widget.NewButton(lang.L("Migrate Vault to Local Folder..."), func() {
 			handlers.OnMigrateVault(currentSnapshot())
 		})

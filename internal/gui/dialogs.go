@@ -55,6 +55,60 @@ func showConfirm(title, message string, confirmImportance widget.Importance, onR
 	})
 }
 
+// wrappedMessageLabel returns a word-wrapping label for use as a custom
+// dialog's message content. A plain widget.Label defaults to no wrapping
+// (fyne.TextWrapOff) - Choice/ChoiceN build their own dialog.NewCustom
+// rather than using Fyne's own Confirm/Info dialogs (which wrap correctly
+// out of the box via a mechanism only Fyne's dialog package itself can
+// use), so a long message silently renders as one long unwrapped line that
+// overflows past the window/screen edge instead of growing the window
+// downward - a real, previously-shipped bug. Must be paired with
+// constrainWrappedDialogWidth (below), since setting Wrapping alone does
+// nothing without also constraining the width it wraps against.
+func wrappedMessageLabel(message string) *widget.Label {
+	l := widget.NewLabel(message)
+	l.Wrapping = fyne.TextWrapWord
+	return l
+}
+
+// constrainWrappedDialogWidth caps d's width so a wrappedMessageLabel
+// inside it actually wraps, instead of the dialog auto-sizing to whatever
+// width the underlying label widget's own MinSize() currently reports -
+// which, for wrapping text, reflects the width of its single longest
+// unbreakable word (a handful of pixels), not a sensible paragraph width;
+// left unconstrained, the dialog collapses to that width and the message
+// renders as one absurdly narrow, absurdly tall column instead. Mirrors
+// Fyne's own internal text-dialog sizing rule (dialog/text.go): the
+// smaller of the message's natural single-line width, an absolute cap, and
+// 90% of the parent window's width.
+//
+// Must be called after d.Show() (dialog.Dialog.Resize's own doc comment)
+// and, empirically, twice: Resize derives the dialog's actual size from
+// size.Max(d.MinSize()), and d.MinSize() one frame after Show still
+// reflects the label's pre-wrap state - the same one-frame-stale-MinSize
+// class of issue documented against Fyne issue #4648 in dialog/text.go.
+// The first call re-wraps the label at the target width (still sizing the
+// dialog off the old, taller MinSize); the second call reads the
+// now-correct, properly-wrapped MinSize and settles the dialog at its
+// actual height.
+func constrainWrappedDialogWidth(d dialog.Dialog, message string, parent fyne.Window) {
+	const maxAbsoluteWidth float32 = 600
+	const maxWinPercentWidth float32 = 0.9
+
+	width := widget.NewLabel(message).MinSize().Width + 48
+	if width > maxAbsoluteWidth {
+		width = maxAbsoluteWidth
+	}
+	if parent != nil {
+		if maxWin := parent.Canvas().Size().Width * maxWinPercentWidth; width > maxWin {
+			width = maxWin
+		}
+	}
+
+	d.Resize(fyne.NewSize(width, 0))
+	d.Resize(fyne.NewSize(width, 0))
+}
+
 // Choice shows a dialog with two named action buttons plus an implicit Cancel
 // (closing the dialog without choosing). onChoice is called exactly once with
 // 1 (btn1Text chosen), 2 (btn2Text chosen), or 0 (cancelled/closed). Safe to
@@ -76,7 +130,7 @@ func Choice(title, message, btn1Text, btn2Text string, onChoice func(result int)
 		b1.Importance = widget.HighImportance
 
 		content := container.NewVBox(
-			widget.NewLabel(message),
+			wrappedMessageLabel(message),
 			container.NewGridWithColumns(2, b1, b2),
 		)
 
@@ -90,6 +144,7 @@ func Choice(title, message, btn1Text, btn2Text string, onChoice func(result int)
 			}
 		})
 		d.Show()
+		constrainWrappedDialogWidth(d, message, mainWindow)
 	})
 }
 
@@ -120,7 +175,7 @@ func ChoiceN(title, message string, optionLabels []string, onChoice func(result 
 		}
 
 		content := container.NewVBox(
-			widget.NewLabel(message),
+			wrappedMessageLabel(message),
 			container.NewVBox(buttons...),
 		)
 
@@ -134,6 +189,7 @@ func ChoiceN(title, message string, optionLabels []string, onChoice func(result 
 			}
 		})
 		d.Show()
+		constrainWrappedDialogWidth(d, message, mainWindow)
 	})
 }
 

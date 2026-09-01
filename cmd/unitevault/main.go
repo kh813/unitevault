@@ -318,11 +318,28 @@ func vaultUnderManagedRoot(vaultPath string) bool {
 // is already under the managed folder (e.g. after a successful migration -
 // no separate "already migrated" flag is needed, since this check alone
 // naturally stops firing).
-func (t *trayApp) maybeShowICloudMigrationReminder(cfg *config.Config) {
-	if t.cfgMgr.IsICloudMigrationReminderDismissed() {
-		return
+// shouldShowICloudMigrationReminder is maybeShowICloudMigrationReminder's
+// decision, factored out as a pure predicate so it's testable without
+// needing a real gui.mainWindow (gui.ChoiceN would otherwise be reached).
+func shouldShowICloudMigrationReminder(cfgMgr *config.ConfigManager, cfg *config.Config) bool {
+	// iCloud-centric (Mode A, spec 1.6.10) deliberately keeps the Vault
+	// inside iCloud Drive forever - that's the whole point of the mode, not
+	// a legacy pre-1.6 layout this reminder exists to catch. Without this
+	// check, every iCloud-mode device would see this reminder on every
+	// launch and, if accepted, "Migrate Now" would move the Vault out of
+	// iCloud into UniteVault's local folder - breaking the very
+	// cross-device sync the user chose this mode for.
+	if cfg.EffectiveSyncMode() == config.SyncModeICloud {
+		return false
 	}
-	if vaultUnderManagedRoot(cfg.VaultPath) {
+	if cfgMgr.IsICloudMigrationReminderDismissed() {
+		return false
+	}
+	return !vaultUnderManagedRoot(cfg.VaultPath)
+}
+
+func (t *trayApp) maybeShowICloudMigrationReminder(cfg *config.Config) {
+	if !shouldShowICloudMigrationReminder(t.cfgMgr, cfg) {
 		return
 	}
 

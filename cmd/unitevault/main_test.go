@@ -578,6 +578,56 @@ func TestVaultMigrationSourceIsBridge(t *testing.T) {
 	}
 }
 
+// TestShouldShowICloudMigrationReminder guards a real bug: the reminder
+// used to fire for every non-managed-folder Vault regardless of sync mode,
+// which is exactly how an iCloud-centric (Mode A, spec 1.6.10) device's
+// Vault is *supposed* to be set up - accepting "Migrate Now" there would
+// move the Vault out of iCloud into UniteVault's local folder, breaking the
+// cross-device sync the user deliberately chose that mode for.
+func TestShouldShowICloudMigrationReminder(t *testing.T) {
+	root, err := bootstrap.ManagedVaultParentDir()
+	if err != nil {
+		t.Fatalf("ManagedVaultParentDir failed: %v", err)
+	}
+	unmanagedPath := filepath.Join(filepath.Dir(root), "iCloud", "Vault")
+	managedPath := filepath.Join(root, "Vault")
+
+	t.Run("Drive mode, unmanaged Vault, not dismissed", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		cfg := &config.Config{VaultPath: unmanagedPath, SyncMode: config.SyncModeDrive}
+		if !shouldShowICloudMigrationReminder(tr.cfgMgr, cfg) {
+			t.Error("expected the reminder for a Drive-mode device with an unmanaged Vault")
+		}
+	})
+
+	t.Run("iCloud mode, unmanaged Vault - suppressed regardless", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		cfg := &config.Config{VaultPath: unmanagedPath, SyncMode: config.SyncModeICloud}
+		if shouldShowICloudMigrationReminder(tr.cfgMgr, cfg) {
+			t.Error("expected no reminder for an iCloud-mode device - its Vault belongs in iCloud by design")
+		}
+	})
+
+	t.Run("Drive mode, already under the managed root", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		cfg := &config.Config{VaultPath: managedPath, SyncMode: config.SyncModeDrive}
+		if shouldShowICloudMigrationReminder(tr.cfgMgr, cfg) {
+			t.Error("expected no reminder once the Vault is already under the managed folder")
+		}
+	})
+
+	t.Run("Drive mode, previously dismissed", func(t *testing.T) {
+		tr := newTestTrayApp(t)
+		if err := tr.cfgMgr.SetICloudMigrationReminderDismissed(); err != nil {
+			t.Fatalf("failed to dismiss reminder: %v", err)
+		}
+		cfg := &config.Config{VaultPath: unmanagedPath, SyncMode: config.SyncModeDrive}
+		if shouldShowICloudMigrationReminder(tr.cfgMgr, cfg) {
+			t.Error("expected no reminder once previously dismissed")
+		}
+	})
+}
+
 // TestPathIsUnder guards the detection logic behind
 // maybeShowICloudMigrationReminder (spec 1.6.1/1.6.7, Phase 18): whether a
 // configured Vault path sits inside iCloud Drive.

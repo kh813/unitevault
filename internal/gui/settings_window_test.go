@@ -872,6 +872,30 @@ func hasLabelText(root fyne.CanvasObject, text string) bool {
 	return found
 }
 
+// TestBuildSettingsContent_SyncMode_HidesMigrateVaultButton guards a real
+// bug class: Vault Migration moves a Vault OUT of iCloud into this app's
+// own local folder, exactly the opposite of what an iCloud-centric (Mode
+// A, spec 1.6.10) Vault needs (it must stay inside iCloud permanently) -
+// so the button must never be offered once iCloud mode is selected/locked,
+// mirroring maybeShowICloudMigrationReminder's own suppression.
+func TestBuildSettingsContent_SyncMode_HidesMigrateVaultButton(t *testing.T) {
+	newTestWindow()
+
+	drive := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "drive"}, SettingsHandlers{
+		OnMigrateVault: func(SettingsFormData) {},
+	})
+	if !hasButton(drive, "Migrate Vault to Local Folder...") {
+		t.Error("expected the Migrate Vault button for a Drive-mode device")
+	}
+
+	icloud := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "icloud"}, SettingsHandlers{
+		OnMigrateVault: func(SettingsFormData) {},
+	})
+	if hasButton(icloud, "Migrate Vault to Local Folder...") {
+		t.Error("expected no Migrate Vault button for an iCloud-mode device")
+	}
+}
+
 // TestBuildSettingsContent_SyncMode_HidesDeviceRoleRow guards a real,
 // previously-shipped confusion: Primary/Secondary is a Drive-mode-only
 // concept (spec 1.6.10) that an iCloud-mode device never has (its role file

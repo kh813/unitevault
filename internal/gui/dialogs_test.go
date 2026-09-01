@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 )
@@ -221,6 +222,57 @@ func TestChoiceN_CancelReportsZero(t *testing.T) {
 
 // findDialogButtonByLabel locates a button in the overlay dialog by its
 // exact label text.
+func findDialogLabel(t *testing.T, text string) *widget.Label {
+	t.Helper()
+	overlays := mainWindow.Canvas().Overlays().List()
+	if len(overlays) == 0 {
+		t.Fatal("expected the dialog to be shown as an overlay")
+	}
+	for _, o := range overlays {
+		for _, obj := range test.LaidOutObjects(o) {
+			if l, ok := obj.(*widget.Label); ok && l.Text == text {
+				return l
+			}
+		}
+	}
+	t.Fatalf("expected to find a label with text %q", text)
+	return nil
+}
+
+// TestChoiceN_LongMessageWraps guards a real, previously-shipped bug: the
+// message label in Choice/ChoiceN's own hand-built dialog.NewCustom (unlike
+// Fyne's own Confirm/Info dialogs, which wrap correctly out of the box)
+// defaulted to no wrapping at all, so a long message (e.g. the iCloud
+// migration reminder, spec 1.6.1/1.6.7) rendered as one unwrapped line wide
+// enough to overflow past the window/screen edge instead of wrapping
+// downward within it.
+func TestChoiceN_LongMessageWraps(t *testing.T) {
+	newTestWindow()
+	mainWindow.Resize(fyne.NewSize(900, 700))
+
+	longMessage := "Your Obsidian Vault currently isn't in UniteVault's own local folder:\n/Users/someone/Library/Mobile Documents/iCloud~md~obsidian/Documents/MyVaultName\n\nIf this location is also synced by another service (iCloud Drive, Google Drive Desktop, Dropbox, ...), that service's own sync daemon can edit the same files UniteVault and Obsidian are editing at the same time, which can lead to duplicate or conflicted files."
+
+	ChoiceN("Move Your Vault?", longMessage, []string{"Migrate Now", "Don't Show This Again"}, func(int) {})
+
+	label := findDialogLabel(t, longMessage)
+	if label.Wrapping != fyne.TextWrapWord {
+		t.Fatal("expected the message label to wrap words")
+	}
+
+	unwrappedWidth := widget.NewLabel(longMessage).MinSize().Width
+	if label.Size().Width >= unwrappedWidth {
+		t.Errorf("expected the wrapped label's actual width (%v) to be well under its unwrapped natural width (%v)", label.Size().Width, unwrappedWidth)
+	}
+	// A correctly wrapped multi-paragraph message must span several text
+	// rows, so its height should be well above a single line's height -
+	// an unwrapped label would instead report just one line's height
+	// regardless of how wide (or narrow) it ends up.
+	oneLineHeight := widget.NewLabel("single line").MinSize().Height
+	if label.Size().Height <= oneLineHeight*2 {
+		t.Errorf("expected the wrapped label to span multiple lines (height %v, one line is %v), looks unwrapped", label.Size().Height, oneLineHeight)
+	}
+}
+
 func findDialogButtonByLabel(t *testing.T, label string) *widget.Button {
 	t.Helper()
 	overlays := mainWindow.Canvas().Overlays().List()
