@@ -621,46 +621,30 @@ func engineLogPath() string {
 func (t *trayApp) buildFormData() gui.SettingsFormData {
 	cfg, _ := t.cfgMgr.LoadConfig()
 	role, _ := t.cfgMgr.LoadRole()
-	isICloudMode := cfg.EffectiveSyncMode() == config.SyncModeICloud
 
-	// loadDriveSyncStatusText reads the most recent recorded outcome from
-	// whichever code path actually performed it - RunCycle's Primary branch
-	// in Drive mode, or runICloudModeCycle in every device unconditionally
-	// (spec 1.6.10) - and formats it the same way regardless of which one.
-	loadDriveSyncStatusText := func() string {
-		st, err := t.cfgMgr.LoadDriveSyncStatus()
-		if err != nil || st == nil {
-			return lang.L("Never synced yet")
-		}
+	// engine.RunCycle only ever runs the rclone sync step (and records its
+	// outcome) on a Primary device - a Secondary never attempts it (in
+	// either sync mode - spec 1.6.10 elects a Primary/Secondary in iCloud
+	// mode too, exactly like Drive mode, so Google Drive always has one
+	// canonical publisher), so showing its (possibly stale, or simply
+	// absent) sync status would be misleading rather than just showing why
+	// there isn't one.
+	driveSyncStatus := lang.L("Never synced yet")
+	if role == "" {
+		driveSyncStatus = lang.L("N/A (not configured yet)")
+		role = "N/A"
+	} else if role == "secondary" {
+		driveSyncStatus = lang.L("N/A (this device is Secondary - Google Drive backup runs on the Primary device)")
+	} else if st, err := t.cfgMgr.LoadDriveSyncStatus(); err == nil && st != nil {
 		displayTime := st.Time
 		if ts, parseErr := time.Parse(time.RFC3339, st.Time); parseErr == nil {
 			displayTime = ts.Local().Format("2006-01-02 15:04")
 		}
 		if st.Success {
-			return lang.L("Last synced: {{.Time}}", map[string]string{"Time": displayTime})
+			driveSyncStatus = lang.L("Last synced: {{.Time}}", map[string]string{"Time": displayTime})
+		} else {
+			driveSyncStatus = lang.L("Last sync failed ({{.Time}}): {{.Error}}", map[string]string{"Time": displayTime, "Error": st.Error})
 		}
-		return lang.L("Last sync failed ({{.Time}}): {{.Error}}", map[string]string{"Time": displayTime, "Error": st.Error})
-	}
-
-	// engine.RunCycle only ever runs the rclone sync step (and records its
-	// outcome) on a Primary device in Drive mode - a Secondary never
-	// attempts it, so showing its (possibly stale, or simply absent) sync
-	// status would be misleading rather than just showing why there isn't
-	// one. In iCloud mode there is no Primary/Secondary at all - every
-	// device runs its own backup every cycle (runICloudModeCycle), so its
-	// status is always meaningful regardless of role (which is never even
-	// set in this mode - see saveSettingsConfirmed).
-	var driveSyncStatus string
-	switch {
-	case isICloudMode:
-		driveSyncStatus = loadDriveSyncStatusText()
-	case role == "":
-		driveSyncStatus = lang.L("N/A (not configured yet)")
-		role = "N/A"
-	case role == "secondary":
-		driveSyncStatus = lang.L("N/A (this device is Secondary - Google Drive backup runs on the Primary device)")
-	default:
-		driveSyncStatus = loadDriveSyncStatusText()
 	}
 
 	gitStatus := "Not Found"
@@ -1686,32 +1670,31 @@ func (t *trayApp) saveSettingsConfirmed(data gui.SettingsFormData) {
 
 		remoteTarget := fmt.Sprintf("%s:%s", data.RcloneRemote, data.RclonePath)
 
+		// Primary/Secondary election (spec 3.6.1.1) applies in both sync
+		// modes: iCloud-centric (Mode A) still needs exactly one device
+		// publishing to Google Drive, so downstream consumers of that
+		// backup (e.g. feeding it to an external analysis tool) always see
+		// one canonical, unambiguous copy rather than whichever of several
+		// independently-writing devices happened to sync last (spec
+		// 1.6.10). InitializeNode's Secondary path never reads Vault
+		// content back from Drive - only bookkeeping (PRIMARY_MARKER.json,
+		// an empty per-device log file) - so it's just as safe to run here
+		// as it always was for Drive mode.
 		var newRole string
-		if newCfg.SyncMode == config.SyncModeICloud {
-			// Mode A (spec 1.6.10): Apple's iCloud alone keeps this Vault
-			// consistent across devices - there is no Primary/Secondary to
-			// elect, and running InitializeNode here would attempt an
-			// initial pull from the Google Drive target, which is only
-			// ever a one-way backup destination in this mode (possibly
-			// empty, possibly stale) and must never be written back into
-			// this iCloud-managed Vault.
-			newRole = lang.L("iCloud-centric (backup only)")
-		} else {
-			hostname, _ := os.Hostname()
-			bootstrapper := bootstrap.NewBootstrapper(t.cfgMgr, driveClient)
-			err := gui.RunWithProgress(
-				lang.L("Initializing UniteVault"),
-				lang.L("Determining Primary/Secondary role and syncing initial state with Google Drive..."),
-				func() error {
-					var initErr error
-					newRole, initErr = bootstrapper.InitializeNode(context.Background(), data.VaultPath, remoteTarget, hostname)
-					return initErr
-				},
-			)
-			if err != nil {
-				gui.Info(lang.L("Initialization Failed"), lang.L("UniteVault could not finish initializing: {{.Err}}", map[string]string{"Err": err.Error()}))
-				return
-			}
+		hostname, _ := os.Hostname()
+		bootstrapper := bootstrap.NewBootstrapper(t.cfgMgr, driveClient)
+		err := gui.RunWithProgress(
+			lang.L("Initializing UniteVault"),
+			lang.L("Determining Primary/Secondary role and syncing initial state with Google Drive..."),
+			func() error {
+				var initErr error
+				newRole, initErr = bootstrapper.InitializeNode(context.Background(), data.VaultPath, remoteTarget, hostname)
+				return initErr
+			},
+		)
+		if err != nil {
+			gui.Info(lang.L("Initialization Failed"), lang.L("UniteVault could not finish initializing: {{.Err}}", map[string]string{"Err": err.Error()}))
+			return
 		}
 
 		gui.SetMenuItemLabel(t.menu, t.status, lang.L("Status: Active ({{.Role}})", map[string]string{"Role": newRole}))

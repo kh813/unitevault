@@ -119,13 +119,19 @@ func TestSyncEngine_RunCycle(t *testing.T) {
 	}
 }
 
-// TestSyncEngine_RunCycle_ICloudMode_BackupOnlyNoRoleOrMerge guards spec
-// 1.6.10's Mode A: RunCycle must take an entirely different, much simpler
-// path when config.SyncModeICloud is set - a one-way rclone sync backup
-// only, with none of SyncModeDrive's Primary/Secondary election, device
-// log, or merge machinery ever running (Apple's own iCloud sync, not this
-// app, is responsible for cross-device consistency in this mode).
-func TestSyncEngine_RunCycle_ICloudMode_BackupOnlyNoRoleOrMerge(t *testing.T) {
+// TestSyncEngine_RunCycle_ICloudMode_PrimaryPublishesElectsAndSkipsMerge
+// guards spec 1.6.10's Mode A: RunCycle takes a much simpler path than
+// SyncModeDrive - no device log, no merge machinery (Apple's own iCloud
+// sync, not this app, is responsible for cross-device Vault consistency) -
+// but it still elects a Primary/Secondary exactly like SyncModeDrive does,
+// and only Primary publishes. A real, previously-shipped design mistake
+// had every device publish independently (reasoning that a pure backup
+// nobody reads back can tolerate transient staleness); that broke down
+// once the Drive backup itself needed to be a single canonical, trustable
+// snapshot (e.g. for an external tool to read), since two independent
+// writers could otherwise silently overwrite/delete each other's more
+// current content during iCloud's convergence window.
+func TestSyncEngine_RunCycle_ICloudMode_PrimaryPublishesElectsAndSkipsMerge(t *testing.T) {
 	tempDir := t.TempDir()
 	vaultPath := filepath.Join(tempDir, "Vault")
 	cfgDir := filepath.Join(tempDir, "config")
@@ -153,13 +159,22 @@ func TestSyncEngine_RunCycle_ICloudMode_BackupOnlyNoRoleOrMerge(t *testing.T) {
 	}
 
 	if !mock.syncCalled {
-		t.Error("expected Mode A to publish via a one-way rclone sync")
+		t.Error("expected the first (and thus Primary-electing) device to publish via a one-way rclone sync")
 	}
 	if len(mock.copyCalls) != 0 {
-		t.Errorf("expected Mode A to never push/pull via Copy (no Secondary/Bridge logic), got %+v", mock.copyCalls)
+		t.Errorf("expected Mode A to never push/pull via Copy (no Secondary log/Bridge logic), got %+v", mock.copyCalls)
 	}
-	if role, err := cfgMgr.LoadRole(); err != nil || role != "" {
-		t.Errorf("expected Mode A to never elect a Primary/Secondary role, got role=%q, err=%v", role, err)
+	found := false
+	for _, ex := range mock.syncExcludes {
+		if ex == "/"+syncdir.Name+"/**" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected the publish to exclude this app's own %s/ bookkeeping, got excludes %v", syncdir.Name, mock.syncExcludes)
+	}
+	if role, err := cfgMgr.LoadRole(); err != nil || role != "primary" {
+		t.Errorf("expected Mode A to elect this (first) device as primary, got role=%q, err=%v", role, err)
 	}
 
 	status, err := cfgMgr.LoadDriveSyncStatus()
@@ -168,6 +183,82 @@ func TestSyncEngine_RunCycle_ICloudMode_BackupOnlyNoRoleOrMerge(t *testing.T) {
 	}
 	if !status.Success {
 		t.Errorf("expected the recorded status to report success, got %+v", status)
+	}
+}
+
+// TestSyncEngine_RunCycle_ICloudMode_SecondaryNeverTouchesDrive guards the
+// other half of the same fix: a Mode A device that loses (or never wins)
+// the Primary election must never publish to Google Drive itself - only
+// Primary does, so the backup always reflects exactly one device's view.
+func TestSyncEngine_RunCycle_ICloudMode_SecondaryNeverTouchesDrive(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:       vaultPath,
+		RcloneRemote:    "ObsidianVault",
+		RclonePath:      "MyVault",
+		IntervalSeconds: 120,
+		SyncMode:        config.SyncModeICloud,
+	})
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", "some-other-device-id", "mac-mini")
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "windows-test", mock)
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	if mock.syncCalled {
+		t.Error("expected a Secondary device to never publish to Google Drive in Mode A")
+	}
+	if len(mock.copyCalls) != 0 {
+		t.Errorf("expected a Secondary device to never push/pull via Copy either, got %+v", mock.copyCalls)
+	}
+	if role, err := cfgMgr.LoadRole(); err != nil || role != "secondary" {
+		t.Errorf("expected this device to be elected secondary, got role=%q, err=%v", role, err)
+	}
+	if status, err := cfgMgr.LoadDriveSyncStatus(); err != nil || status != nil {
+		t.Errorf("expected no drive sync status to be recorded for a Secondary, got %v, err %v", status, err)
+	}
+}
+
+// TestSyncEngine_RunCycle_ICloudMode_SkipsSyncWhenSupersededByAnotherPrimary
+// mirrors TestSyncEngine_RunCycle_SkipsSyncWhenSupersededByAnotherPrimary
+// for Mode A: a cached "primary" role must be re-verified every cycle, not
+// trusted forever, so a device demoted elsewhere (Promote to Primary...)
+// stops publishing immediately instead of racing the new Primary.
+func TestSyncEngine_RunCycle_ICloudMode_SkipsSyncWhenSupersededByAnotherPrimary(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:       vaultPath,
+		RcloneRemote:    "ObsidianVault",
+		RclonePath:      "MyVault",
+		IntervalSeconds: 120,
+		SyncMode:        config.SyncModeICloud,
+	})
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", "some-other-device-id", "windows-desktop")
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	if mock.syncCalled {
+		t.Error("expected RunCycle to skip rclone sync once superseded by another device's PRIMARY_MARKER.json")
+	}
+	if status, err := cfgMgr.LoadDriveSyncStatus(); err != nil || status != nil {
+		t.Errorf("expected no drive sync status to be recorded when the cycle was skipped, got %v, err %v", status, err)
 	}
 }
 

@@ -516,21 +516,18 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		// arrives pre-localized - it must not be wrapped in lang.L again.
 		operationalRows = append(operationalRows, statusLine(lang.L("Google Drive sync:"), data.DriveSyncStatus, "", nil))
 	}
-	// Primary/Secondary is a Drive-mode-only concept (spec 1.6.10) - an
-	// iCloud-mode device never has one (see saveSettingsConfirmed, which
-	// never calls InitializeNode/SaveRole in that mode), so showing this
-	// row would only ever read "N/A", which looks like an unfinished setup
-	// rather than the working, fully-configured state it actually is.
-	if syncMode != "icloud" {
-		deviceRoleValue := lang.L(orDefault(data.DeviceRole, "N/A"))
-		if data.MultiDeviceStatus != "" {
-			// MultiDeviceStatus is already localized (built via lang.L in
-			// main.go), so it must not be wrapped in lang.L again - only the
-			// surrounding template here needs its own localization.
-			deviceRoleValue = lang.L("{{.Role}} ({{.Status}})", map[string]string{"Role": deviceRoleValue, "Status": data.MultiDeviceStatus})
-		}
-		operationalRows = append(operationalRows, statusLine(lang.L("Device role:"), deviceRoleValue, promoteToPrimaryLabel, promoteToPrimary))
+	// Primary/Secondary applies in both sync modes (spec 1.6.10) - iCloud
+	// mode still elects one, so Google Drive there always gets exactly one
+	// canonical publisher instead of every device racing to overwrite the
+	// same backup.
+	deviceRoleValue := lang.L(orDefault(data.DeviceRole, "N/A"))
+	if data.MultiDeviceStatus != "" {
+		// MultiDeviceStatus is already localized (built via lang.L in
+		// main.go), so it must not be wrapped in lang.L again - only the
+		// surrounding template here needs its own localization.
+		deviceRoleValue = lang.L("{{.Role}} ({{.Status}})", map[string]string{"Role": deviceRoleValue, "Status": data.MultiDeviceStatus})
 	}
+	operationalRows = append(operationalRows, statusLine(lang.L("Device role:"), deviceRoleValue, promoteToPrimaryLabel, promoteToPrimary))
 	statusRows := []fyne.CanvasObject{
 		container.NewGridWithColumns(2, container.NewVBox(installRows...), container.NewVBox(operationalRows...)),
 	}
@@ -539,8 +536,11 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// Drive push/pull entirely, spec 1.6.4), so nothing else in this
 	// window would ever hint that it's not actually receiving Primary's
 	// changes at all - Google Drive is the only channel a Secondary has
-	// for that since the 1.6 migration away from iCloud-as-transport.
-	if data.DeviceRole == "secondary" && !data.RcloneConfigured {
+	// for that since the 1.6 migration away from iCloud-as-transport. Does
+	// not apply in iCloud mode: there, a Secondary receives every other
+	// device's changes via iCloud itself and never touches Google Drive at
+	// all (spec 1.6.10), so an unconfigured remote there is harmless.
+	if syncMode != "icloud" && data.DeviceRole == "secondary" && !data.RcloneConfigured {
 		var configureRemote func()
 		if handlers.OnConfigureRemote != nil {
 			configureRemote = func() { handlers.OnConfigureRemote(currentSnapshot()) }

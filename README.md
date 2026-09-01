@@ -8,7 +8,7 @@ Obsidian Vault（Markdownファイル群）を Mac / Windows（複数台可）/ 
 
 - **3つの同期モードから選択**: iPhone/iPadと連携したい場合はiCloud中心モード（Aモード）、PC間のみの同期でよければGoogle Drive中心モード（複数PC＝Bモード／単一PC＝Cモード）を選べます。セットアップ時に1つ選ぶと、以降は変更するのに設定リセットが必要です
 - **B・Cモード：独自ログと3-way merge**: 複数端末が同じファイルを編集した場合の競合を、`git merge-file`を使って自動検出・マージ。PC間の同期・共有ハブはGoogle Driveが担います
-- **Aモード：iCloudにすべて任せる**: Mac/Windows/iPhone/iPad間の一貫性はAppleのiCloudが担い、このアプリは各PCが独立してGoogle Driveへ一方向バックアップするだけです（Primary/Secondaryの区別・3-way merge・Vault Migrationはいずれも不要）
+- **Aモード：iCloudにすべて任せる**: Mac/Windows/iPhone/iPad間の内容の一貫性はAppleのiCloudが担うため、3-way merge・Vault Migrationは不要です。ただしGoogle Driveへの公開はPrimary機のみが行います（Bモードと同じPrimary/Secondary固定ハブ方式）——Google Driveを外部ツール（分析用途等）が読み込む単一の正本として使えるようにするためです
 - **単一ウィンドウの設定画面**: メニューバー（Mac）／タスクトレイ（Windows）に常駐し、Settings画面から設定・状態確認・Google Drive接続をすべて行えます
 - **OS標準のファイル監視 + 定期フルスキャン**: 常駐プロセスとして、変更検出を軽量化しつつ、監視の取りこぼしも定期フルスキャンで補います
 - **Git / rclone 自動インストール**: 未インストールでもSettings画面のボタンから自動取得できます（いつ・どちらが必要かは後述）
@@ -38,20 +38,19 @@ Aモードは、iPhone/iPadとの連携を優先し、このリスクを承知�
 
 ```mermaid
 flowchart LR
-    PC1["Mac または Windows"]
-    PC2["Mac または Windows<br/>（1台でも複数台でも可）"]
+    PC1["Primary<br/>Mac または Windows"]
+    PC2["Secondary<br/>Mac または Windows<br/>（複数台可）"]
     ICLOUD[("iCloud Drive<br/>(Obsidian Vault本体)")]
     IPHONE["iPhone / iPad"]
-    DRIVE[("Google Drive<br/>(バックアップ専用・読み返さない)")]
+    DRIVE[("Google Drive<br/>(単一の正本として扱える)")]
 
     PC1 <-->|Obsidian直接編集| ICLOUD
     PC2 <-->|Obsidian直接編集| ICLOUD
     ICLOUD <-->|"Apple自身のiCloud同期<br/>（このアプリの管轄外）"| IPHONE
-    PC1 -.->|"rclone sync<br/>一方向"| DRIVE
-    PC2 -.->|"rclone sync<br/>一方向"| DRIVE
+    PC1 -.->|"rclone sync<br/>Primaryのみ"| DRIVE
 ```
 
-Mac/Windows間・iPhone/iPad間の内容の一貫性はすべてAppleのiCloudに任せ、このアプリはPrimary/Secondaryの区別も3-way mergeも行いません。各PCが独立して、iCloud管理下のVaultの現在の内容をGoogle Driveへ一方向バックアップするだけです（詳細: spec 1.6.10節）。
+Mac/Windows間・iPhone/iPad間の内容の一貫性はすべてAppleのiCloudに任せるため、3-way mergeは行いません。ただしGoogle Driveへの公開はBモードと同じPrimary/Secondary固定ハブ方式で、**Primaryのみ**が行います（詳細: spec 1.6.10節）。複数端末が独立に書き込むと、Google Drive上のバックアップがどちらの端末の状態を反映しているか分からなくなる（iCloudの収束前に片方が上書きしてしまう等）ため、書き込み元を常に1台に固定しています。
 
 ### Bモード：Google Drive中心・複数PC（iPhone/iPad連携なし）
 
@@ -172,10 +171,11 @@ Remote Name・Sync Interval はデフォルト値のままで問題ありませ�
 **[ Save Settings ]** を押します。自動的に以下が行われます。
 
 - 設定の保存（選んだ同期モードはこの時点で確定し、以降変更できません）
-- **Google Drive-centricの場合のみ：Primary / Secondary の自動判定**: Google Drive上に他端末の初期化情報（`PRIMARY_MARKER.json`）が無ければこの端末が Primary（マージ処理・Google Drive/iCloud Bridge同期を担当）、既にあれば Secondary（編集＋Google Driveへの変更のpush/pullのみ）になります。手動で選ぶ必要はありません。
-- **iCloud-centricの場合：** Primary/Secondaryの判定自体が行われません。各端末が対等に、独立してGoogle Driveへバックアップします。
+- **Primary / Secondary の自動判定**: Google Drive上に他端末の初期化情報（`PRIMARY_MARKER.json`）が無ければこの端末が Primary、既にあれば Secondary になります。手動で選ぶ必要はありません。両モードで行われますが、役割の中身は異なります。
+  - **Google Drive-centricの場合：** Primaryはマージ処理・Google Drive/iCloud Bridge同期を担当、Secondaryは編集＋Google Driveへの変更のpush/pullのみ。
+  - **iCloud-centricの場合：** Primaryは現在のiCloud管理下Vaultの内容をそのままGoogle Driveへ公開するのみ（マージ処理は無し、内容の一貫性自体はiCloudが担うため）。SecondaryはGoogle Driveに対して一切何もしません（iCloudが自分のVaultを最新に保つのに任せるだけ）。
 
-保存が完了すると要約ダイアログが表示され、Settingsウィンドウは閉じます。以降はバックグラウンドで自動的に同期サイクル（デフォルト60秒間隔の共通ティック）が実行されます。Google Drive-centricのPrimaryの場合、Google Drive同期とiCloud Bridge同期は同じティックで両方実行されるのではなく、両方設定されていればティックごとに交互に1つずつ実行されます（実効間隔はおよそこの値の2倍）。片方だけ設定されていれば毎ティック実行されます。iCloud-centricの場合は毎ティック、Google Driveへのバックアップのみが実行されます。
+保存が完了すると要約ダイアログが表示され、Settingsウィンドウは閉じます。以降はバックグラウンドで自動的に同期サイクル（デフォルト60秒間隔の共通ティック）が実行されます。Google Drive-centricのPrimaryの場合、Google Drive同期とiCloud Bridge同期は同じティックで両方実行されるのではなく、両方設定されていればティックごとに交互に1つずつ実行されます（実効間隔はおよそこの値の2倍）。片方だけ設定されていれば毎ティック実行されます。iCloud-centricのPrimaryの場合は毎ティック、Google Driveへの公開のみが実行されます。iCloud-centricのSecondaryは、いずれのモードでも同期サイクル自体はバックグラウンドで動き続けますが、何も実行することがありません。
 
 ### 8. 日常的な使い方
 
@@ -187,7 +187,7 @@ Remote Name・Sync Interval はデフォルト値のままで問題ありませ�
 - **Check for Update...**: 新しいバージョンがGitHub Releasesに公開されていないか確認し、あればダウンロード・自動適用・再起動まで行う（下記参照）
 - **Quit UniteVault**: 終了
 
-**Google Drive-centricの場合：** Primary端末（最初にセットアップした端末がなりますが、Settingsから他の端末へ手動で引き継ぐこともできます）は、他端末の変更をマージしてGoogle Drive・iCloud Bridgeへ反映する役割を担うため、**定期的に起動しておく**ことを推奨します（起動していない間の他端末の変更は、Primaryが次に起動するまで反映されません）。**iCloud-centricの場合：** 全端末が対等なので、この注意は当てはまりません。どの端末も、起動している間は自分の現在の内容をGoogle Driveへバックアップし続けます。
+**両モードとも：** Primary端末（最初にセットアップした端末がなりますが、Settingsから他の端末へ手動で引き継ぐこともできます）は、Google Driveへの公開を担う役割のため、**定期的に起動しておく**ことを推奨します（起動していない間は、そのバックアップが更新されません。Google Drive-centricの場合は、さらに他端末の変更のマージも止まります）。Secondaryは起動していなくても、他端末の同期そのものには影響しません。
 
 ### 9. 2台目以降のPCを追加する
 
@@ -201,7 +201,7 @@ Remote Name・Sync Interval はデフォルト値のままで問題ありませ�
 - **Vaultの中身は、最初の同期サイクル（デフォルト最大60秒後、または手動で「Sync Now」を実行）で、Google Driveから自動的に取り込まれます。** 保存直後は空のままなので、少し待つか「Sync Now」を実行してください。
 - iPhone/iPadは追加インストール不要です（旧代替構成のiCloud Bridgeを使っている場合、Primary機のiCloud Bridgeフォルダが、通常のiCloud同期でiPhone/iPadにも配布されます）。
 
-**iCloud-centric（Aモード）の場合：** 追加するPCも同じiCloudアカウントにサインインしていれば、そのPC上のiCloud Drive内に同じVaultフォルダが既に存在するはずです（Apple自身のiCloud同期による）。手順5ではそのフォルダを選び、手順6では1台目と同じGoogleアカウント・同じリモート名を使ってください。Primary/Secondaryの区別が無いため、「新規に空のフォルダを選ぶ」手順は不要です。
+**iCloud-centric（Aモード）の場合：** 追加するPCも同じiCloudアカウントにサインインしていれば、そのPC上のiCloud Drive内に同じVaultフォルダが既に存在するはずです（Apple自身のiCloud同期による）。手順5ではそのフォルダを選び、手順6では1台目と同じGoogleアカウント・同じリモート名を使ってください（B・Cモードと違い、Vaultの中身は既にiCloudから届いているため、「新規に空のフォルダを選ぶ」手順は不要です）。保存すると、Google Drive上に既に `PRIMARY_MARKER.json` が存在するため、自動的に **Secondary** として初期化されます（Google Driveへは何もしませんが、iCloud自体は通常どおり同期され続けます）。
 
 ### 10. Vaultを変更する場合の注意
 

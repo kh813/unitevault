@@ -190,7 +190,9 @@ iCloud Bridgeフォルダを、**通常のデバイスと同列の「仮想デ�
 
 #### 1.6.10 マルチモード方式への発展（Aモード基盤：実装済み／conflicted copy自動マージ：未実装）
 
-> **実装状況：** セットアップ画面でのモード選択UI、選択結果の永続化（`config.SyncMode`、一度設定すると以後のSaveでも上書きされない）、およびAモード専用の軽量な同期サイクル（`engine.runICloudModeCycle`：Primary/Secondaryの区別なし、各PCが独立してGoogle Driveへ一方向バックアップするのみ）は実装済み。未実装なのは、iCloudが作成する`ファイル名 2.md`型のコンフリクトコピーを検出して元ファイルと3-way mergeする機能（下記「Aモードの詳細」）のみ——正規のユーザーノート命名（例:「Chapter 2.md」）と区別がつかず誤検出のリスクがあるため、検出ヒューリスティックを詰めてから実装する。1.6.1節〜1.6.9節・2章・3章が記す内容は、本節で言う「Bモード」「Cモード」に相当する**現行の実装**であり、追加実装は不要。
+> **実装状況：** セットアップ画面でのモード選択UI、選択結果の永続化（`config.SyncMode`、一度設定すると以後のSaveでも上書きされない）、およびAモード専用の同期サイクル（`engine.runICloudModeCycle`：Bモードと同じPrimary/Secondary選出を行い、**Primaryのみ**がGoogle Driveへ一方向バックアップする）は実装済み。未実装なのは、iCloudが作成する`ファイル名 2.md`型のコンフリクトコピーを検出して元ファイルと3-way mergeする機能（下記「Aモードの詳細」）のみ——正規のユーザーノート命名（例:「Chapter 2.md」）と区別がつかず誤検出のリスクがあるため、検出ヒューリスティックを詰めてから実装する。1.6.1節〜1.6.9節・2章・3章が記す内容は、本節で言う「Bモード」「Cモード」に相当する**現行の実装**であり、追加実装は不要。
+>
+> **設計変更の経緯（実機テストにより発見）：** 当初はAモードもPrimary/Secondaryの区別なく「各PCが独立してGoogle Driveへバックアップする」設計だった。これはGoogle Driveを「誰も読み返さない、純粋なバックアップ先」とみなす前提の上でのみ安全だったが、実機テストで「Google Drive上のバックアップを外部の分析ツール（例：Gemini）に読み込ませたい」という実際の利用要件が判明し、この前提が崩れた。複数端末が同じ場所へ独立に書き込むと、iCloudの収束が完了する前に片方が先にpublishした場合、Google Drive上の内容がどちらの端末の状態を反映しているか分からなくなる（`rclone sync`は差分マージではなく完全一致ミラーのため、新しい内容が古い内容で上書き・削除されることすらある）。この状態は「Vault本体（iCloud側）には実害がない」だけで、「Google Drive上のバックアップ自体の信頼性」には実害があるため、Bモードと同じPrimary/Secondary固定ハブ方式を導入し、**書き込み元を常に1台に固定**することで解決した。
 
 **背景：** 1.6.1節〜1.6.9節までの方式（以下「統合方式」と呼ぶ）は、「PC間同期」と「iPhone/iPad連携」を単一の仕組み（Google Driveハブ＋iCloud Bridge＋N-way merge）で同時に成立させようとするものだった。実機テストを重ねる中で、この**「1つの仕組みで全パターンに対応する」という設計方針自体**が、複雑さと不具合の主な発生源になっていることが判明した：
 
@@ -205,13 +207,15 @@ iCloud Bridgeフォルダを、**通常のデバイスと同列の「仮想デ�
 
 | モード | 対象ユーザー | Vaultの場所（Obsidianで指定する場所） | PC間・iPhone間の同期方式 |
 |---|---|---|---|
-| **A：iCloud中心モード** | iPhone/iPadと連携したい（PCが1台でも複数でも） | `iCloud_root/Obsidian/<Vault名>`（iCloud管理下、Obsidian専用iCloudコンテナ、1.6.3節の場所と同じ） | Mac・Windows・iPhone間の一貫性は全てAppleのiCloudに任せる。このアプリは各PCで、iCloud管理下のVaultの現在の内容を定期的にGoogle Driveへ**一方向バックアップ**するだけ（`rclone sync`）。Primary/Secondaryの区別・3-way merge・iCloud Bridgeいずれも不要 |
+| **A：iCloud中心モード** | iPhone/iPadと連携したい（PCが1台でも複数でも） | `iCloud_root/Obsidian/<Vault名>`（iCloud管理下、Obsidian専用iCloudコンテナ、1.6.3節の場所と同じ） | Mac・Windows・iPhone間の内容の一貫性は全てAppleのiCloudに任せる。ただしGoogle Driveへの公開はPrimaryのみが行う（Bモードと同じPrimary/Secondary固定ハブ方式、3.6.1節）——Google Driveを外部ツール（分析用途等）が読み込む単一の正本として使えるようにするため。3-way merge・iCloud Bridgeは不要（内容統合自体はiCloudが担うため） |
 | **B：Google Drive中心モード（複数PC）** | PCが複数台、iPhone/iPadは使わない（使う場合もこのアプリの管轄外） | `~/Obsidian/<Vault名>`（ローカル専用フォルダ） | 現行の統合方式からiCloud Bridge関連を除いたもの。Primary/Secondary固定ハブ方式＋3-way merge（1.6.4節・3.3節）でPC間の内容統合を行う |
 | **C：Google Drive中心モード（単一PC）** | PCが1台のみ | `~/Obsidian/<Vault名>`（ローカル専用フォルダ） | Bモードの縮退形（Secondary・マージ対象が存在しないため、実質的に一方向バックアップと同じ動きになる）。実装上はBモードと共通のコードパスで、追加実装は不要 |
 
 **Aモードの詳細（実装状況は本節冒頭の実装状況ブロックを参照）：**
 - Vault MigrationやiCloud Bridge（1.6.3節・1.6.7節）はAモードでは不要になる——Vault自体が既にiCloud管理下にあるため、「別の安全な場所へ移動してからステージング用にコピーし直す」という手順そのものが発生しない。
-- Google Driveへの同期はPrimary/Secondaryの区別なく、**各PCが独立して**「現在のiCloud管理下Vaultの内容をそのままGoogle Driveへ`rclone sync`する」だけでよい。Google Driveは**誰も読み返さない、純粋なバックアップ先**として扱うため、複数PCが多少タイミングをずらして書き込んでも（iCloudの同期が全PC間で収束しきる前に片方が先にpublishしてしまう等）実害はない——次のティックで、収束後の内容に上書きされて自己修復するため。
+- **Primary/Secondaryの選出はBモードと全く同じ仕組み**（`PRIMARY_MARKER.json`、3.6.1節）を再利用する。ただしPrimaryが行うのは他デバイスのログのマージではなく、**現在のiCloud管理下Vaultの内容をそのままGoogle Driveへ`rclone sync`で公開する**だけ（内容統合自体はAppleのiCloudが担うため、ログ・マージエンジンは不要）。Secondaryは、iCloudが自分のVaultを最新に保つのに任せるのみで、Google Driveに対しては何も行わない（push/pullとも無し）。
+- Primaryが長期間起動しない場合は、Bモードと同じ「Promote to Primary...」で他デバイスに引き継げる。
+- Google Driveへの公開時は、このアプリ自身のブックキーピング用ディレクトリ（`.sync/`、Bモードでは他デバイスへログを配布するため公開に含める）を除外する——Aモードでは`.sync/`を読み返すデバイスが存在しないため、公開版に含めると外部分析ツール等から見て余計なノイズになるだけのため。
 - 唯一のトレードオフ：ObsidianによるVaultファイルへの直接書き込みとiCloudの内部デーモンによる同期処理が同じファイルに対して競合し得るという、1.6.1節で回避しようとしたリスクを、**利用者が明示的にこのモードを選ぶことで受け入れる**。iCloudはこの競合を検出した場合、タイムスタンプの新しい方を採用するか、`ファイル名 (conflicted copy).md`という別名の複製を作成する（3.6.1.6節）。後者が発生した場合、このアプリの3-way mergeエンジン（3.3節、`git merge-file`）を使って元ファイルと複製ファイルをマージする機能を提供する予定（詳細は実装時に別途仕様化する）。
 
 **BモードとCモードの詳細：** 1.6.1節〜1.6.9節の内容から、iCloud Bridge関連（1.6.3節・1.6.7節のBridge部分）を除いたものがそのまま該当する。Vault Migration機能自体は、B・Cモードでも「iCloud上に元々あったVaultを`~/Obsidian/`へ取り込む」という初回移行の用途では引き続き必要（1.6.7節）。
@@ -265,18 +269,18 @@ Google Drive
 #### Aモード：iCloud中心（実装済み、conflicted copy自動マージを除く）
 
 ```
-[PC 1: Mac/Windows] ──┐
-                       ├── Obsidian Vault（iCloud_root/Obsidian/<Vault名>） ──▶ [iPhone/iPad]
-[PC 2: Mac/Windows] ──┘         │
-        （台数は1台でも複数でも可、          │ Apple自身のiCloud同期
-         Primary/Secondaryの区別は無い）      │ （このアプリの管轄外）
-                                 │
-                     各PCが独立して rclone sync でバックアップ
-                                 ▼
-                    Google Drive（誰も読み返さない、バックアップ専用）
+[Primary: Mac/Windows]   ──┐
+                            ├── Obsidian Vault（iCloud_root/Obsidian/<Vault名>） ──▶ [iPhone/iPad]
+[Secondary: Mac/Windows] ──┘         │
+   （Secondaryは複数台可）            │ Apple自身のiCloud同期
+                                      │ （このアプリの管轄外）
+                                      │
+                        Primaryのみ rclone sync で公開
+                                      ▼
+                     Google Drive（単一の正本として扱える）
 ```
 
-PC間・iPhone間の内容の一貫性は全てAppleのiCloudが担う。Primary/Secondaryの区別・3-way merge・iCloud Bridge・Vault Migrationはいずれも不要（1.6.10節）。セットアップ画面でAモードを選ぶと、Vault Migrationへの自動誘導もPrimary/Secondary初期化も行われず、`engine.runICloudModeCycle`による一方向バックアップのみが動く。
+PC間・iPhone間の内容の一貫性は全てAppleのiCloudが担う。3-way merge・iCloud Bridge・Vault Migrationはいずれも不要（1.6.10節）。ただしGoogle Driveへの公開はBモードと同じPrimary/Secondary固定ハブ方式で行う——複数PCが独立に書き込むと、Google Drive上のバックアップが「どちらの端末の状態を反映しているか分からない」状態になり得るため（外部分析ツール等がGoogle Driveを読み込む前提では、この曖昧さは許容できない）。セットアップ画面でAモードを選ぶと、Vault Migrationへの自動誘導は行われないが、Primary/Secondary初期化はBモードと同様に行われ、`engine.runICloudModeCycle`はPrimaryの時だけGoogle Driveへ公開する。
 
 #### Aモードの旧代替手段（Bridge方式・Aモード実装前の暫定運用）
 

@@ -423,20 +423,21 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 // runICloudModeCycle implements spec 1.6.10's Mode A: the Vault lives
 // directly in Obsidian's iCloud container, and Apple's own iCloud sync is
 // solely responsible for content consistency across every Mac/Windows/
-// iPhone signed into the same account - this app never elects a Primary
-// and never merges anything in this mode (contrast SyncModeDrive's
-// Primary/Secondary + 3-way merge engine, the rest of this file). Each
-// device independently mirrors its own current view of the Vault to
-// Google Drive as a one-way backup only, via the same destructive
-// `rclone sync` SyncModeDrive's Primary uses to publish - safe here
-// specifically because nothing in this mode ever reads it back: unlike a
-// Secondary's pull (which does get read back, and so needs the
-// debounce/exclude protection RunCycle's SyncModeDrive path has), a
-// moment of staleness in this one-way backup (e.g. two devices publishing
-// close together before iCloud has fully converged them) self-heals on
-// the very next tick once iCloud catches up, with no data ever actually
-// lost - only ever overwritten with what becomes the final, converged
-// content moments later.
+// iPhone signed into the same account - this app never merges anything in
+// this mode (contrast SyncModeDrive's 3-way merge engine, the rest of this
+// file). It still elects a Primary/Secondary exactly like SyncModeDrive
+// does, though: Google Drive here isn't a read-back sync channel, but it
+// is meant to hold one canonical, unambiguous snapshot of the Vault for
+// downstream consumers (e.g. feeding it to an external analysis tool) -
+// letting every device publish independently would let whichever synced
+// last silently overwrite (or even delete, since `rclone sync` mirrors
+// destructively) another device's more current content during the window
+// before iCloud has converged them, with no way to tell afterwards which
+// version Drive actually reflects. A real, previously-shipped design
+// mistake had every device publish independently on the reasoning that a
+// pure backup nobody reads back can tolerate transient staleness - true
+// for the live Vault, but not for a backup itself relied upon as a
+// canonical export.
 func (e *SyncEngine) runICloudModeCycle(ctx context.Context, cfg *config.Config) error {
 	if err := os.MkdirAll(e.vaultPath, 0755); err != nil {
 		return fmt.Errorf("failed to create vault dir: %w", err)
@@ -446,8 +447,47 @@ func (e *SyncEngine) runICloudModeCycle(ctx context.Context, cfg *config.Config)
 		return nil
 	}
 
+	deviceID, err := e.cfgMgr.GetDeviceID()
+	if err != nil {
+		return fmt.Errorf("failed to get device ID: %w", err)
+	}
 	remoteTarget := fmt.Sprintf("%s:%s", cfg.RcloneRemote, cfg.RclonePath)
-	syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget)
+	bootstrapper := bootstrap.NewBootstrapper(e.cfgMgr, e.drive)
+
+	role, err := e.cfgMgr.LoadRole()
+	if err != nil || role == "" {
+		role, err = bootstrapper.InitializeNode(ctx, e.vaultPath, remoteTarget, e.label)
+		if err != nil {
+			return fmt.Errorf("initialization failed: %w", err)
+		}
+	}
+
+	if role == "secondary" {
+		// Nothing to do: iCloud alone keeps this device's own Vault
+		// current, and only Primary ever touches Google Drive in this
+		// mode (no per-device log/merge exists here for a Secondary to
+		// contribute to, unlike SyncModeDrive's Secondary).
+		return nil
+	}
+
+	// Primary: re-confirm every cycle that this device is still the one
+	// PRIMARY_MARKER.json names (mirrors SyncModeDrive's Primary branch) -
+	// a device superseded elsewhere (Settings > "Promote to Primary...")
+	// must stop publishing immediately, not keep racing the new Primary.
+	proceed, err := bootstrapper.VerifyPrimaryStatus(ctx, e.vaultPath, remoteTarget, deviceID, e.label)
+	if err != nil {
+		return fmt.Errorf("primary status check failed: %w", err)
+	}
+	if !proceed {
+		return nil
+	}
+
+	// This app's own bookkeeping (.sync/) is excluded - unlike
+	// SyncModeDrive's Primary publish (which needs it there for
+	// Secondaries to read), Mode A's Secondary never reads Drive at all,
+	// so publishing it would only add noise to what's meant to be a clean
+	// Vault-only export.
+	syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget, "/"+syncdir.Name+"/**")
 
 	status := config.DriveSyncStatus{Time: time.Now().Format(time.RFC3339), Success: syncErr == nil}
 	if syncErr != nil {

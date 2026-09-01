@@ -8,7 +8,6 @@
   "Mac/Windows only (iPhone/iPad won't run Obsidian)": "Mac/Windowsのみ（iPhone/iPadでObsidianを使わない場合）",
   "iPhone/iPad will run Obsidian and sync with Mac/Windows - required in this case": "iPhone/iPadでObsidianを使い、Windows/Macと同期する場合（この場合は必須）",
   "This can't be changed later without resetting configuration.": "この設定は後から変更できません（変更するには設定のリセットが必要です）。",
-  "iCloud-centric (backup only)": "iCloud中心（バックアップ専用）",
   "Select Folder...": "フォルダを選択...",
   "Select Your Obsidian Vault Folder": "Obsidian Vaultのフォルダを選択",
   "Obsidian Vault": "Obsidian Vault",

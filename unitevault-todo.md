@@ -316,13 +316,17 @@
 
 - [x] セットアップ画面（Settings Window / Setup Wizard）にモード選択UIを追加
 - [x] Aモード（iCloud中心）の実装：
-  - [x] Vault Migration・iCloud Bridge関連の仕組み（`ManagedVaultParentDir`・`SeedICloudBridge`・`MirrorVaultToBridge`・`ScanBridgeAndLog`等）を経由しない、専用の軽量な同期エンジンを実装する（Primary/Secondaryの区別なし、各PCが独立して`rclone sync`でGoogle Driveへバックアップするのみ、`engine.runICloudModeCycle`）
+  - [x] Vault Migration・iCloud Bridge関連の仕組み（`ManagedVaultParentDir`・`SeedICloudBridge`・`MirrorVaultToBridge`・`ScanBridgeAndLog`等）を経由しない、専用の同期エンジンを実装する（`engine.runICloudModeCycle`。Bモードと同じPrimary/Secondary選出を再利用し、Primaryのみが`rclone sync`でGoogle Driveへ公開する——設計変更の経緯は下記「追記」参照）
   - [ ] iCloudが作成する`ファイル名 (conflicted copy).md`／`ファイル名 2.md`を検出し、元ファイルと3-way mergeする機能（既存の`internal/merge`を再利用可能）——正規のユーザーノート命名（例:「Chapter 2.md」）と区別できないため、誤検出時に無関係なファイルを壊しかねない。検出ヒューリスティックが固まるまで着手しない（ユーザーへの相談待ち）
 - [x] B・Cモードは既存の実装をそのまま使う（追加実装なし、確認済み）
 - [x] モード間の切り替えはv1では非対応（将来のTodo参照）。`cmd/unitevault/main.go`の`lockedSyncMode`が、一度保存されたSyncModeを以後のSaveで上書きさせないことで永続化層でも強制している
 - [ ] README等のユーザーガイドへの詳しい手順の追記は、実装が一段落してから行う（ユーザー指示）
 
-**追記（実装済み）：** Settings画面にモード選択（RadioGroup、初回セットアップ時のみ表示、Vault保存済みなら以後は読み取り専用ラベル表示に切り替え）を追加した。`gui.SettingsFormData.SyncMode`（"drive"/"icloud"の平文字列、`internal/gui`をconfigパッケージから独立に保つ既存方針を踏襲）で受け渡し、`main.go`の`buildFormData`/`buildSaveConfig`/`lockedSyncMode`/`vaultNeedsAutoMigration`/`saveSettingsConfirmed`を対応させた。AモードではVault Migrationへの自動誘導（`vaultNeedsAutoMigration`）とPrimary/Secondary初期化（`InitializeNode`）の両方を明示的にスキップする——後者は、AモードのGoogle Drive同期先が純粋なバックアップ専用（読み返されない）であるにもかかわらず、`InitializeNode`のSecondary初期化パスが実際にはDriveからの初回pullを行うため、iCloud管理下のVaultをその（空または古い）バックアップ内容で上書きしてしまう実害があったため。
+**追記（実装済み）：** Settings画面にモード選択（RadioGroup、初回セットアップ時のみ表示、Vault保存済みなら以後は読み取り専用ラベル表示に切り替え）を追加した。`gui.SettingsFormData.SyncMode`（"drive"/"icloud"の平文字列、`internal/gui`をconfigパッケージから独立に保つ既存方針を踏襲）で受け渡し、`main.go`の`buildFormData`/`buildSaveConfig`/`lockedSyncMode`/`vaultNeedsAutoMigration`/`saveSettingsConfirmed`を対応させた。AモードではVault Migrationへの自動誘導（`vaultNeedsAutoMigration`）のみ明示的にスキップする（Vaultを意図的にiCloud内に置き続けるモードのため）。
+
+**追記（設計変更・実機テストにより発見、spec 1.6.10節に反映済み）：** 上記の初版実装では、AモードもPrimary/Secondaryの区別なく「各PCが独立してGoogle Driveへバックアップする」設計にしていた（`saveSettingsConfirmed`・`runICloudModeCycle`ともPrimary/Secondary初期化を明示的にスキップ）。これはGoogle Driveを「誰も読み返さない、純粋なバックアップ先」とみなす前提の上でのみ安全だったが、ユーザーから「Google Drive上のバックアップをGemini等の外部分析ツールに読み込ませたい」という実際の利用要件を指摘され、この前提が崩れていることが判明した。複数端末が同じ場所へ独立に書き込むと、iCloudの収束が完了する前に片方が先にpublishした場合、Google Drive上の内容がどちらの端末の状態を反映しているか分からなくなる（`rclone sync`は完全一致ミラーのため、新しい内容が古い内容で上書き・削除されることすらある）。対応として、AモードにもBモードと同じPrimary/Secondary選出（`bootstrap.InitializeNode`・`VerifyPrimaryStatus`・`PRIMARY_MARKER.json`）を導入し、`engine.runICloudModeCycle`はPrimaryの時だけGoogle Driveへ公開するよう変更した（Secondaryは何もしない）。あわせて、Settings画面でAモードでも「Device role」欄・「Promote to Primary...」を表示するよう戻した（初版実装時に「Primary/Secondaryが存在しないモードなので表示すると紛らわしい」という理由で非表示にしていたが、その前提自体が変わったため）。
+
+なお、初版実装時の判断（`saveSettingsConfirmed`でのInitializeNode呼び出しスキップ）には誤解があった：`bootstrap.initAsSecondary`は実際にはGoogle Driveから何もpull/コピーしない（`PRIMARY_MARKER.json`とローカルの空ログファイルを用意するだけ）ため、Secondary初期化自体はAモードでも元々安全だった。今回の再導入にあたり、この誤解も併せて訂正した。
 
 ---
 

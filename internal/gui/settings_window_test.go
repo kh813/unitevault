@@ -896,20 +896,17 @@ func TestBuildSettingsContent_SyncMode_HidesMigrateVaultButton(t *testing.T) {
 	}
 }
 
-// TestBuildSettingsContent_SyncMode_HidesDeviceRoleRow guards a real,
-// previously-shipped confusion: Primary/Secondary is a Drive-mode-only
-// concept (spec 1.6.10) that an iCloud-mode device never has (its role file
-// is never written - see saveSettingsConfirmed), so showing the row always
-// read "N/A" there even on a fully working, correctly-configured device -
-// indistinguishable from an unfinished setup. Drive-mode devices (locked or
-// still mid first-time-setup, where SyncMode is still "") must keep seeing
-// the row.
-func TestBuildSettingsContent_SyncMode_HidesDeviceRoleRow(t *testing.T) {
+// TestBuildSettingsContent_SyncMode_ShowsDeviceRoleRowInBothModes guards
+// spec 1.6.10: iCloud mode elects a Primary/Secondary exactly like Drive
+// mode does (Google Drive needs exactly one canonical publisher there
+// too), so the "Device role" row must appear regardless of which mode is
+// selected/locked, or unset entirely (first-time setup).
+func TestBuildSettingsContent_SyncMode_ShowsDeviceRoleRowInBothModes(t *testing.T) {
 	newTestWindow()
 
 	icloud := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "icloud"}, SettingsHandlers{})
-	if hasLabelText(icloud, "Device role:") {
-		t.Error("expected no 'Device role' row for an iCloud-mode device")
+	if !hasLabelText(icloud, "Device role:") {
+		t.Error("expected a 'Device role' row for an iCloud-mode device")
 	}
 
 	drive := buildSettingsContent(SettingsFormData{VaultPath: "/tmp/vault", SyncMode: "drive"}, SettingsHandlers{})
