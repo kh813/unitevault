@@ -24,6 +24,24 @@ jobs:
         with:
           go-version: '1.22'
 
+      # internal/selfupdate/apply_windows.go go:embeds this helper binary,
+      # so anything compiling that file (which release.yml's own Windows
+      # build always does after building this first) fails to even
+      # `go build` without it - a Windows-only source file, so this only
+      # actually matters for the windows-latest job, but building it here
+      # unconditionally mirrors release.yml exactly and costs nothing on
+      # macOS (CGO_ENABLED=0 cross-compile, no mingw toolchain needed).
+      - name: Build Windows self-update helper
+        env:
+          CGO_ENABLED: 0
+          GOOS: windows
+          GOARCH: amd64
+        # A single-line command with no shell-specific syntax (no line
+        # continuation, no inline env var prefix) - this step's default
+        # shell differs by runner (bash on macOS, PowerShell on Windows),
+        # and only the env: block above is portable between them.
+        run: go build -ldflags "-H=windowsgui" -o internal/selfupdate/updatehelper_windows_amd64.exe ./cmd/unitevault-updatehelper
+
       # The GUI (internal/gui, cmd/unitevault) is built on Fyne, which
       # requires CGO to compile at all - go vet/go test need the same
       # native OpenGL bindings as the real build. Runs on both macOS and
