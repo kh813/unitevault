@@ -175,6 +175,25 @@ func SetMenuItemEnabled(menu *fyne.Menu, item *fyne.MenuItem, enabled bool) {
 	})
 }
 
+// minDialogHostSize is a floor for mainWindow's canvas size whenever
+// ensureWindowVisible has to bring it up from fully hidden just to host a
+// dialog. Every dialog in this package (Info/Confirm/Choice/ChoiceN/
+// InstallReminder, and even Fyne's own built-in dialog.NewInformation/
+// NewConfirm) is shown as an overlay on mainWindow's canvas via
+// widget.NewModalPopUp, and Fyne's popup layout clamps an overlay to fit
+// inside whatever canvas size it's hosted on
+// (popUpRenderer.Layout: size = size.Min(canvas.Size())) rather than
+// growing the window to fit - none of this package's own wrapping/sizing
+// logic (wrappedMessageLabel, constrainWrappedDialogWidth, or Fyne's own
+// equivalent in dialog/text.go) helps if the window itself is smaller than
+// what the dialog naturally needs; the excess is silently clipped instead
+// of erroring. A real, previously-shipped bug: InitApp's own placeholder
+// size (480x320) is too small for some of this app's longer messages (e.g.
+// the first-launch disclaimer, spec 8.6) - and the disclaimer gate is the
+// very first thing ever shown on a fresh install, before Settings has had
+// any chance to size the window from its own real content.
+var minDialogHostSize = fyne.NewSize(700, 560)
+
 // ensureWindowVisible shows the shared window if it isn't already, and
 // reports whether it *was* hidden. Dialogs (Info/Confirm/Choice/...) are
 // attached as an overlay on mainWindow's canvas, so if the window itself is
@@ -190,6 +209,14 @@ func ensureWindowVisible() bool {
 	wasHidden := !windowVisible
 	if wasHidden {
 		windowVisible = true
+		// Only grow the window here, in the "just borrowing it for a
+		// transient dialog" path - if Settings is already genuinely open
+		// (wasHidden false), its size reflects the user's own real content
+		// (ShowSettingsWindow's own Resize) and must not be resized out
+		// from under them just because an unrelated dialog happened to fire.
+		if cur := mainWindow.Canvas().Size(); cur.Width < minDialogHostSize.Width || cur.Height < minDialogHostSize.Height {
+			mainWindow.Resize(minDialogHostSize)
+		}
 		mainWindow.Show()
 	}
 	return wasHidden

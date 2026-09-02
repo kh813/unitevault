@@ -373,6 +373,17 @@
 
 ---
 
+## Phase 23：初回起動時の免責事項ダイアログの説明文がウィンドウからはみ出る不具合（実装済み）
+
+**背景：** v0.0.66リリース後、ユーザーから「起動時の免責事項の同意画面の説明文がウィンドウから溢れる。このダイアログだけでなく、すべてのダイアログが対象」という実機報告があった。
+
+- [x] **根本原因：** ダイアログ（`Info`・`Confirm`／`ConfirmDanger`・`Choice`／`ChoiceN`・`InstallReminder`、さらにFyne組み込みの`dialog.NewInformation`／`dialog.NewConfirm`まで含め、このアプリのダイアログは全て）は`widget.NewModalPopUp`で共有ウィンドウ（`mainWindow`）のCanvas上にオーバーレイとして表示される。Fyneの`widget.popUpRenderer.Layout`は、オーバーレイのサイズを`size.Min(canvas.Size())`で**現在のウィンドウのCanvasサイズにクランプ**する（ウィンドウ側を広げてくれるわけではない）。既存の折り返し処理（`wrappedMessageLabel`・`constrainWrappedDialogWidth`、Fyne組み込みダイアログ自身の`dialog/text.go`の同種ロジック）は幅しか制御しておらず、高さは無制限にラベルの自然な必要高さになる。`mainWindow`は`InitApp`で480x320という小さいプレースホルダーサイズのまま初期化され、Settingsが一度も表示されていない起動直後はこのサイズのまま——免責事項の同意ダイアログ（`showDisclaimerGate`）はまさに**アプリ起動後、最初に必ず表示されるダイアログ**であり、複数段落のメッセージがこの小さいCanvasサイズにクランプされて見切れてしまっていた。
+- [x] **修正：** `internal/gui/app.go`の`ensureWindowVisible`（全ダイアログ関数が共通で呼ぶ、共有ウィンドウを表示させるための唯一の入口）に、ウィンドウが非表示状態から呼び出された場合（＝Settingsが実際に開かれているのではなく、ダイアログのために一時的に間借りしているだけの場合）に限り、Canvasサイズが`minDialogHostSize`（700x560）を下回っていれば`mainWindow.Resize(minDialogHostSize)`で底上げする処理を追加。Settingsが既に開いている場合（`wasHidden == false`）は何もしない——ユーザーが見ている実際のSettings画面のサイズを、無関係なダイアログのために勝手に広げないようにするため。
+- [x] 回帰防止テスト`TestChoice_GrowsUndersizedHiddenWindowToFitDialog`を追加（480x320の非表示ウィンドウから、免責事項相当の長文メッセージで`Choice`を呼び出し、ウィンドウが`minDialogHostSize`まで広がること、かつラベルがCanvas内に収まる（見切れない）ことを確認）
+- [x] ビルド/vet/テスト・Windowsクロスコンパイルすべて確認済み
+
+---
+
 ## 進め方の補足
 
 - 各PhaseはPhase番号の順に進めることを推奨する（Phase 4〈drive〉→Phase 5〈bootstrap〉→Phase 6〈merge〉の順は依存関係上この並びが自然）。

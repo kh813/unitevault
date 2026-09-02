@@ -408,3 +408,34 @@ func TestInfo_ShowsAsOverlayOnSharedWindow(t *testing.T) {
 		t.Error("expected Info to show the shared window so its overlay has somewhere to render")
 	}
 }
+
+// TestChoice_GrowsUndersizedHiddenWindowToFitDialog guards a real,
+// previously-shipped bug: the first-launch disclaimer gate
+// (showDisclaimerGate, cmd/unitevault/main.go) is the very first dialog
+// ever shown on a fresh install, while mainWindow still sits at InitApp's
+// small placeholder size (480x320) - Fyne's own popup layout clamps an
+// overlay dialog to fit inside whatever canvas size it's hosted on instead
+// of growing the window to fit (widget.popUpRenderer.Layout), so a long
+// multi-paragraph message got silently clipped at the window's edge
+// instead of wrapping visibly within it. ensureWindowVisible must grow a
+// hidden window to a comfortable floor (minDialogHostSize) before showing
+// anything on it.
+func TestChoice_GrowsUndersizedHiddenWindowToFitDialog(t *testing.T) {
+	newTestWindow()
+	mainWindow.Resize(fyne.NewSize(480, 320))
+	windowVisible = false
+
+	longMessage := "UniteVault is an independent, unofficial tool - it is not made, endorsed, or supported by Obsidian.\n\nIt is provided \"as is\", with no warranty of any kind. The author is not liable for any data loss, file corruption, or other damage that may result from using it.\n\nThis software moves, merges, and synchronizes your Vault files automatically. Please keep your own backups, especially while you're still getting familiar with it.\n\nBy clicking \"I Agree\", you acknowledge and accept these terms."
+
+	Choice("UniteVault Disclaimer", longMessage, "I Agree", "Quit", func(int) {})
+
+	got := mainWindow.Canvas().Size()
+	if got.Width < minDialogHostSize.Width || got.Height < minDialogHostSize.Height {
+		t.Fatalf("expected the window to grow to at least %v before hosting the dialog, got %v - Fyne clamps an overlay to the canvas size instead of growing it, so a too-small window silently clips the dialog's content", minDialogHostSize, got)
+	}
+
+	label := findDialogLabel(t, longMessage)
+	if label.Size().Height > got.Height {
+		t.Errorf("expected the wrapped label (height %v) to fit within the window's canvas (height %v) instead of being clipped", label.Size().Height, got.Height)
+	}
+}
