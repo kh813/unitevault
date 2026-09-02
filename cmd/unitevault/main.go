@@ -1133,7 +1133,7 @@ func (t *trayApp) configureRemote(current gui.SettingsFormData) {
 
 					err := gui.RunWithProgress(
 						lang.L("Google Drive Setup"),
-						lang.L("Opening your browser for Google Drive authentication...\nPlease grant permissions, then return here."),
+						lang.L("Opening your browser for Google Drive authentication...\nThis can take up to a minute or two before the browser tab appears - please wait. Then grant permissions and return here."),
 						func() error { return client.CreateGoogleDriveRemote(context.Background(), remoteName) },
 					)
 					if err != nil || !client.IsRemoteConfigured(context.Background(), remoteName) {
@@ -1884,7 +1884,7 @@ func (t *trayApp) saveSettingsConfirmed(data gui.SettingsFormData) {
 				case 1:
 					err := gui.RunWithProgress(
 						lang.L("Google Drive Setup"),
-						lang.L("Opening your browser for Google Drive authentication...\nPlease grant permissions, then return here."),
+						lang.L("Opening your browser for Google Drive authentication...\nThis can take up to a minute or two before the browser tab appears - please wait. Then grant permissions and return here."),
 						func() error { return driveClient.CreateGoogleDriveRemote(context.Background(), data.RcloneRemote) },
 					)
 					if err != nil || !driveClient.IsRemoteConfigured(context.Background(), data.RcloneRemote) {

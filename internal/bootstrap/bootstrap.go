@@ -14,7 +14,7 @@ import (
 	"github.com/kh813/unitevault/internal/syncdir"
 )
 
-const AppVersion = "0.0.69"
+const AppVersion = "0.0.70"
 const PrimaryMarkerRelPath = syncdir.Name + "/PRIMARY_MARKER.json"
 
 // ConflictMarkerRelPath is the Google Drive path (not mirrored into the

@@ -164,7 +164,7 @@
   "New Setup (Recommended)": "新規設定（推奨）",
   "Existing / CLI Config": "既存 / CLIでの設定",
   "Google Drive Setup": "Google Driveの設定",
-  "Opening your browser for Google Drive authentication...\nPlease grant permissions, then return here.": "Google Drive認証のためブラウザを開いています...\n権限を許可した後、ここに戻ってください。",
+  "Opening your browser for Google Drive authentication...\nThis can take up to a minute or two before the browser tab appears - please wait. Then grant permissions and return here.": "Google Drive認証のためブラウザを開いています...\nブラウザのタブが開くまで1〜2分ほどかかることがあります。しばらくお待ちください。権限を許可した後、ここに戻ってください。",
   "Setup Failed": "設定に失敗しました",
   "Automatic setup did not complete. Launching a terminal for manual configuration instead...": "自動設定が完了しませんでした。代わりに手動設定用のターミナルを起動します...",
   "Google Drive Connected": "Google Driveに接続しました",

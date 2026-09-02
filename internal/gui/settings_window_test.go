@@ -78,6 +78,16 @@ func findCheck(root fyne.CanvasObject, text string) *widget.Check {
 	return found
 }
 
+func findLabel(root fyne.CanvasObject, text string) *widget.Label {
+	var found *widget.Label
+	walkObjects(root, func(o fyne.CanvasObject) {
+		if l, ok := o.(*widget.Label); ok && l.Text == text {
+			found = l
+		}
+	})
+	return found
+}
+
 func newTestWindow() {
 	test.NewApp()
 	mainWindow = test.NewWindow(nil)
@@ -981,6 +991,84 @@ func TestBuildSettingsContent_SyncMode_SelectorShownForFirstTimeSetup(t *testing
 
 	if findCheck(content, "Google Drive-centric") == nil || findCheck(content, "iCloud-centric") == nil || findCheck(content, "Google Drive (desktop app)") == nil {
 		t.Fatal("expected all three sync mode options for an unconfigured device")
+	}
+}
+
+// TestBuildSettingsContent_SyncMode_DescriptionsColumnAligned guards a real
+// user request: the 3-way Sync Mode selector's description must sit next
+// to its Check on the same row (not wrapped onto a separate line below it
+// - an earlier design this reverts), with every description's start
+// column-aligned to the widest Check label, like a small table.
+func TestBuildSettingsContent_SyncMode_DescriptionsColumnAligned(t *testing.T) {
+	newTestWindow()
+	mainWindow.Resize(fyne.NewSize(480, 320))
+
+	ShowSettingsWindow(SettingsFormData{}, SettingsHandlers{})
+
+	labels := []string{"Google Drive-centric", "iCloud-centric", "Google Drive (desktop app)"}
+	descriptions := []string{
+		"Mac/Windows only (iPhone/iPad won't run Obsidian)",
+		"iPhone/iPad will run Obsidian and sync with Mac/Windows - required in this case",
+		"Vault already lives in a folder Google Drive's desktop app syncs (Mac/Windows only, no iPhone/iPad)",
+	}
+
+	var descX float32 = -1
+	for i, label := range labels {
+		check := findCheck(mainWindow.Content(), label)
+		if check == nil {
+			t.Fatalf("expected to find the %q check", label)
+		}
+		desc := findLabel(mainWindow.Content(), descriptions[i])
+		if desc == nil {
+			t.Fatalf("expected to find the description label %q", descriptions[i])
+		}
+
+		if desc.Position().Y != check.Position().Y {
+			t.Errorf("expected %q's description to sit on the same row as its check (check Y=%v, desc Y=%v)", label, check.Position().Y, desc.Position().Y)
+		}
+		if desc.Position().X <= check.Position().X {
+			t.Errorf("expected %q's description to sit to the right of its check", label)
+		}
+		if descX == -1 {
+			descX = desc.Position().X
+		} else if desc.Position().X != descX {
+			t.Errorf("expected every description to start at the same X position (column-aligned), got %v for %q, expected %v", desc.Position().X, label, descX)
+		}
+	}
+}
+
+// TestShowSettingsWindow_CapsHeightForTallFirstTimeSetupForm guards a real,
+// previously-shipped bug reported on a real Windows device: the
+// first-time-setup form (VaultPath unset, so the interactive 3-way Sync
+// Mode selector - each option with its own wrapped description, spec
+// 1.6.10 - renders instead of a single locked label) is tall enough that
+// the window ended up sized taller than the actual screen, and got
+// positioned such that its very top (the Sync Mode card, this content's
+// first section) rendered off-screen and unreachable - the user reported
+// not seeing the Sync Mode card or even its label text at all, as if it
+// had vanished, rather than needing to scroll or move the window.
+// ShowSettingsWindow must cap the window's height at settingsWindowMaxHeight
+// and let the content scroll (it's already wrapped in a VScroll, see
+// buildSettingsContent) instead of growing the window past it, while
+// keeping content near the top (e.g. the Sync Mode selector) positioned
+// within that capped height so it's visible without scrolling.
+func TestShowSettingsWindow_CapsHeightForTallFirstTimeSetupForm(t *testing.T) {
+	newTestWindow()
+	mainWindow.Resize(fyne.NewSize(480, 320))
+
+	ShowSettingsWindow(SettingsFormData{}, SettingsHandlers{})
+
+	got := mainWindow.Canvas().Size()
+	if got.Height > settingsWindowMaxHeight {
+		t.Fatalf("expected the window height to be capped at %v, got %v", settingsWindowMaxHeight, got.Height)
+	}
+
+	check := findCheck(mainWindow.Content(), "iCloud-centric")
+	if check == nil {
+		t.Fatal("expected to find the iCloud-centric sync mode check in the rendered content")
+	}
+	if check.Position().Y+check.Size().Height > got.Height {
+		t.Errorf("expected the Sync Mode selector (position %v, size %v) to fit within the capped window height %v - looks like it would render off-screen/unreachable", check.Position(), check.Size(), got.Height)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/lang"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -150,6 +151,23 @@ type SettingsHandlers struct {
 // devices (a follow-up user report, on both Mac and Windows).
 const settingsWindowWidthFactor float32 = 1.55
 
+// settingsWindowMaxHeight caps the window's height regardless of how tall
+// its content naturally wants to be, so it always fits comfortably even on
+// a small/laptop-resolution screen (e.g. 1366x768) once the title bar and
+// window chrome are accounted for - a real, previously-shipped bug: the
+// first-time-setup form (the interactive 3-way Sync Mode selector, each
+// option with its own wrapped description, spec 1.6.10) is tall enough
+// that on a real Windows device the window ended up sized taller than the
+// actual screen, and got positioned such that its very top (the Sync Mode
+// card - the first section of this content) rendered off-screen and
+// unreachable, looking like it had vanished entirely rather than merely
+// needing the window moved or scrolled. Fyne has no cross-platform API to
+// query the actual screen size here, so this is a conservative fixed
+// value; content taller than it simply scrolls (topContent is already
+// wrapped in a VScroll, see buildSettingsContent) instead of forcing the
+// window past it.
+const settingsWindowMaxHeight float32 = 700
+
 func ShowSettingsWindow(data SettingsFormData, handlers SettingsHandlers) {
 	fyne.Do(func() {
 		content := buildSettingsContent(data, handlers)
@@ -175,9 +193,9 @@ func ShowSettingsWindow(data SettingsFormData, handlers SettingsHandlers) {
 		// suggest.
 		min := content.MinSize()
 		width := min.Width*settingsWindowWidthFactor + 24
-		mainWindow.Resize(fyne.NewSize(width, min.Height+24))
+		mainWindow.Resize(fyne.NewSize(width, fyne.Min(min.Height+24, settingsWindowMaxHeight)))
 		reflowed := content.MinSize()
-		mainWindow.Resize(fyne.NewSize(width, reflowed.Height+24))
+		mainWindow.Resize(fyne.NewSize(width, fyne.Min(reflowed.Height+24, settingsWindowMaxHeight)))
 		windowVisible = true
 		mainWindow.Show()
 		mainWindow.RequestFocus()
@@ -211,15 +229,22 @@ func statusLine(label, value, actionLabel string, action func()) fyne.CanvasObje
 }
 
 // newExclusiveCheckGroup builds a set of mutually-exclusive widget.Check
-// rows (one per option, each immediately followed by its own wrapped
-// description) and returns them as a single VBox - used for Sync Mode's
-// 3-way choice (spec 1.6.10). widget.RadioGroup can't be used here since
-// its per-option label is a canvas.Text, which (per its own doc comment:
-// "No formatting or text parsing will be performed") can't wrap or render
-// a multi-line description under each option. onSelect is called with the
-// newly-selected option's index whenever the selection changes; exactly
-// one option stays checked at all times (clicking the already-selected
-// check back off is refused, mirroring an actual radio group).
+// options for Sync Mode's 3-way choice (spec 1.6.10), laid out via
+// layout.NewFormLayout so each option's Check and its description sit side
+// by side on one row, with every description's start column-aligned to
+// the widest Check label - a real user request, after an earlier design
+// (one row per option, the description wrapped on its own line below the
+// Check) was reverted back to this more compact one-row-per-option look.
+// widget.RadioGroup can't be used here since its per-option label is a
+// canvas.Text, which (per its own doc comment: "No formatting or text
+// parsing will be performed") can't wrap; FormLayout's content column
+// stretches to fill the remaining row width and still lets the
+// description's own Wrapping kick in on the rare row a description
+// doesn't fit on one line, rather than ever overflowing past the window's
+// edge. onSelect is called with the newly-selected option's index whenever
+// the selection changes; exactly one option stays checked at all times
+// (clicking the already-selected check back off is refused, mirroring an
+// actual radio group).
 func newExclusiveCheckGroup(labels, descriptions []string, selectedIndex int, onSelect func(index int)) fyne.CanvasObject {
 	checks := make([]*widget.Check, len(labels))
 	rows := make([]fyne.CanvasObject, 0, len(labels)*2)
@@ -250,7 +275,7 @@ func newExclusiveCheckGroup(labels, descriptions []string, selectedIndex int, on
 		desc.Wrapping = fyne.TextWrapWord
 		rows = append(rows, c, desc)
 	}
-	return container.NewVBox(rows...)
+	return container.New(layout.NewFormLayout(), rows...)
 }
 
 func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne.CanvasObject {

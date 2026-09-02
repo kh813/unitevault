@@ -408,6 +408,25 @@
 
 ---
 
+## Phase 26：タスクトレイ／メニューバーの項目順変更（実装済み）
+
+ユーザー要望により、`runTrayMode`のメニュー項目順を「今すぐ同期 → 競合の確認とマージ → 設定 → アップデートを確認 → About → (区切り) → 終了」に変更（`mCheckConflicts`を`mSettings`より前に移動）。ビルド/vet/テスト・Windowsクロスコンパイル確認済み（v0.0.69でリリース）。
+
+---
+
+## Phase 27：Windows実機での不具合報告（初回セットアップのウィンドウ高さ・rclone認証待ち時間・Sync Mode表示）への対応（実装済み）
+
+**背景：** ユーザーがWindows(Secondary)で設定をリセットし、既存のiCloud Vaultを指定して再セットアップしようとしたところ、Sync Modeの選択画面（カード自体・「Sync Mode」という文字列すら）が全く表示されず、意図せずGoogle Drive中心モードのまま保存されてしまい、iCloud実フォルダを（本来Aモードでは不要な）ローカル管理フォルダへ移動しようとしてフリーズする、という不具合が発生した。
+
+- [x] **根本原因（実機再現・診断済み）：** 初回セットアップ（Vault未設定）時に表示される、インタラクティブな3択Sync Modeセレクタ（各選択肢に説明文付き）は、既存の「設定済みでロックされた1行表示」よりもずっと縦長のフォームで、実測でウィンドウ高さ約860pxを要求していた。Phase 24で追加したウィンドウ幅の拡大処理（`settingsWindowWidthFactor`）は幅のみを対象にしており、高さには上限が無かったため、ノートPCなど画面の低い実機ではウィンドウが画面に収まらず、一番上にあるSync Modeカードが画面外に配置されて見えなくなっていた（消えたのではなく、既存のスクロール機構でも救えない「そもそも画面に映らない」状態）。
+- [x] **修正：** `internal/gui/settings_window.go`の`ShowSettingsWindow`に`settingsWindowMaxHeight`（700px）という上限を導入し、ウィンドウ高さをこの値でクランプするようにした。それを超える分は既存の`VScroll`（`buildSettingsContent`内、以前から実装済み）に任せる。回帰防止テスト`TestShowSettingsWindow_CapsHeightForTallFirstTimeSetupForm`を追加（初回セットアップ相当のフォームで、ウィンドウ高さが上限を超えないこと、かつSync Mode選択肢がその範囲内に収まることを確認）。
+- [x] **rclone「新規設定」選択後、ブラウザが開くまで無反応に見える：** 実際には`gui.RunWithProgress`によるプログレスダイアログ（スピナー付き）は表示されているが、Google側のOAuth認証URL取得～ブラウザタブが実際に開くまで数十秒かかることがあり、ユーザーから「何も起きていないように見える」との指摘。メッセージ文言に「ブラウザのタブが開くまで1〜2分ほどかかることがあります。しばらくお待ちください。」という一文を追加（`cmd/unitevault/main.go`の2箇所：`configureRemote`・`saveSettingsConfirmed`双方の「New Setup」フロー、および`ja.json`）。
+- [x] **Sync Mode選択画面のレイアウトをユーザー要望で再変更：** 以前（Windowsでの折り返し不具合対応）チェックボックス1行＋説明文を次の行に折り返す2行構成にしていたが、ユーザーから「1行に戻し、代わりにタブ揃えで説明文の先頭を揃えたい」との要望。`newExclusiveCheckGroup`のコンテナを`container.NewVBox`から`container.New(layout.NewFormLayout(), ...)`に変更し、チェックボックス列と説明文列をテーブル状に整列させた（`layout.FormLayout`は`widget.Form`と異なり左側に任意のCanvasObject＝Checkウィジェットを置けるため採用）。説明文側は引き続き`Wrapping = fyne.TextWrapWord`のままなので、万一1行に収まらない長さの説明文があっても、以前のWindows実機での横方向はみ出し不具合を再発させることはない。回帰防止テスト`TestBuildSettingsContent_SyncMode_DescriptionsColumnAligned`を追加（3つの説明文が同じX座標から始まる＝カラム整列していることを確認）。
+- [x] README.md・spec.mdへの反映は本Phaseの変更内容が実装の内部詳細（ウィンドウサイズ計算式・レイアウトの実装手段）にとどまるため見送り、todo.mdのみに記録
+- [x] ビルド/vet/テスト・Windowsクロスコンパイルすべて確認済み
+
+---
+
 ## 進め方の補足
 
 - 各PhaseはPhase番号の順に進めることを推奨する（Phase 4〈drive〉→Phase 5〈bootstrap〉→Phase 6〈merge〉の順は依存関係上この並びが自然）。
