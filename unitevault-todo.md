@@ -384,6 +384,30 @@
 
 ---
 
+## Phase 24：Settings > StatusのSecondary表示・ウィンドウ幅への実機フィードバック（実装済み）
+
+**背景：** v0.0.67リリース後、ユーザーからSecondaryデバイスでのSettings > Status表示についてのフィードバックがあった。
+
+- [x] **Google Drive同期の説明文が長すぎる（Secondary時）：** `ja.json`の該当訳を「該当なし（このデバイスはSecondaryのため、Google Driveバックアップはプライマリデバイスが実行します）」から、ユーザー指定の「なし（プライマリがデータ同期しています）」に短縮
+- [x] **デバイスの役割の「（同期中）」表示が不要：** `MultiDeviceStatus`（Standalone/Syncing）はPrimaryの場合のみ意味のある情報（他のデバイスが存在するかどうか）を運ぶが、Secondaryは常に「Syncing」固定であり、かつ同じ情報がGoogle Drive同期の行に既にある。`cmd/unitevault/main.go`の`buildFormData`から`case "secondary": data.MultiDeviceStatus = lang.L("Syncing")`を削除し、Secondaryでは「Device role: Secondary」のみ表示するよう変更（Primary側のStandalone/Syncing区別は維持）
+- [x] **Settingsウィンドウの横幅を1.5〜1.6倍程度に拡大：** Phase 23で`statusLine`をBorderレイアウトに変更した副作用で、`content.MinSize().Width`が「技術的にギリギリ収まる最小幅」を反映するようになり、実機で窮屈に見えるという報告。`internal/gui/settings_window.go`の`ShowSettingsWindow`に`settingsWindowWidthFactor`（1.55）を導入し、`content.MinSize().Width`にこの係数を掛けてからウィンドウ幅を決定するよう変更。幅を広げた後の高さのずれ（折り返しラベルは実際にレイアウトされた幅でないと正しい高さを報告しない）は、`constrainWrappedDialogWidth`と同じ「Resizeを2回呼ぶ」パターンで解消（1回目で目的の幅にレイアウトさせ、その後`content.MinSize()`を再取得して正しい高さで2回目のResizeを行う）
+- [x] Mac実機で表示確認（ユーザー確認済み："手元のMacではちょうどいい感じ"）。Windows実機での見た目は未確認
+- [x] ビルド/vet/テスト・Windowsクロスコンパイルすべて確認済み
+
+---
+
+## Phase 25：週次の自動アップデートチェック（実装済み）
+
+**背景：** ユーザーから「定期的にアップデートあり／なしを確認（例えば週1回）して、アップデートがあれば、ダイアログを表示してアップデートするかユーザーに聞いて欲しい」という要望があった。既存の「Check for Update...」（8.4節）は手動トリガーのみで、自動的な定期チェックは存在しなかった。
+
+- [x] `config.ConfigManager`に`LastUpdateCheck`関連のメソッド（`LoadLastUpdateCheck`・`SaveLastUpdateCheck`・`LastUpdateCheckPath`）を追加。マーカーファイル`last_update_check`（RFC3339形式の文字列1行）に最終チェック日時を永続化する、既存の`disclaimer_accepted`等と同じパターン。**`ResetConfig`ではクリアしない**（同期設定とは無関係な事項のため）
+- [x] `cmd/unitevault/main.go`に`runPeriodicUpdateCheck`（`startup()`から免責事項同意ゲート通過後に1回だけ起動する常駐ゴルーチン、1時間ごとに要否を再評価）と`maybeCheckForUpdatePeriodically`（`updateCheckInterval`＝7日経過していなければ何もしない）を追加。既存の`checkForUpdate`（手動チェック）から「Update Available」確認ダイアログ部分を`offerUpdate`として切り出し、手動・自動の両方から共有
+- [x] 自動チェックは**最新版が無い場合は何も表示しない**（手動チェックとの違い）。最新版がある場合は手動チェックと同じ確認ダイアログを表示し、同意した場合のみ適用する（サイレント自動適用はしない）。チェック自体が失敗した場合（ネットワーク不通等）は`last_update_check`を更新しない（次の1時間ごとの再評価で再試行され、丸1週間待たされない）
+- [x] spec.md（8.4節）に反映
+- [x] テスト追加（`TestConfigManager_LastUpdateCheck`：ResetConfigでクリアされないことも含めて確認、`TestMaybeCheckForUpdatePeriodically_SkipsWhenRecentlyChecked`：直近チェック済みの場合にネットワークアクセスなしでスキップされることを確認）・ビルド/vet/テスト・Windowsクロスコンパイルすべて確認済み
+
+---
+
 ## 進め方の補足
 
 - 各PhaseはPhase番号の順に進めることを推奨する（Phase 4〈drive〉→Phase 5〈bootstrap〉→Phase 6〈merge〉の順は依存関係上この並びが自然）。

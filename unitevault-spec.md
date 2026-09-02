@@ -1021,6 +1021,12 @@ unitevault/                         ← ソースコードリポジトリ（GitH
 
 **失敗時のフォールバック**: ダウンロード・展開・ヘルパー起動のいずれかで失敗した場合、ヘルパープロセスは一切起動されない（＝既存のインストール状態は変化しない）ため、エラーメッセージとともにReleaseページへのリンクを提示し、手動ダウンロードを案内する。自動更新が「中途半端に失敗してアプリが起動できなくなる」状態を作らないことを設計上の必須要件とする。
 
+**定期的な自動チェック（実装済み）：** 「Check for Update...」による手動チェックとは別に、UniteVaultは**週1回**を目安に、ユーザー操作なしでバックグラウンドから同じGitHub Releasesチェックを自動的に行う（`cmd/unitevault`の`runPeriodicUpdateCheck`／`maybeCheckForUpdatePeriodically`）。最後にチェックした日時は`last_update_check`というマーカーファイル（`config.ConfigManager.LoadLastUpdateCheck`／`SaveLastUpdateCheck`、RFC3339形式）としてディスクに永続化し、アプリを毎日終了・再起動するような使い方でも週次の間隔が起動のたびにリセットされないようにする。免責事項の同意ゲート（8.6節）通過後、`startup()`から1回だけ起動され、以後はアプリ終了まで1時間ごとにチェック要否を再評価し続ける常駐ゴルーチンとして動作する。
+
+- **最新版が無い場合**：手動チェックと異なり、何も表示しない（バックグラウンドチェックのたびに「最新版です」と毎回ポップアップするのは煩わしいため）。
+- **最新版がある場合**：手動チェックと全く同じ「Update Available」確認ダイアログ（`offerUpdate`、対応成果物が無い場合はRelease page open確認）を表示し、ユーザーが同意した場合のみダウンロード・自己更新を実行する（自動でのサイレント適用はしない）。
+- **チェック自体が失敗した場合**（ネットワーク不通等）：エラーダイアログは出さず、かつ`last_update_check`も更新しない——次回のネットワーク接続の回復を待って、次の1時間ごとの再評価で再試行される（失敗しても「1週間」経過を待たせない）。
+
 **Windowsコンソールウィンドウの一瞬の表示（実機報告により全面対応済み）：** 自己更新ヘルパー以外にも、このアプリがWindows上でコンソールサブシステムの外部実行ファイル（`rclone`、`git`、`winget`、`tasklist`/`taskkill`、`cmd.exe`自体等）を起動する箇所では、`CREATE_NO_WINDOW`を設定しない限り同様に一瞬コンソールが表示され得る。実機テストで、**同期サイクルのたびに`rclone`呼び出しで、3-way mergeが発動するたびに`git merge-file`呼び出しで**、それぞれ実際にコンソールが一瞬表示される不具合が見つかった（自己更新ヘルパーの対応だけではカバーしきれていなかった）。共通ヘルパー`internal/winexec.HideWindow(cmd)`（Windows以外では無条件no-op）を新設し、`internal/drive`（`rclone`の全呼び出し：`sync`/`copy`/`lsf`/`listremotes`/`config create`/`config delete`）・`internal/merge`（`git merge-file`）・`internal/bootstrap`（`tasklist`/`taskkill`、`winget`、Gitインストーラー、iCloud起動用の`cmd /c start`、`rundll32`）の全箇所に一律適用した。ユーザーに実際に見せることを意図した対話的ウィンドウ（`LaunchTerminalRcloneConfig`が開くPowerShellターミナル、Gitインストーラーのサイレント失敗時のフォールバック起動）には適用しない。
 
 ### 8.5 簡易i18n（多言語対応）

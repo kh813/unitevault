@@ -250,6 +250,8 @@ func (t *trayApp) startup() {
 		return
 	}
 
+	go t.runPeriodicUpdateCheck(t.ctx)
+
 	t.refreshCheckConflictsMenuItem()
 
 	cfg, err := t.cfgMgr.LoadConfig()
@@ -572,11 +574,22 @@ func (t *trayApp) checkForUpdate() {
 		return
 	}
 
+	_ = t.cfgMgr.SaveLastUpdateCheck(time.Now())
+
 	if !selfupdate.IsNewer(bootstrap.AppVersion, info.Version) {
 		gui.Info(lang.L("Up to Date"), lang.L("You're running the latest version (v{{.Version}}).", map[string]string{"Version": bootstrap.AppVersion}))
 		return
 	}
 
+	t.offerUpdate(info)
+}
+
+// offerUpdate shows the "Update Available" prompt - or, if no automatic
+// download matches this platform, an offer to open the release page
+// instead - shared by both the manual "Check for Update..." menu action and
+// the periodic background check (maybeCheckForUpdatePeriodically). Safe to
+// call from any goroutine (gui.Confirm is).
+func (t *trayApp) offerUpdate(info *selfupdate.ReleaseInfo) {
 	if info.AssetURL == "" {
 		gui.Confirm(
 			lang.L("Update Available"),
@@ -605,6 +618,63 @@ func (t *trayApp) checkForUpdate() {
 			}
 		},
 	)
+}
+
+// updateCheckInterval is how often UniteVault checks GitHub Releases for a
+// newer version in the background, without any user action - separate from
+// "Check for Update..." in the tray menu, which always checks immediately
+// regardless of when the last check happened.
+const updateCheckInterval = 7 * 24 * time.Hour
+
+// runPeriodicUpdateCheck loops for the lifetime of ctx, checking roughly
+// once an hour whether updateCheckInterval has elapsed since the last
+// recorded check (LoadLastUpdateCheck, persisted to disk) - so quitting and
+// relaunching the app daily doesn't reset a weekly cadence back to zero
+// every time. Silent unless an update is actually found: unlike the manual
+// "Check for Update..." menu action, this never shows a progress dialog or
+// an "Up to Date" message on its own - only the same "Update Available"
+// prompt the manual check shows (offerUpdate), and only when there's
+// actually something to offer. Must be started at most once per app
+// lifetime - see startup, its only caller, which only ever reaches the line
+// that starts this after the user has passed the first-launch disclaimer
+// gate.
+func (t *trayApp) runPeriodicUpdateCheck(ctx context.Context) {
+	t.maybeCheckForUpdatePeriodically()
+
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			t.maybeCheckForUpdatePeriodically()
+		}
+	}
+}
+
+// maybeCheckForUpdatePeriodically runs a silent background update check if
+// at least updateCheckInterval has passed since the last recorded check (or
+// none has ever been recorded on this device). A failed check (e.g. no
+// network) deliberately doesn't update the recorded time, so it's retried
+// on the next hourly tick instead of waiting a full week for connectivity
+// to come back.
+func (t *trayApp) maybeCheckForUpdatePeriodically() {
+	last, _ := t.cfgMgr.LoadLastUpdateCheck()
+	if time.Since(last) < updateCheckInterval {
+		return
+	}
+
+	info, err := selfupdate.CheckLatest(context.Background())
+	if err != nil {
+		return
+	}
+	_ = t.cfgMgr.SaveLastUpdateCheck(time.Now())
+
+	if !selfupdate.IsNewer(bootstrap.AppVersion, info.Version) {
+		return
+	}
+	t.offerUpdate(info)
 }
 
 // performSelfUpdate downloads and applies the update described by info, then
@@ -811,24 +881,25 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 
 	applyPrimaryConflictStatus(t.cfgMgr, &data)
 
-	// MultiDeviceStatus (spec 3.6.1.5): a Secondary always implies a Primary
-	// exists somewhere, even if currently unreachable, so it's always
-	// "Syncing" - only a Primary can ever be "Standalone".
-	switch role {
-	case "primary":
-		if cfg != nil && cfg.VaultPath != "" {
-			if deviceID, err := t.cfgMgr.GetDeviceID(); err == nil {
-				if others, err := knownActiveOtherDevices(cfg.VaultPath, deviceID); err == nil {
-					if len(others) == 0 {
-						data.MultiDeviceStatus = lang.L("Standalone")
-					} else {
-						data.MultiDeviceStatus = lang.L("Syncing")
-					}
+	// MultiDeviceStatus (spec 3.6.1.5) only ever applies to a Primary - it
+	// tells them whether any other device has shown up at all ("Standalone"
+	// vs "Syncing"), which is real signal since nothing else in Settings
+	// says that. A Secondary always implies a Primary exists somewhere
+	// (even if currently unreachable), so it would always read "Syncing" -
+	// a constant that carries no information, and appending it to "Device
+	// role: Secondary" only duplicated the separate Google Drive sync
+	// status row - a real user complaint, so a Secondary now leaves this
+	// empty and shows just its role.
+	if role == "primary" && cfg != nil && cfg.VaultPath != "" {
+		if deviceID, err := t.cfgMgr.GetDeviceID(); err == nil {
+			if others, err := knownActiveOtherDevices(cfg.VaultPath, deviceID); err == nil {
+				if len(others) == 0 {
+					data.MultiDeviceStatus = lang.L("Standalone")
+				} else {
+					data.MultiDeviceStatus = lang.L("Syncing")
 				}
 			}
 		}
-	case "secondary":
-		data.MultiDeviceStatus = lang.L("Syncing")
 	}
 
 	// PendingConflictCount (spec 3.3.2): merging - and therefore genuine

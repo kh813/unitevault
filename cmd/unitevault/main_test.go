@@ -187,6 +187,33 @@ func TestRefreshCheckConflictsMenuItem_EnabledOnlyForICloudModeWithVault(t *test
 	}
 }
 
+// TestMaybeCheckForUpdatePeriodically_SkipsWhenRecentlyChecked guards the
+// periodic background update check's cadence gate: it must not attempt a
+// network call (or touch the recorded time) again until updateCheckInterval
+// has actually elapsed since the last recorded check - otherwise this test
+// would hang/fail trying to reach GitHub in a sandboxed test run.
+func TestMaybeCheckForUpdatePeriodically_SkipsWhenRecentlyChecked(t *testing.T) {
+	tr := newTestTrayApp(t)
+	// Truncated to a whole second and stripped of its monotonic reading
+	// (time.Now()'s own) to match RFC3339's on-disk precision - LastUpdateCheck
+	// round-trips through that format, so comparing against the untruncated
+	// original would spuriously fail even when nothing is actually wrong.
+	recent := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := tr.cfgMgr.SaveLastUpdateCheck(recent); err != nil {
+		t.Fatalf("SaveLastUpdateCheck: %v", err)
+	}
+
+	tr.maybeCheckForUpdatePeriodically()
+
+	got, err := tr.cfgMgr.LoadLastUpdateCheck()
+	if err != nil {
+		t.Fatalf("LoadLastUpdateCheck: %v", err)
+	}
+	if !got.Equal(recent) {
+		t.Errorf("expected the recorded check time to stay unchanged (no check attempted) when still within updateCheckInterval, got %v want %v", got, recent)
+	}
+}
+
 func TestStopDaemonLoop_CancelsAndClears(t *testing.T) {
 	tr := newTestTrayApp(t)
 
@@ -967,8 +994,10 @@ func TestDecommissionSelf(t *testing.T) {
 // TestBuildFormData_MultiDeviceStatus guards how buildFormData surfaces
 // MultiDeviceStatus (spec 3.6.1.5): "Standalone" for a Primary with no
 // other PC's event log showing up as active, "Syncing" as soon as one
-// does, and always "Syncing" for a Secondary (which always implies a
-// Primary exists somewhere, even if unreachable).
+// does, and empty for a Secondary - a Secondary always implies a Primary
+// exists somewhere (even if unreachable), so "Syncing" there would be a
+// constant that carries no information and only duplicated the separate
+// Google Drive sync status row (a real user complaint).
 func TestBuildFormData_MultiDeviceStatus(t *testing.T) {
 	standalone := lang.L("Standalone")
 	syncing := lang.L("Syncing")
@@ -998,14 +1027,14 @@ func TestBuildFormData_MultiDeviceStatus(t *testing.T) {
 		}
 	})
 
-	t.Run("Secondary is always Syncing", func(t *testing.T) {
+	t.Run("Secondary shows no MultiDeviceStatus", func(t *testing.T) {
 		tr := newTestTrayApp(t)
 		vaultPath := filepath.Join(t.TempDir(), "Vault")
 		_ = tr.cfgMgr.SaveConfig(&config.Config{VaultPath: vaultPath})
 		_ = tr.cfgMgr.SaveRole("secondary")
 
-		if got := tr.buildFormData().MultiDeviceStatus; got != syncing {
-			t.Errorf("expected MultiDeviceStatus %q for a Secondary device, got %q", syncing, got)
+		if got := tr.buildFormData().MultiDeviceStatus; got != "" {
+			t.Errorf("expected empty MultiDeviceStatus for a Secondary device (it's always \"Syncing\" and would just duplicate the Google Drive sync status row), got %q", got)
 		}
 	})
 

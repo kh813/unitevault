@@ -208,7 +208,7 @@
 
   "Never synced yet": "まだ同期されていません",
   "N/A (not configured yet)": "該当なし（未設定）",
-  "N/A (this device is Secondary - Google Drive backup runs on the Primary device)": "該当なし（このデバイスはSecondaryのため、Google Driveバックアップはプライマリデバイスが実行します）",
+  "N/A (this device is Secondary - Google Drive backup runs on the Primary device)": "なし（プライマリがデータ同期しています）",
   "Last synced: {{.Time}}": "最終同期: {{.Time}}",
   "Last sync failed ({{.Time}}): {{.Error}}": "同期失敗（{{.Time}}）: {{.Error}}",
   "rclone not installed yet": "rcloneが未インストールです",

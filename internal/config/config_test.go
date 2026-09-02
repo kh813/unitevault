@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kh813/unitevault/internal/config"
 )
@@ -180,6 +181,48 @@ func TestConfigManager_DisclaimerAccepted(t *testing.T) {
 	}
 	if !cm.IsDisclaimerAccepted() {
 		t.Error("expected ResetConfig to NOT clear disclaimer acceptance")
+	}
+}
+
+// TestConfigManager_LastUpdateCheck guards the persisted marker the
+// periodic background update check (cmd/unitevault's
+// maybeCheckForUpdatePeriodically) relies on to survive across app
+// restarts: unset initially, round-trips through Save/Load, and - like
+// DisclaimerAccepted above, and for the same reason (unrelated to sync
+// configuration state) - is NOT cleared by ResetConfig.
+func TestConfigManager_LastUpdateCheck(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := config.NewConfigManagerWithDir(tempDir)
+
+	got, err := cm.LoadLastUpdateCheck()
+	if err != nil {
+		t.Fatalf("LoadLastUpdateCheck failed before any check was ever recorded: %v", err)
+	}
+	if !got.IsZero() {
+		t.Fatalf("expected the zero time before any check was ever recorded, got %v", got)
+	}
+
+	want := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := cm.SaveLastUpdateCheck(want); err != nil {
+		t.Fatalf("SaveLastUpdateCheck failed: %v", err)
+	}
+	got, err = cm.LoadLastUpdateCheck()
+	if err != nil {
+		t.Fatalf("LoadLastUpdateCheck failed: %v", err)
+	}
+	if !got.Equal(want) {
+		t.Errorf("expected LoadLastUpdateCheck to round-trip %v, got %v", want, got)
+	}
+
+	if err := cm.ResetConfig(); err != nil {
+		t.Fatalf("ResetConfig failed: %v", err)
+	}
+	got, err = cm.LoadLastUpdateCheck()
+	if err != nil {
+		t.Fatalf("LoadLastUpdateCheck failed after ResetConfig: %v", err)
+	}
+	if !got.Equal(want) {
+		t.Errorf("expected ResetConfig to NOT clear the last update check time, got %v", got)
 	}
 }
 

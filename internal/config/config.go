@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -211,6 +212,40 @@ func (cm *ConfigManager) SetDisclaimerAccepted() error {
 		return err
 	}
 	return os.WriteFile(cm.DisclaimerAcceptedPath(), []byte("1"), 0644)
+}
+
+// LastUpdateCheckPath returns the path to last_update_check - a marker file
+// recording (as RFC3339) when this device last checked GitHub Releases for
+// a newer UniteVault version. Persisted to disk (rather than kept only in
+// the running tray app's memory) so the periodic weekly check survives
+// across app restarts instead of re-checking on every single launch.
+func (cm *ConfigManager) LastUpdateCheckPath() string {
+	return filepath.Join(cm.configDir, "last_update_check")
+}
+
+// LoadLastUpdateCheck reads the last recorded update-check time, or the
+// zero time if a check has never been recorded on this device.
+func (cm *ConfigManager) LoadLastUpdateCheck() (time.Time, error) {
+	data, err := os.ReadFile(cm.LastUpdateCheckPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, fmt.Errorf("failed to read last update check time: %w", err)
+	}
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(string(data)))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to parse last update check time: %w", err)
+	}
+	return t, nil
+}
+
+// SaveLastUpdateCheck records when this device last checked for updates.
+func (cm *ConfigManager) SaveLastUpdateCheck(when time.Time) error {
+	if err := cm.EnsureDir(); err != nil {
+		return err
+	}
+	return os.WriteFile(cm.LastUpdateCheckPath(), []byte(when.Format(time.RFC3339)), 0644)
 }
 
 // DriveSyncStatus records the outcome of the most recent Google Drive

@@ -141,6 +141,15 @@ type SettingsHandlers struct {
 // handlers, then shows/focuses it. Safe to call from any goroutine; calling
 // it again (e.g. after a background install finishes) refreshes the
 // displayed status without losing the window's open/closed state.
+// settingsWindowWidthFactor widens the Settings window beyond content's own
+// bare MinSize().Width - statusLine's own Border layout (see its own doc
+// comment) no longer lets one long dynamic status value force the window
+// wide, which fixed a real overflow bug, but as a side effect made
+// content.MinSize().Width reflect only the narrowest width everything
+// technically still fits at, which then looked visibly cramped on real
+// devices (a follow-up user report, on both Mac and Windows).
+const settingsWindowWidthFactor float32 = 1.55
+
 func ShowSettingsWindow(data SettingsFormData, handlers SettingsHandlers) {
 	fyne.Do(func() {
 		content := buildSettingsContent(data, handlers)
@@ -153,8 +162,22 @@ func ShowSettingsWindow(data SettingsFormData, handlers SettingsHandlers) {
 		// leaves blank space below a shorter form or forces scrolling for a
 		// taller one. A small fixed margin comfortably covers the window's
 		// own border/padding chrome around the content.
+		//
+		// Resizing twice - once to size the layout at the actual target
+		// (widened) width, then re-measuring content.MinSize() for the
+		// height that width really needs - mirrors
+		// constrainWrappedDialogWidth's own "MinSize is one frame stale"
+		// workaround (dialogs.go): a wrapped label's MinSize only reports
+		// the correct wrapped height once it's actually been laid out at
+		// its final width, and a wider window means every wrapped value
+		// (e.g. the Google Drive sync status) re-flows into fewer, longer
+		// lines than measuring at the original (narrower) width would
+		// suggest.
 		min := content.MinSize()
-		mainWindow.Resize(fyne.NewSize(min.Width+24, min.Height+24))
+		width := min.Width*settingsWindowWidthFactor + 24
+		mainWindow.Resize(fyne.NewSize(width, min.Height+24))
+		reflowed := content.MinSize()
+		mainWindow.Resize(fyne.NewSize(width, reflowed.Height+24))
 		windowVisible = true
 		mainWindow.Show()
 		mainWindow.RequestFocus()
