@@ -8,7 +8,13 @@ on:
 
 jobs:
   test:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: 1
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -20,12 +26,19 @@ jobs:
 
       # The GUI (internal/gui, cmd/unitevault) is built on Fyne, which
       # requires CGO to compile at all - go vet/go test need the same
-      # native OpenGL bindings as the real build.
+      # native OpenGL bindings as the real build. Runs on both macOS and
+      # Windows: the Release workflow's Windows build is only ever
+      # cross-compiled from a macOS runner and never actually executed
+      # there, so platform-specific code paths (winexec, iCloud/rclone
+      # detection, ...) and Fyne's own layout/rendering only get real
+      # automated coverage - across every ordinary push, not just manual
+      # dogfooding on a real device - by building and running the tests on
+      # an actual Windows runner too.
       - name: Build
-        run: CGO_ENABLED=1 go build ./...
+        run: go build ./...
 
       - name: Vet
-        run: CGO_ENABLED=1 go vet ./...
+        run: go vet ./...
 
       # This runner deterministically aborts the test binaries for
       # non-cgo packages (bootstrap/config/drive/engine, every run, same
@@ -36,6 +49,12 @@ jobs:
       # everything else uses Go's internal linker by default, which on this
       # runner's toolchain doesn't always emit the LC_UUID load command that
       # newer dyld requires. Forcing external linking for every test binary
-      # sidesteps the internal linker entirely.
-      - name: Test
-        run: CGO_ENABLED=1 go test -ldflags=-linkmode=external -count=1 ./...
+      # sidesteps the internal linker entirely. Windows has no equivalent
+      # issue, so it doesn't need this flag.
+      - name: Test (macOS)
+        if: runner.os == 'macOS'
+        run: go test -ldflags=-linkmode=external -count=1 ./...
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        run: go test -count=1 ./...

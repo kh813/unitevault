@@ -156,12 +156,12 @@ func TestStartDaemonLoop_CancelsPreviousLoop(t *testing.T) {
 }
 
 // TestRefreshCheckConflictsMenuItem_EnabledOnlyForICloudModeWithVault guards
-// the tray menu's "Check for Conflicts and Merge..." item (spec 1.6.10,
+// the tray menu's "Check for Conflicts and Merge" item (spec 1.6.10,
 // moved here from the Settings window): it should only ever be actionable
 // in iCloud-centric Mode A, once a Vault is actually configured to scan.
 func TestRefreshCheckConflictsMenuItem_EnabledOnlyForICloudModeWithVault(t *testing.T) {
 	tr := newTestTrayApp(t)
-	tr.checkConflicts = fyne.NewMenuItem("Check for Conflicts and Merge...", nil)
+	tr.checkConflicts = fyne.NewMenuItem("Check for Conflicts and Merge", nil)
 	tr.menu = fyne.NewMenu("", tr.checkConflicts)
 
 	// No config saved yet at all.

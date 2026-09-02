@@ -427,6 +427,28 @@
 
 ---
 
+## Phase 28：見た目・UI系デグレ防止のためのテスト拡充（実装済み）
+
+**背景：** ここまで実機ドッグフーディングで、文字のはみ出し・ウィンドウサイズ・ダイアログの裏表示といった見た目・UI系の不具合が複数回発生した。0.1.0を見据え、個別の不具合修正ごとの狭い回帰テストだけでなく、同じ**クラスの不具合**を今後も広く検出できるテストを追加できないか、というユーザーからの提案があった。
+
+- [x] **`TestDialogs_NeverUseZenityExceptForNativePickers`（`internal/gui/dialogs_test.go`）：** `Info`がzenity経由の別ウィンドウ表示だったために発生した裏表示バグ（Phase 22）のクラスそのものを今後も防ぐため、`Info`・`showConfirm`・`Choice`・`ChoiceN`・`InstallReminder`・`RunWithProgress`の関数本体（ソースコードをテキストとして読み、既存の`funcBody`ヘルパーで関数本体を抽出）に`zenity.`という文字列が含まれていないことを検証するソーススキャン型テスト。`PickFolder`（意図的にOSネイティブのフォルダ選択ダイアログを使う）だけは対象外。
+- [x] **`TestShowSettingsWindow_SyncModeCardAlwaysWithinCappedHeight`（`internal/gui/settings_window_test.go`）：** Phase 27で追加した単一シナリオの回帰テスト（`TestShowSettingsWindow_CapsHeightForTallFirstTimeSetupForm`）を、複数の現実的な組み合わせ（初回セットアップ／各Sync Modeでロック済み／長いGoogle Drive同期エラー付き／未解決の競合＋長いリモート情報付き、等）に一般化したテーブル駆動テスト。どのシナリオでもウィンドウ高さが上限を超えず、かつ「Sync Mode」カードがその範囲内に収まる（＝スクロールなしで見える）ことを検証する。
+  - **このテストが実際に本物のバグを検出した：** 「locked drive mode with a long dynamic sync error」のケースで実際にテストが失敗した。原因は、`buildSettingsContent`内の`topCards`が`{statusCard, syncModeCard, vaultCard}`の順で並んでおり、`statusCard`（Git/rclone状態やGoogle Drive同期ステータスを含む）は長いエラーメッセージが折り返されると際限なく縦に伸びうるため、Phase 27で導入したウィンドウ高さの上限（700px）と組み合わさると、`statusCard`の直後にある`syncModeCard`が画面外（スクロールしないと見えない位置）に押し出されてしまうことが判明した。**修正として`topCards`の順序を`{syncModeCard, statusCard, vaultCard}`に変更**——サイズが可変・無制限になりうる`statusCard`より、サイズが小さく固定的で「一目で分かってほしい情報」である`syncModeCard`を先に配置することで、この問題を構造的に防いだ。
+- [x] ビルド/vet/テスト・Windowsクロスコンパイルすべて確認済み
+
+---
+
+## Phase 29：Sync Mode選択のEnd-to-Endテスト・CIをWindowsでも実行（実装済み）
+
+**背景：** ユーザーから「設定リセット後、iCloud中心・Google Drive中心などの選択が正しくできるか、WindowsとMacの両方で毎回手作業確認するのは不可能。テストコードで検証できないか」という要望があった。
+
+- [x] **`TestShowSettingsWindow_SyncModeSelectionEndToEnd`（`internal/gui/settings_window_test.go`）：** `ShowSettingsWindow`を実際に呼び出し、3つのSync Modeそれぞれについて「チェックボックスをタップ→Save Settingsボタンをタップ」を`test.Tap`でシミュレートし、`OnSave`に渡される`SyncMode`が実際に選んだものと一致することを検証するEnd-to-Endテスト。既存の`TestBuildSettingsContent_SyncMode_Selecting*RoundTrips`が`buildSettingsContent`のウィジェットツリーを直接検証するのに対し、こちらは`ShowSettingsWindow`の実際のウィンドウサイズ計算パスも含めて検証するため、「配線は合っているが実際には届かない/タップできない」というクラスの不具合（Phase 27の実機不具合と同種）も検出できる。
+  - **このテストの実装中に判明したFyneのテスト作法上の注意点（実際のバグではない）：** `test.Tap`はデフォルトでウィジェットの左上付近（座標(1,1)）をタップする実装になっているが、`layout.FormLayout`（Sync Modeセレクタで使用）は同じ行内のセルを最大の高さに揃えるため、説明文がチェックボックス自身より背が高い行では、チェックボックスが行の中央に配置される。`widget.Check.Tapped`は自身の実際の当たり判定（中央付近）の外側でのタップを無視するため、`test.Tap`のデフォルト座標では有効判定に失敗し、テストが誤って「クリックしても何も起きない」ように見えてしまうことが判明した。実際のマウス操作ではチェックボックスの見た目の中心をクリックするため、これは実機での不具合ではない。テストは`test.TapAt`でチェックボックスの実際の縦中央を明示的に狙うよう修正した。
+- [x] **CIをWindowsでも実行：** `.github/workflows/test.yml`の`test`ジョブを`macos-latest`単独から`[macos-latest, windows-latest]`のマトリクスに拡張。既存のRelease workflowはWindows向けバイナイルをmacOSランナーからクロスコンパイルするのみで、実際にWindows上でビルド・実行したことは一度も無かったため、`go build`・`go vet`・`go test`をWindowsランナー上でも実行することで、プラットフォーム依存のコードパス（`internal/winexec`等）やFyneのレイアウト計算について、実機ドッグフーディングに頼らない自動的な継続検証を得られるようにした。**このCI変更自体はローカルでは検証できず、実際にmainへpushしてGitHub Actions上で動作するか確認が必要**（Windowsランナーにcgo用のCコンパイラが標準で用意されているか等、未確認の前提がある）。
+- [x] ビルド/vet/テスト・Windowsクロスコンパイルすべて確認済み（ローカルで検証可能な範囲）
+
+---
+
 ## 進め方の補足
 
 - 各PhaseはPhase番号の順に進めることを推奨する（Phase 4〈drive〉→Phase 5〈bootstrap〉→Phase 6〈merge〉の順は依存関係上この並びが自然）。

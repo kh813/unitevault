@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -72,6 +73,16 @@ func findCheck(root fyne.CanvasObject, text string) *widget.Check {
 	var found *widget.Check
 	walkObjects(root, func(o fyne.CanvasObject) {
 		if c, ok := o.(*widget.Check); ok && c.Text == text {
+			found = c
+		}
+	})
+	return found
+}
+
+func findCard(root fyne.CanvasObject, title string) *widget.Card {
+	var found *widget.Card
+	walkObjects(root, func(o fyne.CanvasObject) {
+		if c, ok := o.(*widget.Card); ok && c.Title == title {
 			found = c
 		}
 	})
@@ -1069,6 +1080,138 @@ func TestShowSettingsWindow_CapsHeightForTallFirstTimeSetupForm(t *testing.T) {
 	}
 	if check.Position().Y+check.Size().Height > got.Height {
 		t.Errorf("expected the Sync Mode selector (position %v, size %v) to fit within the capped window height %v - looks like it would render off-screen/unreachable", check.Position(), check.Size(), got.Height)
+	}
+}
+
+// TestShowSettingsWindow_SyncModeCardAlwaysWithinCappedHeight generalizes
+// TestShowSettingsWindow_CapsHeightForTallFirstTimeSetupForm across a wider
+// range of realistic form shapes (guarding the same class of real,
+// previously-shipped bug - spec/todo Phase 27 - for scenarios other than
+// the one specific case that happened to be reported): whatever the sync
+// mode, lock state, or how long a dynamic status value happens to be, the
+// window's height must stay capped and the Sync Mode card - the form's
+// very first section - must stay positioned within that capped height,
+// not off-screen/unreachable.
+func TestShowSettingsWindow_SyncModeCardAlwaysWithinCappedHeight(t *testing.T) {
+	longError := strings.Repeat("connection reset while uploading a very long file path name that goes on and on. ", 6)
+
+	cases := []struct {
+		name string
+		data SettingsFormData
+	}{
+		{"first-time setup, unlocked selector", SettingsFormData{}},
+		{"locked drive mode", SettingsFormData{VaultPath: "/tmp/v", SyncMode: "drive"}},
+		{"locked icloud mode", SettingsFormData{VaultPath: "/tmp/v", SyncMode: "icloud", DeviceRole: "primary"}},
+		{"locked gdrive_desktop mode", SettingsFormData{VaultPath: "/tmp/v", SyncMode: "gdrive_desktop"}},
+		{"locked drive mode with a long dynamic sync error", SettingsFormData{
+			VaultPath:       "/tmp/v",
+			SyncMode:        "drive",
+			DeviceRole:      "primary",
+			DriveSyncStatus: longError,
+		}},
+		{"locked drive mode with pending conflicts and a long remote info", SettingsFormData{
+			VaultPath:            "/tmp/v",
+			SyncMode:             "drive",
+			DeviceRole:           "secondary",
+			PendingConflictCount: 3,
+			RcloneRemoteInfo:     longError,
+		}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			newTestWindow()
+			mainWindow.Resize(fyne.NewSize(480, 320))
+
+			ShowSettingsWindow(c.data, SettingsHandlers{})
+
+			got := mainWindow.Canvas().Size()
+			if got.Height > settingsWindowMaxHeight {
+				t.Fatalf("expected the window height to be capped at %v, got %v", settingsWindowMaxHeight, got.Height)
+			}
+
+			card := findCard(mainWindow.Content(), "Sync Mode")
+			if card == nil {
+				t.Fatal("expected to find the Sync Mode card in the rendered content")
+			}
+			if card.Position().Y+card.Size().Height > got.Height {
+				t.Errorf("expected the Sync Mode card (position %v, size %v) to fit within the capped window height %v - looks like it would render off-screen/unreachable", card.Position(), card.Size(), got.Height)
+			}
+		})
+	}
+}
+
+// TestShowSettingsWindow_SyncModeSelectionEndToEnd simulates, end to end,
+// the exact real-world flow behind a real, previously-shipped incident
+// (spec/todo Phase 27): open Settings fresh - as if right after Reset
+// Configuration, before the window has ever been given a real size from
+// its own content - click one of the Sync Mode options, then click Save
+// Settings. Unlike TestBuildSettingsContent_SyncMode_Selecting*RoundTrips
+// (which drive buildSettingsContent's widget tree directly, in isolation
+// from any window), this goes through ShowSettingsWindow so it also
+// exercises the real window-sizing path: it fails if the tapped option
+// isn't actually reachable within the window's rendered (capped) bounds,
+// not just if the underlying widget wiring is wrong - manually re-checking
+// this on both Mac and Windows on every change isn't practical, so this
+// automates it for all three modes.
+func TestShowSettingsWindow_SyncModeSelectionEndToEnd(t *testing.T) {
+	cases := []struct {
+		checkLabel string
+		wantMode   string
+	}{
+		{"Google Drive-centric", "drive"},
+		{"iCloud-centric", "icloud"},
+		{"Google Drive (desktop app)", "gdrive_desktop"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.wantMode, func(t *testing.T) {
+			newTestWindow()
+			mainWindow.Resize(fyne.NewSize(480, 320))
+
+			var saved SettingsFormData
+			savedOK := false
+			ShowSettingsWindow(SettingsFormData{}, SettingsHandlers{
+				OnSave: func(d SettingsFormData) {
+					saved = d
+					savedOK = true
+				},
+			})
+
+			winSize := mainWindow.Canvas().Size()
+			if winSize.Height > settingsWindowMaxHeight {
+				t.Fatalf("expected the window height to be capped at %v, got %v", settingsWindowMaxHeight, winSize.Height)
+			}
+
+			check := findCheck(mainWindow.Content(), c.checkLabel)
+			if check == nil {
+				t.Fatalf("expected to find the %q sync mode option", c.checkLabel)
+			}
+			if check.Position().Y+check.Size().Height > winSize.Height {
+				t.Fatalf("the %q option renders at Y=%v (height %v), past the window's own height %v - it would be unreachable without moving/resizing the window", c.checkLabel, check.Position().Y, check.Size().Height, winSize.Height)
+			}
+			// layout.FormLayout (newExclusiveCheckGroup) gives every row in
+			// a "column" the same height - the tallest of the check and its
+			// description - so a check whose own natural height is shorter
+			// than its description ends up vertically centered within extra
+			// padding above and below it. widget.Check.Tapped ignores a tap
+			// outside its own centered active band, so test.Tap's default
+			// (1, 1) - the row's top-left corner, which can land in that
+			// padding rather than the checkbox itself - can silently no-op
+			// even though a real click on the visible checkbox glyph (at
+			// its actual vertical center) works fine; TapAt targets that
+			// center explicitly instead.
+			test.TapAt(check, fyne.NewPos(1, check.Size().Height/2))
+
+			test.Tap(findButton(t, mainWindow.Content(), "Save Settings"))
+
+			if !savedOK {
+				t.Fatal("expected OnSave to be called after tapping Save Settings")
+			}
+			if saved.SyncMode != c.wantMode {
+				t.Errorf("expected SyncMode %q after selecting and saving %q, got %q", c.wantMode, c.checkLabel, saved.SyncMode)
+			}
+		})
 	}
 }
 

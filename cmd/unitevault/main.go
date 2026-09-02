@@ -90,7 +90,7 @@ type trayApp struct {
 	cfgMgr *config.ConfigManager
 	menu   *fyne.Menu
 	status *fyne.MenuItem
-	// checkConflicts is the tray menu's "Check for Conflicts and Merge..."
+	// checkConflicts is the tray menu's "Check for Conflicts and Merge"
 	// item (spec 1.6.10, iCloud-centric Mode A only) - kept as a field so
 	// refreshCheckConflictsMenuItem can toggle its enabled state whenever the
 	// sync mode or Vault path could have changed, rather than only ever
@@ -189,15 +189,15 @@ func runTrayMode() {
 	mStatus := fyne.NewMenuItem(lang.L("Status: Idle"), nil)
 	mStatus.Disabled = true
 	mSyncNow := fyne.NewMenuItem(lang.L("Sync Now"), nil)
-	mSettings := fyne.NewMenuItem(lang.L("Settings..."), nil)
+	mSettings := fyne.NewMenuItem(lang.L("Settings"), nil)
 	// Starts disabled; refreshCheckConflictsMenuItem enables it once startup
 	// has actually determined the sync mode - see that method's doc comment
 	// for why this lives in the tray menu rather than the Settings window
 	// (its previous home).
-	mCheckConflicts := fyne.NewMenuItem(lang.L("Check for Conflicts and Merge..."), nil)
+	mCheckConflicts := fyne.NewMenuItem(lang.L("Check for Conflicts and Merge"), nil)
 	mCheckConflicts.Disabled = true
-	mCheckUpdate := fyne.NewMenuItem(lang.L("Check for Update..."), nil)
-	mAbout := fyne.NewMenuItem(lang.L("About UniteVault..."), nil)
+	mCheckUpdate := fyne.NewMenuItem(lang.L("Check for Update"), nil)
+	mAbout := fyne.NewMenuItem(lang.L("About UniteVault"), nil)
 	mQuit := fyne.NewMenuItem(lang.L("Quit UniteVault"), nil)
 	mQuit.IsQuit = true
 
@@ -554,7 +554,7 @@ func (t *trayApp) syncNow() {
 	t.runCycleGuarded(t.ctx, eng, true)
 }
 
-// checkForUpdate handles the "Check for Update..." tray menu action:
+// checkForUpdate handles the "Check for Update" tray menu action:
 // queries GitHub Releases, and if a newer version is available, offers to
 // download and apply it (performSelfUpdate). Always safe to run regardless
 // of init state - it doesn't touch Vault/config at all.
@@ -586,7 +586,7 @@ func (t *trayApp) checkForUpdate() {
 
 // offerUpdate shows the "Update Available" prompt - or, if no automatic
 // download matches this platform, an offer to open the release page
-// instead - shared by both the manual "Check for Update..." menu action and
+// instead - shared by both the manual "Check for Update" menu action and
 // the periodic background check (maybeCheckForUpdatePeriodically). Safe to
 // call from any goroutine (gui.Confirm is).
 func (t *trayApp) offerUpdate(info *selfupdate.ReleaseInfo) {
@@ -622,7 +622,7 @@ func (t *trayApp) offerUpdate(info *selfupdate.ReleaseInfo) {
 
 // updateCheckInterval is how often UniteVault checks GitHub Releases for a
 // newer version in the background, without any user action - separate from
-// "Check for Update..." in the tray menu, which always checks immediately
+// "Check for Update" in the tray menu, which always checks immediately
 // regardless of when the last check happened.
 const updateCheckInterval = 7 * 24 * time.Hour
 
@@ -631,7 +631,7 @@ const updateCheckInterval = 7 * 24 * time.Hour
 // recorded check (LoadLastUpdateCheck, persisted to disk) - so quitting and
 // relaunching the app daily doesn't reset a weekly cadence back to zero
 // every time. Silent unless an update is actually found: unlike the manual
-// "Check for Update..." menu action, this never shows a progress dialog or
+// "Check for Update" menu action, this never shows a progress dialog or
 // an "Up to Date" message on its own - only the same "Update Available"
 // prompt the manual check shows (offerUpdate), and only when there's
 // actually something to offer. Must be started at most once per app

@@ -106,6 +106,41 @@ func TestPickFolder_NeverUsesDoAndWait(t *testing.T) {
 	}
 }
 
+// TestDialogs_NeverUseZenityExceptForNativePickers guards against
+// reintroducing the exact bug class behind a real, previously-shipped
+// z-order issue: Info used to shell out to zenity for a standalone
+// OS-native dialog window with no parent/owner relationship to the shared
+// window, so it could render behind an already-focused Settings window
+// (see Info's own doc comment). Every dialog that reports something to the
+// user must instead show as an overlay on the shared window (ensureWindowVisible
+// + a dialog.Dialog) - only a genuine native OS picker (PickFolder's folder
+// chooser, which looks out of place as a Fyne dialog and has no z-order
+// relationship to worry about since it's synchronous/modal to the OS
+// itself) may still use zenity.
+func TestDialogs_NeverUseZenityExceptForNativePickers(t *testing.T) {
+	src, err := os.ReadFile("dialogs.go")
+	if err != nil {
+		t.Fatalf("failed to read dialogs.go: %v", err)
+	}
+
+	for _, marker := range []string{
+		"func Info(",
+		"func showConfirm(",
+		"func Choice(",
+		"func ChoiceN(",
+		"func InstallReminder(",
+		"func RunWithProgress(",
+	} {
+		body, ok := funcBody(string(src), marker)
+		if !ok {
+			t.Fatalf("expected to find %s in dialogs.go", marker)
+		}
+		if strings.Contains(body, "zenity.") {
+			t.Errorf("%s must not call zenity directly - it must show as an overlay on the shared window instead of a separate OS-native window with no z-order relationship to it", marker)
+		}
+	}
+}
+
 // funcBody extracts the brace-delimited body text of the first top-level
 // function whose declaration starts with marker (e.g. "func Foo(") in src,
 // by counting braces from that function's opening "{" - good enough for

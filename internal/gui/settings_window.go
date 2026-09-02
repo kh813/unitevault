@@ -722,7 +722,17 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// user's own Google Drive desktop app handles sync entirely, so the
 	// whole rclone card (remote status, target folder, sync interval) has
 	// nothing to configure and would only be confusing here.
-	topCards := []fyne.CanvasObject{statusCard, syncModeCard, vaultCard}
+	//
+	// syncModeCard goes first, ahead of statusCard - a real, previously-
+	// shipped bug: statusCard's own height is unbounded (e.g. a long
+	// rclone/Google Drive sync error message wraps into many lines, see
+	// statusLine's own doc comment), and with the window's own height now
+	// capped (settingsWindowMaxHeight), putting it first could push
+	// syncModeCard - small and fixed-size, and the single fact most worth
+	// seeing at a glance - down past the capped height, requiring a scroll
+	// to reach it on every ordinary open instead of only in the rare case
+	// that actually needs one.
+	topCards := []fyne.CanvasObject{syncModeCard, statusCard, vaultCard}
 	if syncMode != "gdrive_desktop" {
 		topCards = append(topCards, rcloneCard)
 	}
