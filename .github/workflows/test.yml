@@ -24,6 +24,22 @@ jobs:
         with:
           go-version: '1.22'
 
+      # internal/drive's TestClient_Sync_ExcludesDotfilesAndJunkFiles runs
+      # the real rclone binary (local-to-local, no Drive account needed) to
+      # verify the exact --exclude patterns engine.DefaultExcludes sends to
+      # every real Google Drive publish actually work - the mock-based
+      # engine tests only prove the right strings are passed, never that
+      # rclone itself honors them. Without rclone on PATH that test (and
+      # drive_test.go's other rclone-execution tests) silently skip, so
+      # install it here to keep that coverage real instead of dead code.
+      - name: Install rclone (macOS)
+        if: runner.os == 'macOS'
+        run: brew install rclone
+
+      - name: Install rclone (Windows)
+        if: runner.os == 'Windows'
+        run: choco install rclone -y
+
       # internal/selfupdate/apply_windows.go go:embeds this helper binary,
       # so anything compiling that file (which release.yml's own Windows
       # build always does after building this first) fails to even

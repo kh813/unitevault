@@ -77,7 +77,7 @@ type Config struct {
 	// the Google Drive backup - e.g. a large or private subfolder they
 	// don't want mirrored. Applied on top of this app's own always-on
 	// excludes (its own .sync/ bookkeeping, junk files like .DS_Store, and
-	// every dotfile/dot-directory) - see engine.defaultExcludes. Only
+	// every dotfile/dot-directory) - see engine.DefaultExcludes. Only
 	// meaningful in SyncModeDrive/
 	// SyncModeICloud; SyncModeGDriveDesktop never calls rclone at all.
 	ExtraExcludes []string `json:"extra_excludes,omitempty"`

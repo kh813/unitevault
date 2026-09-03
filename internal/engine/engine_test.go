@@ -220,7 +220,8 @@ func TestSyncEngine_RunCycle_ExcludesJunkFilesAndUserConfiguredPatterns(t *testi
 		t.Fatalf("RunCycle failed: %v", err)
 	}
 
-	for _, want := range []string{"**/.DS_Store", "**/Thumbs.db", "**/.*", "**/.*/", "Attachments/**", "**/*.mp4"} {
+	wantExcludes := append(append([]string{}, engine.DefaultExcludes...), "Attachments/**", "**/*.mp4")
+	for _, want := range wantExcludes {
 		found := false
 		for _, ex := range mock.syncExcludes {
 			if ex == want {

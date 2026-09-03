@@ -67,24 +67,32 @@ func primaryExternalTasks(cfg *config.Config) []externalSyncTask {
 	return tasks
 }
 
-// defaultExcludes are rclone --exclude patterns always left out of the
+// DefaultExcludes are rclone --exclude patterns always left out of the
 // Google Drive backup, regardless of config.Config.ExtraExcludes - OS-
 // generated junk files that serve no purpose once copied elsewhere and
 // that nobody would want backed up (a real user request: .DS_Store,
 // macOS Finder's per-folder metadata cache), plus every dotfile/dot-
 // directory (.git, .obsidian, .gitignore, etc.) since a real user request
 // is to keep the backup limited to the actual Vault content it feeds to
-// Gemini, not app/VCS bookkeeping. "**/.*" excludes the dotfile or dot-
-// directory entry itself; "**/.*/" is the directory-only form (trailing
-// "/") that additionally stops rclone from recursing into a matched
-// directory at all, so its contents never even get walked. "**/" matches
-// at any depth, not just the Vault root, since these can appear inside
-// any subfolder. .DS_Store/Thumbs.db are already covered by "**/.*" (only
-// Thumbs.db isn't, since it has no leading dot) but are kept explicit for
-// clarity and because they predate the generic dotfile rule.
-var defaultExcludes = []string{
+// Gemini, not app/VCS bookkeeping.
+//
+// Every name needs BOTH a bare form and a "**/"-prefixed form: verified
+// against a real rclone binary (internal/drive's
+// TestClient_Sync_ExcludesDotfilesAndJunkFiles), rclone's "**/" only
+// matches at depth 1+ - it does NOT also match the Vault-root item the way
+// a shell/gitignore-style "**/" would, so "**/.DS_Store" alone lets a
+// root-level .DS_Store or Thumbs.db through untouched. ".*"/"**/.*" match
+// the dotfile or dot-directory entry itself (root and nested); the
+// trailing-"/" forms are the directory-only variant that additionally
+// stops rclone from recursing into a matched directory at all, so its
+// contents never even get walked.
+var DefaultExcludes = []string{
+	".DS_Store",
 	"**/.DS_Store",
+	"Thumbs.db",
 	"**/Thumbs.db",
+	".*",
+	".*/",
 	"**/.*",
 	"**/.*/",
 }
@@ -92,12 +100,12 @@ var defaultExcludes = []string{
 // syncExcludes builds the full --exclude pattern list for a Google Drive
 // publish: syncdirExclude (this app's own private bookkeeping folder -
 // differs between Drive mode's Primary publish and iCloud mode's, see
-// each cycle's own doc comment), defaultExcludes, and finally whatever
+// each cycle's own doc comment), DefaultExcludes, and finally whatever
 // additional patterns the user configured (cfg.ExtraExcludes, spec
 // 1.6.10) so a user-specified pattern can still override/narrow the
 // built-in ones if it's more specific.
 func syncExcludes(cfg *config.Config, syncdirExclude string) []string {
-	excludes := append([]string{syncdirExclude}, defaultExcludes...)
+	excludes := append([]string{syncdirExclude}, DefaultExcludes...)
 	return append(excludes, cfg.ExtraExcludes...)
 }
 
