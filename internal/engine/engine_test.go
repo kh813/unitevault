@@ -1066,6 +1066,92 @@ func TestSyncEngine_RunCycle_SkipsApplyingPrimarysOwnSoleChange(t *testing.T) {
 	}
 }
 
+// setUpApplyFailureScenario seeds a Primary with a Secondary-only logged
+// deletion of "secret-plan.md", whose Vault path is deliberately a
+// non-empty directory rather than a plain file - os.Remove reliably fails
+// on that (ENOTEMPTY, portable across macOS/Windows/Linux) without
+// depending on any real filesystem-permission trick, so
+// applySingleDeviceChange's delete branch is guaranteed to return an
+// error every run.
+func setUpApplyFailureScenario(t *testing.T) (*config.ConfigManager, string, *mockDriveRunner) {
+	t.Helper()
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveRole("primary")
+	primaryID, _ := cfgMgr.GetDeviceID()
+
+	mock := newMockDriveRunner()
+	seedPrimaryMarker(t, mock, "ObsidianVault:MyVault", primaryID, "mac-test")
+
+	secretDir := filepath.Join(vaultPath, "secret-plan.md")
+	if err := os.MkdirAll(secretDir, 0755); err != nil {
+		t.Fatalf("failed to seed directory: %v", err)
+	}
+	writeFile(t, filepath.Join(secretDir, "inner.txt"), "x")
+
+	logMgr := syncedlog.NewLogManager(vaultPath)
+	if err := logMgr.AppendLogEntry(syncedlog.LogEntry{
+		Device: "secondary-1", Label: "iphone", Seq: 1, Path: "secret-plan.md", Action: scan.ActionDelete,
+	}); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+	return cfgMgr, vaultPath, mock
+}
+
+// TestSyncEngine_RunCycle_RedactsFilenameInApplyErrorByDefault guards the
+// v0.0.74 privacy fix: by default, a note's actual filename must not
+// appear in the error engine.go surfaces when applying another device's
+// change fails (this can reach the tray status label - see
+// engine.redactRelPath's own doc comment) - only its extension, so bug
+// reports stay useful without exposing Vault content.
+func TestSyncEngine_RunCycle_RedactsFilenameInApplyErrorByDefault(t *testing.T) {
+	cfgMgr, vaultPath, mock := setUpApplyFailureScenario(t)
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:    vaultPath,
+		RcloneRemote: "ObsidianVault",
+		RclonePath:   "MyVault",
+	})
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	err := eng.RunCycle(context.Background())
+	if err == nil {
+		t.Fatal("expected RunCycle to surface the failed delete as an error")
+	}
+	if strings.Contains(err.Error(), "secret-plan.md") {
+		t.Errorf("expected the note's filename to be redacted from the error by default, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "<redacted.md>") {
+		t.Errorf("expected a redacted placeholder in the error, got %q", err.Error())
+	}
+}
+
+// TestSyncEngine_RunCycle_IncludesFilenameInApplyErrorWhenOptedIn is
+// RedactsFilenameInApplyErrorByDefault's mirror image: with
+// LogIncludeFilenames explicitly turned on, the real filename must come
+// through unredacted - guards against a future change accidentally making
+// the opt-in setting a no-op.
+func TestSyncEngine_RunCycle_IncludesFilenameInApplyErrorWhenOptedIn(t *testing.T) {
+	cfgMgr, vaultPath, mock := setUpApplyFailureScenario(t)
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:           vaultPath,
+		RcloneRemote:        "ObsidianVault",
+		RclonePath:          "MyVault",
+		LogIncludeFilenames: true,
+	})
+
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+	err := eng.RunCycle(context.Background())
+	if err == nil {
+		t.Fatal("expected RunCycle to surface the failed delete as an error")
+	}
+	if !strings.Contains(err.Error(), "secret-plan.md") {
+		t.Errorf("expected the real filename when opted in, got %q", err.Error())
+	}
+}
+
 // TestResolvePendingConflict guards conflict resolution via the GUI
 // device-picker (spec 3.3.2): the chosen device's real content (never a
 // placeholder string - the original bug) gets written to the Vault file

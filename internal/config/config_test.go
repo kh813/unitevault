@@ -9,6 +9,24 @@ import (
 	"github.com/kh813/unitevault/internal/config"
 )
 
+// TestEngineLogPath_MatchesConfigDir guards the single-source-of-truth
+// consolidation of this device's own rclone diagnostic log path: every
+// caller (main.go's admin actions, engine.NewSyncEngine's default
+// driveRunner) must resolve to the exact same file under GetConfigDir(),
+// not something separately computed that could drift - e.g. back to a
+// path under the Vault, a real previously-shipped bug (see
+// engine.defaultEngineLogPath's own test).
+func TestEngineLogPath_MatchesConfigDir(t *testing.T) {
+	dir, err := config.GetConfigDir()
+	if err != nil {
+		t.Fatalf("GetConfigDir failed: %v", err)
+	}
+	want := filepath.Join(dir, "engine.log")
+	if got := config.EngineLogPath(); got != want {
+		t.Errorf("EngineLogPath() = %q, want %q", got, want)
+	}
+}
+
 // TestConfig_EffectiveSyncMode guards spec 1.6.10's backward-compat
 // requirement: every config saved before SyncMode existed has it as the
 // empty string, and must be treated identically to SyncModeDrive (the

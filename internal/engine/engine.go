@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -154,16 +156,27 @@ func (e *SyncEngine) scanStep(lastRawState *scan.ScanState) (*scan.ScanState, er
 	return e.scanner.ScanPaths(lastRawState, paths)
 }
 
+// defaultEngineLogPath is where NewSyncEngine's default driveRunner writes
+// its own rclone diagnostic log when the caller doesn't supply one -
+// always config.EngineLogPath(), never anything under vaultPath. Kept as
+// its own (trivial) function, vaultPath parameter included even though
+// unused, so a regression back to a Vault-relative path - what this
+// function replaced, see NewSyncEngine's own comment - is caught by
+// TestDefaultEngineLogPath_NeverInsideVault instead of only surfacing
+// later as leaked data in another paired device's Google Drive pull.
+func defaultEngineLogPath(vaultPath string) string {
+	return config.EngineLogPath()
+}
+
 func NewSyncEngine(cfgMgr *config.ConfigManager, vaultPath string, label string, driveRunner drive.RcloneRunner) *SyncEngine {
 	if driveRunner == nil {
-		// config.EngineLogPath(), not a path under vaultPath/syncdir.Name:
-		// a real, previously-shipped bug had this device's own local
+		// A real, previously-shipped bug had this device's own local
 		// rclone diagnostic log living inside Vault/.sync, where
 		// SyncModeDrive's Primary publish only excludes .sync/state/** -
 		// so this log (local absolute paths, rclone remote name, ...)
 		// was getting synced to Google Drive and pulled onto every other
 		// paired device instead of staying local-only.
-		driveRunner = drive.NewClient(config.EngineLogPath())
+		driveRunner = drive.NewClient(defaultEngineLogPath(vaultPath))
 	}
 	return &SyncEngine{
 		cfgMgr:    cfgMgr,
@@ -584,6 +597,25 @@ func redactRelPath(cfg *config.Config, relPath string) string {
 	return "<redacted" + filepath.Ext(relPath) + ">"
 }
 
+// redactErrPath strips the absolute path Go's os package embeds in a
+// *fs.PathError (os.Remove/os.ReadFile/os.WriteFile/os.MkdirAll all return
+// one on failure) before it's wrapped with %w into a returned error. A
+// real bug this guards against: redacting the %s placeholder right next
+// to %w in a format string like "...%s...: %w" isn't enough on its own -
+// the wrapped error's own Error() string still carries the real absolute
+// Vault path (which also reveals the OS username via the home directory)
+// unless the PathError itself is redacted first.
+func redactErrPath(cfg *config.Config, err error) error {
+	if err == nil || (cfg != nil && cfg.LogIncludeFilenames) {
+		return err
+	}
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return &fs.PathError{Op: pe.Op, Path: "<redacted" + filepath.Ext(pe.Path) + ">", Err: pe.Err}
+	}
+	return err
+}
+
 // applySingleDeviceChange handles a path exactly one device has ever logged
 // a change for - the "1台のみが分岐点から変更している場合は、自動的にそ
 // の変更を採用する" rule (spec 3.3). If that lone device is selfDeviceID
@@ -613,7 +645,7 @@ func (e *SyncEngine) applySingleDeviceChange(cfg *config.Config, relPath string,
 
 	if entry.Action == scan.ActionDelete {
 		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to apply %s's deletion of %s: %w", devID, redactRelPath(cfg, relPath), err)
+			return fmt.Errorf("failed to apply %s's deletion of %s: %w", devID, redactRelPath(cfg, relPath), redactErrPath(cfg, err))
 		}
 		delete(pendingByPath, relPath)
 		return nil
@@ -626,10 +658,10 @@ func (e *SyncEngine) applySingleDeviceChange(cfg *config.Config, relPath string,
 	}
 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		return fmt.Errorf("failed to create parent directory for %s: %w", redactRelPath(cfg, relPath), err)
+		return fmt.Errorf("failed to create parent directory for %s: %w", redactRelPath(cfg, relPath), redactErrPath(cfg, err))
 	}
 	if err := os.WriteFile(fullPath, []byte(entry.Diff), 0644); err != nil {
-		return fmt.Errorf("failed to apply %s's change to %s: %w", devID, redactRelPath(cfg, relPath), err)
+		return fmt.Errorf("failed to apply %s's change to %s: %w", devID, redactRelPath(cfg, relPath), redactErrPath(cfg, err))
 	}
 	delete(pendingByPath, relPath)
 	return nil
@@ -722,7 +754,7 @@ func (e *SyncEngine) mergeAndTrackConflicts(cfg *config.Config, selfDeviceID str
 
 		fullPath := filepath.Join(e.vaultPath, relPath)
 		if err := os.WriteFile(fullPath, []byte(res.MergedContent), 0644); err != nil {
-			return fmt.Errorf("failed to write merged file: %w", err)
+			return fmt.Errorf("failed to write merged file %s: %w", redactRelPath(cfg, relPath), redactErrPath(cfg, err))
 		}
 
 		if !res.HasConflict {
@@ -734,7 +766,7 @@ func (e *SyncEngine) mergeAndTrackConflicts(cfg *config.Config, selfDeviceID str
 
 		writtenHash, err := scan.CalculateNormalizedHash(fullPath)
 		if err != nil {
-			return fmt.Errorf("failed to hash conflict-marked file %s: %w", redactRelPath(cfg, relPath), err)
+			return fmt.Errorf("failed to hash conflict-marked file %s: %w", redactRelPath(cfg, relPath), redactErrPath(cfg, err))
 		}
 		conflictVersions := make([]config.PendingConflictVersion, 0, len(versions))
 		for _, v := range versions {
