@@ -779,14 +779,6 @@ func (t *trayApp) performResetConfirmed() {
 	t.openSettingsGUI()
 }
 
-func engineLogPath() string {
-	dir, err := config.GetConfigDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(dir, "engine.log")
-}
-
 // buildFormData gathers everything shown in the Settings window (spec
 // 3.5.2/8.3): tool install status, device role, saved config, and rclone
 // remote status. It never triggers a rclone/Git install by itself (uses
@@ -890,7 +882,7 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 	// avoids triggering drive.NewClient's auto-download side effect just to
 	// render the window.
 	if rcloneExecPath != "" {
-		client := drive.NewClient(engineLogPath())
+		client := drive.NewClient(config.EngineLogPath())
 		data.RcloneConfigured = client.IsRemoteConfigured(context.Background(), data.RcloneRemote)
 		if data.RcloneConfigured {
 			data.RcloneRemoteInfo = lang.L("Configured ({{.Remote}})", map[string]string{"Remote": data.RcloneRemote})
@@ -1010,7 +1002,7 @@ func (t *trayApp) reopenSettingsGUI(current gui.SettingsFormData) {
 	data.LogIncludeFilenames = current.LogIncludeFilenames
 
 	if _, ok := drive.FindRcloneBinary(); ok {
-		client := drive.NewClient(engineLogPath())
+		client := drive.NewClient(config.EngineLogPath())
 		data.RcloneConfigured = client.IsRemoteConfigured(context.Background(), data.RcloneRemote)
 		if data.RcloneConfigured {
 			data.RcloneRemoteInfo = lang.L("Configured ({{.Remote}})", map[string]string{"Remote": data.RcloneRemote})
@@ -1142,7 +1134,7 @@ func (t *trayApp) configureRemote(current gui.SettingsFormData) {
 		lang.L("New Setup (Recommended)"),
 		lang.L("Existing / CLI Config"),
 		func(choice int) {
-			client := drive.NewClient(engineLogPath())
+			client := drive.NewClient(config.EngineLogPath())
 			switch choice {
 			case 1:
 				go func() {
@@ -1231,7 +1223,7 @@ func (t *trayApp) removeRemoteConfirmed(current gui.SettingsFormData, remoteName
 				}
 				defer release()
 
-				client := drive.NewClient(engineLogPath())
+				client := drive.NewClient(config.EngineLogPath())
 				if err := client.RemoveRemote(context.Background(), remoteName); err != nil {
 					gui.Info(lang.L("Remove Failed"), lang.L("Failed to remove remote '{{.Remote}}': {{.Err}}", map[string]string{"Remote": remoteName, "Err": err.Error()}))
 					t.reopenSettingsGUI(current)
@@ -1284,7 +1276,7 @@ func (t *trayApp) promoteToPrimary(current gui.SettingsFormData) {
 		remoteTarget := fmt.Sprintf("%s:%s", remoteName, strings.TrimSpace(current.RclonePath))
 
 		hostname, _ := os.Hostname()
-		bootstrapper := bootstrap.NewBootstrapper(t.cfgMgr, drive.NewClient(engineLogPath()))
+		bootstrapper := bootstrap.NewBootstrapper(t.cfgMgr, drive.NewClient(config.EngineLogPath()))
 
 		err := gui.RunWithProgress(
 			lang.L("Promoting to Primary"),
@@ -1625,7 +1617,7 @@ func (t *trayApp) saveSettings(data gui.SettingsFormData) {
 	// the remote is configured but pointed at a stale/wrong Vault.
 	if prevErr == nil && vaultChangeNeedsRemoteRemoval(prevCfg, data) {
 		remote := strings.TrimSpace(prevCfg.RcloneRemote)
-		if drive.NewClient(engineLogPath()).IsRemoteConfigured(context.Background(), remote) {
+		if drive.NewClient(config.EngineLogPath()).IsRemoteConfigured(context.Background(), remote) {
 			gui.Info(
 				lang.L("Remove the Google Drive Remote First"),
 				lang.L(
@@ -1908,7 +1900,7 @@ func (t *trayApp) saveSettingsConfirmed(data gui.SettingsFormData) {
 
 		var driveClient *drive.Client
 		if !gdriveDesktopMode {
-			driveClient = drive.NewClient(engineLogPath())
+			driveClient = drive.NewClient(config.EngineLogPath())
 
 			if !driveClient.IsRemoteConfigured(context.Background(), data.RcloneRemote) {
 				choiceCh := make(chan int, 1)

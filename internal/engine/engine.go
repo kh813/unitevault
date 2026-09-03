@@ -156,7 +156,14 @@ func (e *SyncEngine) scanStep(lastRawState *scan.ScanState) (*scan.ScanState, er
 
 func NewSyncEngine(cfgMgr *config.ConfigManager, vaultPath string, label string, driveRunner drive.RcloneRunner) *SyncEngine {
 	if driveRunner == nil {
-		driveRunner = drive.NewClient(filepath.Join(vaultPath, syncdir.Name, "engine.log"))
+		// config.EngineLogPath(), not a path under vaultPath/syncdir.Name:
+		// a real, previously-shipped bug had this device's own local
+		// rclone diagnostic log living inside Vault/.sync, where
+		// SyncModeDrive's Primary publish only excludes .sync/state/** -
+		// so this log (local absolute paths, rclone remote name, ...)
+		// was getting synced to Google Drive and pulled onto every other
+		// paired device instead of staying local-only.
+		driveRunner = drive.NewClient(config.EngineLogPath())
 	}
 	return &SyncEngine{
 		cfgMgr:    cfgMgr,

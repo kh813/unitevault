@@ -146,6 +146,21 @@ func GetConfigDir() (string, error) {
 	return filepath.Join(home, ".unitevault"), nil
 }
 
+// EngineLogPath returns the one on-disk location for this device's own
+// rclone diagnostic log (engine.log), inside GetConfigDir() - deliberately
+// outside the Vault, so it can never be picked up by a Google Drive
+// publish and end up synced to every other paired device. Returns "" if
+// GetConfigDir fails (e.g. no resolvable home directory), matching every
+// other drive.NewClient(...) call site's existing "" = "log nowhere but
+// stderr" fallback.
+func EngineLogPath() string {
+	dir, err := GetConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "engine.log")
+}
+
 // EnsureDir ensures that the config directory exists
 func (cm *ConfigManager) EnsureDir() error {
 	return os.MkdirAll(cm.configDir, 0755)

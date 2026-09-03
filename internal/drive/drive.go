@@ -213,10 +213,19 @@ func EnsureRcloneBinary(targetPath string) error {
 	return fmt.Errorf("rclone executable not found inside zip archive")
 }
 
+// maxLogFileSize caps engine.log before it can grow unbounded - a real
+// risk during an extended rclone outage, since every failed attempt
+// (retried on a 30s/2m/10m backoff, see executeWithRetry) appends another
+// entry. Full logrotate-style multi-generation rotation would be overkill
+// for a single small diagnostic text file, so rotateLogIfOversized instead
+// just drops the oldest half once this is exceeded.
+const maxLogFileSize = 5 * 1024 * 1024 // 5 MB
+
 func (c *Client) logError(format string, v ...interface{}) {
 	msg := fmt.Sprintf("[%s] ", time.Now().Format(time.RFC3339)) + fmt.Sprintf(format, v...) + "\n"
 	if c.logFile != "" {
 		if err := os.MkdirAll(filepath.Dir(c.logFile), 0755); err == nil {
+			rotateLogIfOversized(c.logFile)
 			f, err := os.OpenFile(c.logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 			if err == nil {
 				_, _ = f.WriteString(msg)
@@ -225,6 +234,28 @@ func (c *Client) logError(format string, v ...interface{}) {
 		}
 	}
 	log.Print(msg)
+}
+
+// rotateLogIfOversized drops the oldest half of logPath's content once it
+// exceeds maxLogFileSize, cutting at the next line boundary so the kept
+// content never starts mid-entry. Best-effort: any error here just leaves
+// the file as-is rather than blocking the log write that triggered it -
+// growing a little past the cap on a rare failure is harmless.
+func rotateLogIfOversized(logPath string) {
+	info, err := os.Stat(logPath)
+	if err != nil || info.Size() <= maxLogFileSize {
+		return
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return
+	}
+	cut := len(data) / 2
+	if idx := bytes.IndexByte(data[cut:], '\n'); idx >= 0 {
+		cut += idx + 1
+	}
+	notice := fmt.Sprintf("[%s] --- log truncated: older entries dropped to stay under %d bytes ---\n", time.Now().Format(time.RFC3339), maxLogFileSize)
+	_ = os.WriteFile(logPath, append([]byte(notice), data[cut:]...), 0644)
 }
 
 // executeWithRetry runs an exec.Command with exponential backoff (30s -> 2m -> 10m).
