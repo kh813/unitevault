@@ -67,6 +67,40 @@ func primaryExternalTasks(cfg *config.Config) []externalSyncTask {
 	return tasks
 }
 
+// defaultExcludes are rclone --exclude patterns always left out of the
+// Google Drive backup, regardless of config.Config.ExtraExcludes - OS-
+// generated junk files that serve no purpose once copied elsewhere and
+// that nobody would want backed up (a real user request: .DS_Store,
+// macOS Finder's per-folder metadata cache), plus every dotfile/dot-
+// directory (.git, .obsidian, .gitignore, etc.) since a real user request
+// is to keep the backup limited to the actual Vault content it feeds to
+// Gemini, not app/VCS bookkeeping. "**/.*" excludes the dotfile or dot-
+// directory entry itself; "**/.*/" is the directory-only form (trailing
+// "/") that additionally stops rclone from recursing into a matched
+// directory at all, so its contents never even get walked. "**/" matches
+// at any depth, not just the Vault root, since these can appear inside
+// any subfolder. .DS_Store/Thumbs.db are already covered by "**/.*" (only
+// Thumbs.db isn't, since it has no leading dot) but are kept explicit for
+// clarity and because they predate the generic dotfile rule.
+var defaultExcludes = []string{
+	"**/.DS_Store",
+	"**/Thumbs.db",
+	"**/.*",
+	"**/.*/",
+}
+
+// syncExcludes builds the full --exclude pattern list for a Google Drive
+// publish: syncdirExclude (this app's own private bookkeeping folder -
+// differs between Drive mode's Primary publish and iCloud mode's, see
+// each cycle's own doc comment), defaultExcludes, and finally whatever
+// additional patterns the user configured (cfg.ExtraExcludes, spec
+// 1.6.10) so a user-specified pattern can still override/narrow the
+// built-in ones if it's more specific.
+func syncExcludes(cfg *config.Config, syncdirExclude string) []string {
+	excludes := append([]string{syncdirExclude}, defaultExcludes...)
+	return append(excludes, cfg.ExtraExcludes...)
+}
+
 // unstablePullExcludes turns scan.UnstablePaths into rclone --exclude
 // patterns, each anchored to the Vault root with a leading "/" so a
 // pattern can never accidentally match an unrelated file elsewhere that
@@ -404,7 +438,7 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 		// bookkeeping is never published to Drive at all - keeping it
 		// local-only is what lets every other device's pull safely
 		// exclude the same pattern without missing anything real.
-		syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget, "/"+syncdir.Name+"/state/**")
+		syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget, syncExcludes(cfg, "/"+syncdir.Name+"/state/**")...)
 
 		// Recorded regardless of outcome so the Settings window can surface
 		// "last synced" / "last sync failed" without needing a live
@@ -490,7 +524,7 @@ func (e *SyncEngine) runICloudModeCycle(ctx context.Context, cfg *config.Config)
 	// Secondaries to read), Mode A's Secondary never reads Drive at all,
 	// so publishing it would only add noise to what's meant to be a clean
 	// Vault-only export.
-	syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget, "/"+syncdir.Name+"/**")
+	syncErr := e.drive.Sync(ctx, e.vaultPath, remoteTarget, syncExcludes(cfg, "/"+syncdir.Name+"/**")...)
 
 	status := config.DriveSyncStatus{Time: time.Now().Format(time.RFC3339), Success: syncErr == nil}
 	if syncErr != nil {

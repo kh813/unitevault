@@ -864,6 +864,7 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 		if cfg.IntervalSeconds > 0 {
 			data.IntervalSeconds = cfg.IntervalSeconds
 		}
+		data.ExtraExcludes = strings.Join(cfg.ExtraExcludes, "\n")
 	}
 
 	// Only probe "rclone listremotes" if a binary is actually present -
@@ -986,6 +987,7 @@ func (t *trayApp) reopenSettingsGUI(current gui.SettingsFormData) {
 	data.RcloneRemote = current.RcloneRemote
 	data.RclonePath = current.RclonePath
 	data.IntervalSeconds = current.IntervalSeconds
+	data.ExtraExcludes = current.ExtraExcludes
 
 	if _, ok := drive.FindRcloneBinary(); ok {
 		client := drive.NewClient(engineLogPath())
@@ -1774,7 +1776,24 @@ func buildSaveConfig(prevCfg *config.Config, data gui.SettingsFormData) *config.
 		IntervalSeconds:  data.IntervalSeconds,
 		SyncMode:         lockedSyncMode(prevCfg, data),
 		ICloudBridgePath: icloudBridgePath,
+		ExtraExcludes:    parseExtraExcludes(data.ExtraExcludes),
 	}
+}
+
+// parseExtraExcludes splits the Settings window's multi-line "Exclude from
+// Backup" text (gui.SettingsFormData.ExtraExcludes) into individual rclone
+// --exclude patterns, one per line, dropping blank lines so an empty field
+// (or trailing blank lines) round-trips to a nil/empty slice rather than a
+// slice of empty strings (which rclone would reject as an invalid pattern).
+func parseExtraExcludes(text string) []string {
+	var excludes []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			excludes = append(excludes, line)
+		}
+	}
+	return excludes
 }
 
 // clearRemoteConfig removes the (now possibly stale) rclone remote name

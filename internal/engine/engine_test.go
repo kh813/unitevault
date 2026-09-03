@@ -186,6 +186,53 @@ func TestSyncEngine_RunCycle_ICloudMode_PrimaryPublishesElectsAndSkipsMerge(t *t
 	}
 }
 
+// TestSyncEngine_RunCycle_ExcludesJunkFilesAndUserConfiguredPatterns guards
+// a real user request: OS-generated junk files (.DS_Store, Thumbs.db) and
+// every dotfile/dot-directory (.git, .obsidian, etc.) must never be
+// published to Google Drive regardless of config, and a user can
+// add their own additional rclone --exclude patterns
+// (config.Config.ExtraExcludes) for anything else they don't want backed
+// up - both on top of this app's own mandatory .sync/ bookkeeping
+// exclusion, verified here via Mode A's Primary publish (Mode B/C's
+// publish shares the same engine.syncExcludes helper).
+func TestSyncEngine_RunCycle_ExcludesJunkFilesAndUserConfiguredPatterns(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultPath := filepath.Join(tempDir, "Vault")
+	cfgDir := filepath.Join(tempDir, "config")
+	if err := os.MkdirAll(vaultPath, 0755); err != nil {
+		t.Fatalf("failed to create vault dir: %v", err)
+	}
+
+	cfgMgr := config.NewConfigManagerWithDir(cfgDir)
+	_ = cfgMgr.SaveConfig(&config.Config{
+		VaultPath:       vaultPath,
+		RcloneRemote:    "ObsidianVault",
+		RclonePath:      "MyVault",
+		IntervalSeconds: 120,
+		SyncMode:        config.SyncModeICloud,
+		ExtraExcludes:   []string{"Attachments/**", "**/*.mp4"},
+	})
+
+	mock := newMockDriveRunner()
+	eng := engine.NewSyncEngine(cfgMgr, vaultPath, "mac-test", mock)
+
+	if err := eng.RunCycle(context.Background()); err != nil {
+		t.Fatalf("RunCycle failed: %v", err)
+	}
+
+	for _, want := range []string{"**/.DS_Store", "**/Thumbs.db", "**/.*", "**/.*/", "Attachments/**", "**/*.mp4"} {
+		found := false
+		for _, ex := range mock.syncExcludes {
+			if ex == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected the publish to exclude %q, got excludes %v", want, mock.syncExcludes)
+		}
+	}
+}
+
 // TestSyncEngine_RunCycle_ICloudMode_SecondaryNeverTouchesDrive guards the
 // other half of the same fix: a Mode A device that loses (or never wins)
 // the Primary election must never publish to Google Drive itself - only
@@ -473,8 +520,15 @@ func TestSyncEngine_RunCycle_Primary_PullsSyncFolderBeforePublishing(t *testing.
 	if !mock.syncCalled {
 		t.Error("expected the existing full-Vault rclone sync publish to still happen")
 	}
-	if strings.Join(mock.syncExcludes, ",") != "/"+syncdir.Name+"/state/**" {
-		t.Errorf("expected the publish sync to exclude /%s/state/** (this device's own private scanner bookkeeping), got %v", syncdir.Name, mock.syncExcludes)
+	wantExclude := "/" + syncdir.Name + "/state/**"
+	foundExclude := false
+	for _, ex := range mock.syncExcludes {
+		if ex == wantExclude {
+			foundExclude = true
+		}
+	}
+	if !foundExclude {
+		t.Errorf("expected the publish sync to exclude %s (this device's own private scanner bookkeeping), got %v", wantExclude, mock.syncExcludes)
 	}
 }
 

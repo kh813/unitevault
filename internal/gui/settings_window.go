@@ -91,6 +91,13 @@ type SettingsFormData struct {
 	// display text - it's what actually gates showing "Remove Remote
 	// Configuration...".
 	RcloneConfigured bool
+	// ExtraExcludes is config.Config.ExtraExcludes joined with newlines for
+	// display/editing as a single multi-line text field (spec 1.6.10) -
+	// additional rclone --exclude glob patterns, one per line, the user
+	// wants left out of the Google Drive backup on top of this app's own
+	// always-on excludes (its .sync/ bookkeeping, junk files like
+	// .DS_Store). main.go converts to/from config.Config's []string.
+	ExtraExcludes string
 }
 
 // SettingsHandlers wires the Settings window's actions back to the business
@@ -429,6 +436,11 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	intervalEntry := widget.NewEntry()
 	intervalEntry.SetText(fmt.Sprintf("%d", data.IntervalSeconds))
 
+	excludesEntry := widget.NewMultiLineEntry()
+	excludesEntry.SetText(data.ExtraExcludes)
+	excludesEntry.SetPlaceHolder(lang.L("One rclone --exclude pattern per line, e.g.:\nAttachments/**\n**/*.mp4"))
+	excludesEntry.Wrapping = fyne.TextWrapWord
+
 	// unsavedLabel flags edits the user hasn't saved yet by comparing every
 	// field's live text against its value at the moment this content was
 	// built (i.e. what's actually on disk). It never disables Save itself -
@@ -439,6 +451,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	baselineRemote := strings.TrimSpace(remoteEntry.Text)
 	baselineTargetPath := strings.TrimSpace(targetPathEntry.Text)
 	baselineInterval := strings.TrimSpace(intervalEntry.Text)
+	baselineExcludes := strings.TrimSpace(excludesEntry.Text)
 
 	unsavedLabel := canvas.NewText("● "+lang.L("Unsaved changes"), theme.Color(theme.ColorNameWarning))
 	unsavedLabel.TextStyle = fyne.TextStyle{Bold: true}
@@ -448,7 +461,8 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		dirty := strings.TrimSpace(vaultEntry.Text) != baselineVault ||
 			strings.TrimSpace(remoteEntry.Text) != baselineRemote ||
 			strings.TrimSpace(targetPathEntry.Text) != baselineTargetPath ||
-			strings.TrimSpace(intervalEntry.Text) != baselineInterval
+			strings.TrimSpace(intervalEntry.Text) != baselineInterval ||
+			strings.TrimSpace(excludesEntry.Text) != baselineExcludes
 		unsavedLabel.Hidden = !dirty
 		unsavedLabel.Refresh()
 	}
@@ -456,6 +470,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	remoteEntry.OnChanged = updateDirtyState
 	targetPathEntry.OnChanged = updateDirtyState
 	intervalEntry.OnChanged = updateDirtyState
+	excludesEntry.OnChanged = updateDirtyState
 
 	rcloneBasicForm := widget.NewForm(
 		// data.RcloneRemoteInfo is built in main.go via lang.L with template
@@ -472,11 +487,15 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	// one click away for anyone who does want to customize them.
 	intervalHint := widget.NewLabel(lang.L("Local changes are scanned and merged every tick. When both Google Drive and an iCloud Bridge are configured, each one gets a turn on alternating ticks, so its effective interval is roughly double this value."))
 	intervalHint.Wrapping = fyne.TextWrapWord
+	excludesHint := widget.NewLabel(lang.L("Additional files/folders to leave out of the Google Drive backup (rclone --exclude patterns, one per line, relative to the Vault). Dotfiles/dot-folders (.git, .obsidian, .DS_Store, etc.) and Thumbs.db are always excluded regardless of this list."))
+	excludesHint.Wrapping = fyne.TextWrapWord
 	rcloneAdvancedForm := widget.NewForm(
 		widget.NewFormItem(lang.L("Remote Name"), remoteEntry),
 		widget.NewFormItem(lang.L("Google Drive Target Folder Path"), targetPathEntry),
 		widget.NewFormItem(lang.L("Sync Interval (seconds)"), intervalEntry),
 		widget.NewFormItem("", intervalHint),
+		widget.NewFormItem(lang.L("Exclude from Backup"), excludesEntry),
+		widget.NewFormItem("", excludesHint),
 	)
 	rcloneAdvanced := widget.NewAccordion(widget.NewAccordionItem(lang.L("Advanced Options"), rcloneAdvancedForm))
 
@@ -498,6 +517,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			RclonePath:             strings.TrimSpace(targetPathEntry.Text),
 			IntervalSeconds:        sec,
 			SyncMode:               syncMode,
+			ExtraExcludes:          strings.TrimSpace(excludesEntry.Text),
 			RcloneExecPath:         data.RcloneExecPath,
 			RcloneRemoteInfo:       data.RcloneRemoteInfo,
 			RcloneConfigured:       data.RcloneConfigured,

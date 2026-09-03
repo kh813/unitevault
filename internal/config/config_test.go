@@ -36,6 +36,45 @@ func TestConfig_EffectiveSyncMode(t *testing.T) {
 	}
 }
 
+// TestConfigManager_ExtraExcludesRoundTrips guards a real user request:
+// additional rclone --exclude patterns (spec 1.6.10) must survive a
+// Save/Load round-trip, and a config saved before this field existed (or
+// with nothing configured) must come back as an empty/nil slice rather
+// than erroring or panicking.
+func TestConfigManager_ExtraExcludesRoundTrips(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := config.NewConfigManagerWithDir(tempDir)
+
+	want := []string{"Attachments/**", "**/*.mp4"}
+	if err := cm.SaveConfig(&config.Config{VaultPath: "/tmp/v", ExtraExcludes: want}); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	got, err := cm.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if len(got.ExtraExcludes) != len(want) {
+		t.Fatalf("expected ExtraExcludes %v, got %v", want, got.ExtraExcludes)
+	}
+	for i, p := range want {
+		if got.ExtraExcludes[i] != p {
+			t.Errorf("expected ExtraExcludes[%d] = %q, got %q", i, p, got.ExtraExcludes[i])
+		}
+	}
+
+	if err := cm.SaveConfig(&config.Config{VaultPath: "/tmp/v"}); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	got, err = cm.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if len(got.ExtraExcludes) != 0 {
+		t.Errorf("expected empty ExtraExcludes when none configured, got %v", got.ExtraExcludes)
+	}
+}
+
 func TestConfigManager_DeviceID(t *testing.T) {
 	tempDir := t.TempDir()
 	cm := config.NewConfigManagerWithDir(tempDir)

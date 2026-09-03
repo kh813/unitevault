@@ -72,6 +72,15 @@ type Config struct {
 	// has no Bridge concept at all, since the Vault itself already lives in
 	// iCloud (spec 1.6.10).
 	ICloudBridgePath string `json:"icloud_bridge_path,omitempty"`
+	// ExtraExcludes are additional rclone --exclude glob patterns (spec
+	// 1.6.10), relative to the Vault root, that the user wants left out of
+	// the Google Drive backup - e.g. a large or private subfolder they
+	// don't want mirrored. Applied on top of this app's own always-on
+	// excludes (its own .sync/ bookkeeping, junk files like .DS_Store, and
+	// every dotfile/dot-directory) - see engine.defaultExcludes. Only
+	// meaningful in SyncModeDrive/
+	// SyncModeICloud; SyncModeGDriveDesktop never calls rclone at all.
+	ExtraExcludes []string `json:"extra_excludes,omitempty"`
 }
 
 // EffectiveSyncMode returns cfg.SyncMode, defaulting an empty/legacy value
