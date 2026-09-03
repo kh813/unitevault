@@ -883,6 +883,7 @@ func (t *trayApp) buildFormData() gui.SettingsFormData {
 			data.IntervalSeconds = cfg.IntervalSeconds
 		}
 		data.ExtraExcludes = strings.Join(cfg.ExtraExcludes, "\n")
+		data.LogIncludeFilenames = cfg.LogIncludeFilenames
 	}
 
 	// Only probe "rclone listremotes" if a binary is actually present -
@@ -1006,6 +1007,7 @@ func (t *trayApp) reopenSettingsGUI(current gui.SettingsFormData) {
 	data.RclonePath = current.RclonePath
 	data.IntervalSeconds = current.IntervalSeconds
 	data.ExtraExcludes = current.ExtraExcludes
+	data.LogIncludeFilenames = current.LogIncludeFilenames
 
 	if _, ok := drive.FindRcloneBinary(); ok {
 		client := drive.NewClient(engineLogPath())
@@ -1022,16 +1024,16 @@ func (t *trayApp) reopenSettingsGUI(current gui.SettingsFormData) {
 
 func (t *trayApp) showSettingsGUI(data gui.SettingsFormData) {
 	gui.ShowSettingsWindow(data, gui.SettingsHandlers{
-		OnInstallGit:           t.installGit,
-		OnInstallRclone:        t.installRclone,
-		OnInstallICloud:        t.installICloud,
-		OnConfigureRemote:      t.configureRemote,
-		OnRemoveRemote:         t.removeRemote,
-		OnPromoteToPrimary:     t.promoteToPrimary,
-		OnMigrateVault:         t.migrateVault,
-		OnResolveConflicts:     t.resolveConflicts,
-		OnSave:                 t.saveSettings,
-		OnReset:                t.performReset,
+		OnInstallGit:       t.installGit,
+		OnInstallRclone:    t.installRclone,
+		OnInstallICloud:    t.installICloud,
+		OnConfigureRemote:  t.configureRemote,
+		OnRemoveRemote:     t.removeRemote,
+		OnPromoteToPrimary: t.promoteToPrimary,
+		OnMigrateVault:     t.migrateVault,
+		OnResolveConflicts: t.resolveConflicts,
+		OnSave:             t.saveSettings,
+		OnReset:            t.performReset,
 	})
 }
 
@@ -1788,13 +1790,14 @@ func buildSaveConfig(prevCfg *config.Config, data gui.SettingsFormData) *config.
 		icloudBridgePath = prevCfg.ICloudBridgePath
 	}
 	return &config.Config{
-		VaultPath:        data.VaultPath,
-		RcloneRemote:     data.RcloneRemote,
-		RclonePath:       data.RclonePath,
-		IntervalSeconds:  data.IntervalSeconds,
-		SyncMode:         lockedSyncMode(prevCfg, data),
-		ICloudBridgePath: icloudBridgePath,
-		ExtraExcludes:    parseExtraExcludes(data.ExtraExcludes),
+		VaultPath:           data.VaultPath,
+		RcloneRemote:        data.RcloneRemote,
+		RclonePath:          data.RclonePath,
+		IntervalSeconds:     data.IntervalSeconds,
+		SyncMode:            lockedSyncMode(prevCfg, data),
+		ICloudBridgePath:    icloudBridgePath,
+		ExtraExcludes:       parseExtraExcludes(data.ExtraExcludes),
+		LogIncludeFilenames: data.LogIncludeFilenames,
 	}
 }
 

@@ -421,7 +421,7 @@ func (e *SyncEngine) RunCycle(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get latest log entries: %w", err)
 	}
-	if err := e.mergeAndTrackConflicts(deviceID, latestByPath); err != nil {
+	if err := e.mergeAndTrackConflicts(primaryCfg, deviceID, latestByPath); err != nil {
 		return err
 	}
 
@@ -560,6 +560,23 @@ func (e *SyncEngine) runGDriveDesktopModeCycle(ctx context.Context, cfg *config.
 	return nil
 }
 
+// redactRelPath returns relPath unchanged only when the user has opted in
+// via Settings > Advanced Options > "Include filenames in logs"
+// (config.Config.LogIncludeFilenames); otherwise it returns a placeholder
+// that keeps just the file extension (useful for bug-report triage - "is
+// this always a .md file?" - without the note's actual name/path). Applied
+// only to the merge/apply error strings below, which are the ones that can
+// reach an on-screen status label or a future consolidated log file
+// outside the Vault - not to syncedlog's own per-file entries, which are
+// core multi-device merge state that must keep real paths/content to work
+// at all, and never leave the user's own paired devices.
+func redactRelPath(cfg *config.Config, relPath string) string {
+	if cfg != nil && cfg.LogIncludeFilenames {
+		return relPath
+	}
+	return "<redacted" + filepath.Ext(relPath) + ">"
+}
+
 // applySingleDeviceChange handles a path exactly one device has ever logged
 // a change for - the "1台のみが分岐点から変更している場合は、自動的にそ
 // の変更を採用する" rule (spec 3.3). If that lone device is selfDeviceID
@@ -575,7 +592,7 @@ func (e *SyncEngine) runGDriveDesktopModeCycle(ctx context.Context, cfg *config.
 // all - meaning it also never reached Google Drive's published mirror or
 // any other Secondary, despite the Secondary's own push having succeeded
 // without error.
-func (e *SyncEngine) applySingleDeviceChange(relPath string, devEntries map[string]syncedlog.LogEntry, pendingByPath map[string]config.PendingConflict, selfDeviceID string) error {
+func (e *SyncEngine) applySingleDeviceChange(cfg *config.Config, relPath string, devEntries map[string]syncedlog.LogEntry, pendingByPath map[string]config.PendingConflict, selfDeviceID string) error {
 	var devID string
 	var entry syncedlog.LogEntry
 	for id, en := range devEntries {
@@ -589,7 +606,7 @@ func (e *SyncEngine) applySingleDeviceChange(relPath string, devEntries map[stri
 
 	if entry.Action == scan.ActionDelete {
 		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to apply %s's deletion of %s: %w", devID, relPath, err)
+			return fmt.Errorf("failed to apply %s's deletion of %s: %w", devID, redactRelPath(cfg, relPath), err)
 		}
 		delete(pendingByPath, relPath)
 		return nil
@@ -602,10 +619,10 @@ func (e *SyncEngine) applySingleDeviceChange(relPath string, devEntries map[stri
 	}
 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		return fmt.Errorf("failed to create parent directory for %s: %w", relPath, err)
+		return fmt.Errorf("failed to create parent directory for %s: %w", redactRelPath(cfg, relPath), err)
 	}
 	if err := os.WriteFile(fullPath, []byte(entry.Diff), 0644); err != nil {
-		return fmt.Errorf("failed to apply %s's change to %s: %w", devID, relPath, err)
+		return fmt.Errorf("failed to apply %s's change to %s: %w", devID, redactRelPath(cfg, relPath), err)
 	}
 	delete(pendingByPath, relPath)
 	return nil
@@ -625,7 +642,7 @@ func (e *SyncEngine) applySingleDeviceChange(relPath string, devEntries map[stri
 // result_hash - a real base (rather than empty) is essential, since
 // git merge-file falsely reports a conflict for non-overlapping edits when
 // given no base at all.
-func (e *SyncEngine) mergeAndTrackConflicts(selfDeviceID string, latestByPath map[string]map[string]syncedlog.LogEntry) error {
+func (e *SyncEngine) mergeAndTrackConflicts(cfg *config.Config, selfDeviceID string, latestByPath map[string]map[string]syncedlog.LogEntry) error {
 	// Drop any previously-pending conflict whose file has since changed
 	// (the recorded hash no longer matches what's on disk) - the user
 	// resolved it, manually in Obsidian or otherwise, so it shouldn't keep
@@ -663,7 +680,7 @@ func (e *SyncEngine) mergeAndTrackConflicts(selfDeviceID string, latestByPath ma
 			// ever learns about that change at all (spec 3.3's "1台のみ
 			// が分岐点から変更している場合は、自動的にその変更を採用す
 			// る" rule), so it must be applied directly here.
-			if err := e.applySingleDeviceChange(relPath, devEntries, pendingByPath, selfDeviceID); err != nil {
+			if err := e.applySingleDeviceChange(cfg, relPath, devEntries, pendingByPath, selfDeviceID); err != nil {
 				return err
 			}
 			continue
@@ -693,7 +710,7 @@ func (e *SyncEngine) mergeAndTrackConflicts(selfDeviceID string, latestByPath ma
 
 		res, err := merge.NWayMerge(baseContent, versions)
 		if err != nil {
-			return fmt.Errorf("merge error for %s: %w", relPath, err)
+			return fmt.Errorf("merge error for %s: %w", redactRelPath(cfg, relPath), err)
 		}
 
 		fullPath := filepath.Join(e.vaultPath, relPath)
@@ -710,7 +727,7 @@ func (e *SyncEngine) mergeAndTrackConflicts(selfDeviceID string, latestByPath ma
 
 		writtenHash, err := scan.CalculateNormalizedHash(fullPath)
 		if err != nil {
-			return fmt.Errorf("failed to hash conflict-marked file %s: %w", relPath, err)
+			return fmt.Errorf("failed to hash conflict-marked file %s: %w", redactRelPath(cfg, relPath), err)
 		}
 		conflictVersions := make([]config.PendingConflictVersion, 0, len(versions))
 		for _, v := range versions {

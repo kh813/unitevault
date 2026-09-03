@@ -75,6 +75,37 @@ func TestConfigManager_ExtraExcludesRoundTrips(t *testing.T) {
 	}
 }
 
+// TestConfigManager_LogIncludeFilenamesDefaultsToFalse guards a real user
+// request: diagnostic logs must not include note filenames unless the user
+// explicitly opts in via Settings, and a config saved before this field
+// existed (Go zero value) must come back false with no migration needed.
+func TestConfigManager_LogIncludeFilenamesDefaultsToFalse(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := config.NewConfigManagerWithDir(tempDir)
+
+	if err := cm.SaveConfig(&config.Config{VaultPath: "/tmp/v"}); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	got, err := cm.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if got.LogIncludeFilenames {
+		t.Error("expected LogIncludeFilenames to default to false")
+	}
+
+	if err := cm.SaveConfig(&config.Config{VaultPath: "/tmp/v", LogIncludeFilenames: true}); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	got, err = cm.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if !got.LogIncludeFilenames {
+		t.Error("expected LogIncludeFilenames=true to round-trip")
+	}
+}
+
 func TestConfigManager_DeviceID(t *testing.T) {
 	tempDir := t.TempDir()
 	cm := config.NewConfigManagerWithDir(tempDir)

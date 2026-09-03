@@ -49,6 +49,8 @@
   "Exclude from Backup": "バックアップから除外",
   "One rclone --exclude pattern per line, e.g.:\nAttachments/**\n**/*.mp4": "1行に1つ、rcloneの--excludeパターンを入力（例）:\nAttachments/**\n**/*.mp4",
   "Additional files/folders to leave out of the Google Drive backup (rclone --exclude patterns, one per line, relative to the Vault). Dotfiles/dot-folders (.git, .obsidian, .DS_Store, etc.) and Thumbs.db are always excluded regardless of this list.": "Google Driveへのバックアップから除外したいファイル・フォルダを追加できます（rcloneの--excludeパターン、Vaultからの相対パスで1行に1つ）。ドットファイル・ドットフォルダ（.git、.obsidian、.DS_Storeなど）とThumbs.dbは、この設定に関わらず常に除外されます。",
+  "Include Filenames in Logs": "ログにファイル名を含める",
+  "Off by default to protect your notes' privacy: diagnostic error messages this device may log or show (e.g. a sync conflict) refer to the note only by its file type, not its actual filename. Turn this on if a developer asks you to, to help diagnose a bug report.": "初期設定ではオフになっており、ノートのプライバシーを保護します。オフの場合、このデバイスが記録・表示する診断用エラーメッセージ（同期の競合など）には、ファイルの種類のみが記載され、実際のファイル名は含まれません。開発者からバグ報告の調査のために依頼された場合のみ、オンにしてください。",
   "Advanced Options": "詳細オプション",
   "Configure Google Drive Remote...": "Google Driveリモートを設定...",
   "Remove Remote Configuration...": "リモート設定を削除...",

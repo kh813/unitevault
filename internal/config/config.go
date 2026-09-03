@@ -81,6 +81,15 @@ type Config struct {
 	// meaningful in SyncModeDrive/
 	// SyncModeICloud; SyncModeGDriveDesktop never calls rclone at all.
 	ExtraExcludes []string `json:"extra_excludes,omitempty"`
+	// LogIncludeFilenames opts into recording actual note filenames/paths
+	// in this device's own diagnostic error messages (the multi-device
+	// merge errors engine.go can log/surface when applying another
+	// device's change or N-way-merging a conflict). Defaults to false (the
+	// Go zero value, so every config saved before this field existed keeps
+	// the privacy-safe behavior with no migration needed) per a real user
+	// request: bug-report diagnostics should be useful without exposing
+	// Vault note names by default. See engine.redactRelPath.
+	LogIncludeFilenames bool `json:"log_include_filenames,omitempty"`
 }
 
 // EffectiveSyncMode returns cfg.SyncMode, defaulting an empty/legacy value

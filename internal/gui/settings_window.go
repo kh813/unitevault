@@ -98,6 +98,12 @@ type SettingsFormData struct {
 	// always-on excludes (its .sync/ bookkeeping, junk files like
 	// .DS_Store). main.go converts to/from config.Config's []string.
 	ExtraExcludes string
+	// LogIncludeFilenames mirrors config.Config.LogIncludeFilenames -
+	// whether this device's own diagnostic error messages (multi-device
+	// merge errors) may include actual note filenames, instead of a
+	// filename-redacted placeholder. Defaults to false/off (privacy-safe)
+	// per a real user request.
+	LogIncludeFilenames bool
 }
 
 // SettingsHandlers wires the Settings window's actions back to the business
@@ -441,6 +447,9 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	excludesEntry.SetPlaceHolder(lang.L("One rclone --exclude pattern per line, e.g.:\nAttachments/**\n**/*.mp4"))
 	excludesEntry.Wrapping = fyne.TextWrapWord
 
+	logFilenamesCheck := widget.NewCheck("", nil)
+	logFilenamesCheck.SetChecked(data.LogIncludeFilenames)
+
 	// unsavedLabel flags edits the user hasn't saved yet by comparing every
 	// field's live text against its value at the moment this content was
 	// built (i.e. what's actually on disk). It never disables Save itself -
@@ -452,6 +461,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	baselineTargetPath := strings.TrimSpace(targetPathEntry.Text)
 	baselineInterval := strings.TrimSpace(intervalEntry.Text)
 	baselineExcludes := strings.TrimSpace(excludesEntry.Text)
+	baselineLogFilenames := data.LogIncludeFilenames
 
 	unsavedLabel := canvas.NewText("● "+lang.L("Unsaved changes"), theme.Color(theme.ColorNameWarning))
 	unsavedLabel.TextStyle = fyne.TextStyle{Bold: true}
@@ -462,7 +472,8 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			strings.TrimSpace(remoteEntry.Text) != baselineRemote ||
 			strings.TrimSpace(targetPathEntry.Text) != baselineTargetPath ||
 			strings.TrimSpace(intervalEntry.Text) != baselineInterval ||
-			strings.TrimSpace(excludesEntry.Text) != baselineExcludes
+			strings.TrimSpace(excludesEntry.Text) != baselineExcludes ||
+			logFilenamesCheck.Checked != baselineLogFilenames
 		unsavedLabel.Hidden = !dirty
 		unsavedLabel.Refresh()
 	}
@@ -471,6 +482,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	targetPathEntry.OnChanged = updateDirtyState
 	intervalEntry.OnChanged = updateDirtyState
 	excludesEntry.OnChanged = updateDirtyState
+	logFilenamesCheck.OnChanged = func(bool) { updateDirtyState("") }
 
 	rcloneBasicForm := widget.NewForm(
 		// data.RcloneRemoteInfo is built in main.go via lang.L with template
@@ -489,6 +501,8 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 	intervalHint.Wrapping = fyne.TextWrapWord
 	excludesHint := widget.NewLabel(lang.L("Additional files/folders to leave out of the Google Drive backup (rclone --exclude patterns, one per line, relative to the Vault). Dotfiles/dot-folders (.git, .obsidian, .DS_Store, etc.) and Thumbs.db are always excluded regardless of this list."))
 	excludesHint.Wrapping = fyne.TextWrapWord
+	logFilenamesHint := widget.NewLabel(lang.L("Off by default to protect your notes' privacy: diagnostic error messages this device may log or show (e.g. a sync conflict) refer to the note only by its file type, not its actual filename. Turn this on if a developer asks you to, to help diagnose a bug report."))
+	logFilenamesHint.Wrapping = fyne.TextWrapWord
 	rcloneAdvancedForm := widget.NewForm(
 		widget.NewFormItem(lang.L("Remote Name"), remoteEntry),
 		widget.NewFormItem(lang.L("Google Drive Target Folder Path"), targetPathEntry),
@@ -496,6 +510,8 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 		widget.NewFormItem("", intervalHint),
 		widget.NewFormItem(lang.L("Exclude from Backup"), excludesEntry),
 		widget.NewFormItem("", excludesHint),
+		widget.NewFormItem(lang.L("Include Filenames in Logs"), logFilenamesCheck),
+		widget.NewFormItem("", logFilenamesHint),
 	)
 	rcloneAdvanced := widget.NewAccordion(widget.NewAccordionItem(lang.L("Advanced Options"), rcloneAdvancedForm))
 
@@ -518,6 +534,7 @@ func buildSettingsContent(data SettingsFormData, handlers SettingsHandlers) fyne
 			IntervalSeconds:        sec,
 			SyncMode:               syncMode,
 			ExtraExcludes:          strings.TrimSpace(excludesEntry.Text),
+			LogIncludeFilenames:    logFilenamesCheck.Checked,
 			RcloneExecPath:         data.RcloneExecPath,
 			RcloneRemoteInfo:       data.RcloneRemoteInfo,
 			RcloneConfigured:       data.RcloneConfigured,
