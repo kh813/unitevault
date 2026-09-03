@@ -207,6 +207,8 @@
 
   "UniteVault Error": "UniteVaultエラー",
   "Failed to initialize local configuration: {{.Err}}": "ローカル設定の初期化に失敗しました: {{.Err}}",
+  "UniteVault Already Running": "UniteVaultは既に起動しています",
+  "Another UniteVault instance is already running. Check your menu bar or system tray for its icon.": "UniteVaultは既に起動しています。メニューバー（Mac）またはシステムトレイ（Windows）のアイコンをご確認ください。",
 
   "Never synced yet": "まだ同期されていません",
   "N/A (not configured yet)": "該当なし（未設定）",

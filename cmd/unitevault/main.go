@@ -27,6 +27,7 @@ import (
 	"github.com/kh813/unitevault/internal/gui"
 	"github.com/kh813/unitevault/internal/obsidianconfig"
 	"github.com/kh813/unitevault/internal/selfupdate"
+	"github.com/kh813/unitevault/internal/singleinstance"
 	"github.com/kh813/unitevault/internal/syncdir"
 	"github.com/kh813/unitevault/internal/watch"
 )
@@ -157,6 +158,23 @@ func (t *trayApp) refreshCheckConflictsMenuItem() {
 func runTrayMode() {
 	appIcon := fyne.NewStaticResource("unitevault-icon.png", trayIconColorPNG)
 	gui.InitApp(appIcon)
+
+	// A real device report: nothing previously stopped a user from
+	// launching UniteVault.app/UniteVault.exe a second time (double-
+	// clicking it again, an OS "run at login" entry firing while a manual
+	// launch is already open, ...), which would race two SyncEngines
+	// against the same Vault. A failure of the lock mechanism itself
+	// (err != nil) is treated as "couldn't tell, so run anyway" rather
+	// than blocking startup over an unrelated environment problem.
+	release, acquired, instanceErr := singleinstance.TryAcquire()
+	if instanceErr == nil {
+		if !acquired {
+			gui.Info(lang.L("UniteVault Already Running"), lang.L("Another UniteVault instance is already running. Check your menu bar or system tray for its icon."))
+			gui.Run()
+			return
+		}
+		defer release()
+	}
 
 	// macOS menu bars render either black-on-light or white-on-dark, so the
 	// tray icon there uses a monochrome SVG glyph wrapped as a Fyne
